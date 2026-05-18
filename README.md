@@ -26,6 +26,37 @@ Normative reference currently tracked by this repository:
 
 - `dadb99e9261827d63e7638deb67a10bf3406a09d`
 
+## Quick start
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[test]"
+python -m pytest -q
+```
+
+## Canonical usage
+
+`from nicole.pipeline import analyze_program` is the canonical static entrypoint.
+It performs parse -> signature collection -> standard builtin injection -> resolution -> checking -> export collection.
+
+```python
+from nicole.pipeline import analyze_program
+
+source = """
+export : main { -- n:Int }
+  1
+;
+"""
+
+checked = analyze_program(source)
+
+print(checked.export_contract.words.keys())
+```
+
+The public spec still lives in [hashtag1138/Nicole](https://github.com/hashtag1138/Nicole).
+NicolePy does not define the language.
+
 Current documentation constraints:
 
 - local names must be unique inside one frame
