@@ -141,7 +141,8 @@ def _execute_block(
             _execute_identifier(item, locals_env, stack, word_index, runtime_bindings)
             continue
         if isinstance(item, IfNode):
-            raise RuntimeError("runtime feature not supported in phase 1: if")
+            _execute_if(item, locals_env, stack, word_index, runtime_bindings)
+            continue
         raise RuntimeError(f"runtime feature not supported in phase 1: {type(item).__name__}")
 
 
@@ -227,6 +228,21 @@ def _execute_host_call(node: IdentifierNode, stack: RuntimeStack, runtime_bindin
     for parameter, value in zip(signature.outputs, result):
         _ensure_matches_type(value, parameter.type_node.name, context=f"host output '{parameter.name}'")
         stack.push(value)
+
+
+def _execute_if(
+    node: IfNode,
+    locals_env: dict[str, object],
+    stack: RuntimeStack,
+    word_index: dict[str, WordDefNode],
+    runtime_bindings: RuntimeHostBindings,
+) -> None:
+    condition = stack.pop()
+    _ensure_matches_type(condition, "Bool", context="if condition")
+    if condition:
+        _execute_block(node.then_block, locals_env, stack, word_index, runtime_bindings)
+        return
+    _execute_block(node.else_block, locals_env, stack, word_index, runtime_bindings)
 
 
 def _execute_operator(operator: str, stack: RuntimeStack) -> None:

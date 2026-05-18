@@ -312,37 +312,43 @@ def test_runtime_host_multi_output_wrong_element_type() -> None:
         run_export(checked, "app.pair", runtime)
 
 
-def test_runtime_unsupported_if() -> None:
+def test_runtime_if_true_executes_then_branch() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  1 0 < if\n"
-        "    1\n"
+        "export : app.run { -- }\n"
+        "  true\n"
+        "  if\n"
+        '    "yes" host.log\n'
         "  else\n"
-        "    0\n"
+        '    "no" host.log\n'
         "  end\n"
-        ";\n"
+        ";",
+        host_contract=host_contract_from_words(
+            [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"))]
+        ),
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported in phase 1"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    seen: list[str] = []
+    run_export(checked, "app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}))
+    assert seen == ["yes"]
 
 
-def test_runtime_unsupported_if_in_nested_word() -> None:
+def test_runtime_nested_if_in_nested_word() -> None:
     checked = analyze_program(
-        ": inner { -- n:Int }\n"
-        "  1 0 < if\n"
+        ": inner { flag:Bool -- n:Int }\n"
+        "  flag if\n"
         "    1\n"
         "  else\n"
         "    0\n"
         "  end\n"
         ";\n"
         "export : app.run { -- n:Int }\n"
+        "  true\n"
         "  inner\n"
         ";"
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported in phase 1"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    result = run_export(checked, "app.run", RuntimeHostBindings({}))
+    assert result == 1
 
 
 def test_runtime_unsupported_case() -> None:
@@ -395,3 +401,82 @@ def test_runtime_unsupported_collection_builtin() -> None:
 
     with pytest.raises(RuntimeError, match="runtime feature not supported in phase 1"):
         run_export(checked, "app.run", RuntimeHostBindings({}))
+
+
+def test_runtime_if_false_executes_else_branch() -> None:
+    checked = analyze_program(
+        "export : app.run { -- }\n"
+        "  false\n"
+        "  if\n"
+        '    "yes" host.log\n'
+        "  else\n"
+        '    "no" host.log\n'
+        "  end\n"
+        ";",
+        host_contract=host_contract_from_words(
+            [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"))]
+        ),
+    )
+
+    seen: list[str] = []
+    run_export(checked, "app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}))
+
+    assert seen == ["no"]
+
+
+def test_runtime_if_can_call_nicole_word() -> None:
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"))]
+    )
+    checked = analyze_program(
+        ": log-yes { -- }\n"
+        '  "yes" host.log\n'
+        ";\n"
+        "export : app.run { flag:Bool -- }\n"
+        "  flag if\n"
+        "    log-yes\n"
+        "  else\n"
+        "    log-yes\n"
+        "  end\n"
+        ";",
+        host_contract=host_contract,
+    )
+
+    seen: list[str] = []
+    run_export(checked, "app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}), True)
+
+    assert seen == ["yes"]
+
+
+def test_runtime_if_can_produce_stack_output() -> None:
+    checked = analyze_program(
+        "export : app.choose { flag:Bool -- n:Int }\n"
+        "  flag if\n"
+        "    1\n"
+        "  else\n"
+        "    2\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 1
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 2
+
+
+def test_runtime_nested_if_simple() -> None:
+    checked = analyze_program(
+        "export : app.run { flag:Bool -- n:Int }\n"
+        "  flag if\n"
+        "    true if\n"
+        "      1\n"
+        "    else\n"
+        "      2\n"
+        "    end\n"
+        "  else\n"
+        "    3\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({}), True) == 1
+    assert run_export(checked, "app.run", RuntimeHostBindings({}), False) == 3
