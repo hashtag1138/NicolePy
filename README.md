@@ -104,6 +104,14 @@ Host ABI note:
 - optional presence testing and fallback remain outside v1
 - runtime host binding, export linkage, binding generation, IR, and interpreter remain absent
 
+Runtime ABI Phase 1:
+
+- `RUNTIME_ABI_PHASE1.md` defines the current runtime bridge scope
+- `run_export(checked, "app.run", runtime_bindings)` consumes a `CheckedProgram`
+- the runtime executes the already checked AST directly
+- it does not re-parse, re-resolve, or re-check
+- `if`, `case`, runtime quotations, and `call` remain out of scope
+
 Numeric note:
 
 - `+`, `-`, `*`, `div`, and `mod` are `Int Int -> Int`

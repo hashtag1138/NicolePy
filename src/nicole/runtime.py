@@ -1,0 +1,303 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+
+from .ast_nodes import BlockNode, IdentifierNode, IfNode, LiteralNode, OperatorNode, WordDefNode
+from .pipeline import CheckedProgram
+from .symbols import SymbolSource, WordSymbol
+
+__all__ = [
+    "RuntimeError",
+    "RuntimeStack",
+    "RuntimeHostBindings",
+    "run_export",
+]
+
+
+@dataclass(slots=True)
+class RuntimeError(Exception):
+    message: str
+
+    def __str__(self) -> str:
+        return self.message
+
+
+class RuntimeStack:
+    def __init__(self) -> None:
+        self._values: list[object] = []
+
+    def push(self, value: object) -> None:
+        self._values.append(value)
+
+    def pop(self) -> object:
+        if not self._values:
+            raise RuntimeError("runtime stack underflow")
+        return self._values.pop()
+
+    def peek(self) -> object:
+        if not self._values:
+            raise RuntimeError("runtime stack underflow")
+        return self._values[-1]
+
+    def values(self) -> tuple[object, ...]:
+        return tuple(self._values)
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeHostBindings:
+    words: Mapping[str, Callable[..., object]]
+
+    def __init__(self, words: Mapping[str, Callable[..., object]]) -> None:
+        entries: dict[str, Callable[..., object]] = {}
+        for name, binding in words.items():
+            if not name.startswith("host."):
+                raise RuntimeError(f"runtime host binding must start with 'host.': {name}")
+            if not callable(binding):
+                raise RuntimeError(f"runtime host binding must be callable: {name}")
+            entries[name] = binding
+        object.__setattr__(self, "words", MappingProxyType(entries))
+
+
+def run_export(
+    checked: CheckedProgram,
+    export_name: str,
+    runtime_bindings: RuntimeHostBindings,
+    *args: object,
+) -> object:
+    export_word = checked.export_contract.words.get(export_name)
+    if export_word is None:
+        raise RuntimeError(f"missing export: {export_name}")
+
+    word_index = _index_words(checked.program.words)
+    export_def = word_index.get(export_word.internal_name)
+    if export_def is None:
+        raise RuntimeError(f"missing export definition: {export_word.internal_name}")
+
+    return _invoke_word(export_def, word_index, runtime_bindings, args)
+
+
+def _index_words(words: tuple[WordDefNode, ...], owner: str | None = None) -> dict[str, WordDefNode]:
+    index: dict[str, WordDefNode] = {}
+    for word in words:
+        qualified = word.name if owner is None else f"{owner}.{word.name}"
+        index[qualified] = word
+        index.update(_index_words(word.nested_words, owner=qualified))
+    return index
+
+
+def _invoke_word(
+    word: WordDefNode,
+    word_index: dict[str, WordDefNode],
+    runtime_bindings: RuntimeHostBindings,
+    args: tuple[object, ...],
+) -> object:
+    expected_inputs = word.signature.inputs
+    if len(args) != len(expected_inputs):
+        raise RuntimeError(
+            f"wrong arity for {word.name}: expected {len(expected_inputs)}, got {len(args)}"
+        )
+
+    locals_env: dict[str, object] = {}
+    for parameter, value in zip(expected_inputs, args):
+        _ensure_matches_type(value, parameter.type_node.name, context=f"input '{parameter.name}'")
+        locals_env[parameter.name] = value
+
+    stack = RuntimeStack()
+    _execute_block(word.body, locals_env, stack, word_index, runtime_bindings)
+
+    outputs = word.signature.outputs
+    result_values = stack.values()
+    if len(result_values) != len(outputs):
+        raise RuntimeError(
+            f"wrong runtime signature for {word.name}: expected {len(outputs)} outputs, got {len(result_values)}"
+        )
+    for parameter, value in zip(outputs, result_values):
+        _ensure_matches_type(value, parameter.type_node.name, context=f"output '{parameter.name}'")
+
+    if len(result_values) == 0:
+        return None
+    if len(result_values) == 1:
+        return result_values[0]
+    return result_values
+
+
+def _execute_block(
+    block: BlockNode,
+    locals_env: dict[str, object],
+    stack: RuntimeStack,
+    word_index: dict[str, WordDefNode],
+    runtime_bindings: RuntimeHostBindings,
+) -> None:
+    for item in block.items:
+        if isinstance(item, LiteralNode):
+            stack.push(item.value)
+            continue
+        if isinstance(item, OperatorNode):
+            _execute_operator(item.operator, stack)
+            continue
+        if isinstance(item, IdentifierNode):
+            _execute_identifier(item, locals_env, stack, word_index, runtime_bindings)
+            continue
+        if isinstance(item, IfNode):
+            raise RuntimeError("runtime feature not supported in phase 1: if")
+        raise RuntimeError(f"runtime feature not supported in phase 1: {type(item).__name__}")
+
+
+def _execute_identifier(
+    node: IdentifierNode,
+    locals_env: dict[str, object],
+    stack: RuntimeStack,
+    word_index: dict[str, WordDefNode],
+    runtime_bindings: RuntimeHostBindings,
+) -> None:
+    qualified_name = node.resolution.qualified_name
+    if qualified_name is not None and qualified_name.startswith("local:"):
+        local_name = qualified_name.split(":", 1)[1]
+        stack.push(locals_env[local_name])
+        return
+
+    if node.resolution.owner_scope == "host":
+        _execute_host_call(node, stack, runtime_bindings)
+        return
+
+    symbol = node.resolution.resolved_symbol
+    if symbol is None:
+        raise RuntimeError(f"unresolved identifier at runtime: {node.name}")
+    if isinstance(symbol, WordSymbol) and symbol.source is SymbolSource.BUILTIN:
+        raise RuntimeError(f"runtime feature not supported in phase 1: builtin {node.name}")
+
+    word = word_index.get(symbol.qualified_name)
+    if word is None:
+        raise RuntimeError(f"missing Nicole word definition at runtime: {symbol.qualified_name}")
+
+    input_values: list[object] = []
+    for _ in word.signature.inputs:
+        input_values.append(stack.pop())
+    input_values.reverse()
+    result = _invoke_word(word, word_index, runtime_bindings, tuple(input_values))
+
+    if len(word.signature.outputs) == 0:
+        return
+    if len(word.signature.outputs) == 1:
+        stack.push(result)
+        return
+    if not isinstance(result, tuple):
+        raise RuntimeError(f"wrong runtime signature for {word.name}: expected tuple outputs")
+    for value in result:
+        stack.push(value)
+
+
+def _execute_host_call(node: IdentifierNode, stack: RuntimeStack, runtime_bindings: RuntimeHostBindings) -> None:
+    signature = node.resolution.signature_reference
+    if signature is None:
+        raise RuntimeError(f"missing runtime signature for host word: {node.name}")
+
+    binding = runtime_bindings.words.get(node.name)
+    if binding is None:
+        raise RuntimeError(f"missing host binding: {node.name}")
+
+    input_values: list[object] = []
+    for parameter in reversed(signature.inputs):
+        value = stack.pop()
+        _ensure_matches_type(value, parameter.type_node.name, context=f"host input '{parameter.name}'")
+        input_values.append(value)
+    input_values.reverse()
+
+    try:
+        result = binding(*input_values)
+    except Exception as exc:  # pragma: no cover - defensive runtime boundary
+        raise RuntimeError(f"runtime host error: {node.name}") from exc
+    output_count = len(signature.outputs)
+    if output_count == 0:
+        return
+    if output_count == 1:
+        parameter = signature.outputs[0]
+        _ensure_matches_type(result, parameter.type_node.name, context=f"host output '{parameter.name}'")
+        stack.push(result)
+        return
+
+    if not isinstance(result, tuple):
+        raise RuntimeError(f"wrong runtime signature for host word {node.name}: expected tuple outputs")
+    if len(result) != output_count:
+        raise RuntimeError(
+            f"wrong runtime signature for host word {node.name}: expected {output_count} outputs, got {len(result)}"
+        )
+    for parameter, value in zip(signature.outputs, result):
+        _ensure_matches_type(value, parameter.type_node.name, context=f"host output '{parameter.name}'")
+        stack.push(value)
+
+
+def _execute_operator(operator: str, stack: RuntimeStack) -> None:
+    if operator == "drop":
+        stack.pop()
+        return
+    if operator == "dup":
+        value = stack.pop()
+        stack.push(value)
+        stack.push(value)
+        return
+    if operator == "swap":
+        right = stack.pop()
+        left = stack.pop()
+        stack.push(right)
+        stack.push(left)
+        return
+
+    if operator in {"+", "-", "*", "div", "mod"}:
+        right = stack.pop()
+        left = stack.pop()
+        _ensure_matches_type(left, "Int", context="left operand")
+        _ensure_matches_type(right, "Int", context="right operand")
+        try:
+            if operator == "+":
+                stack.push(left + right)
+            elif operator == "-":
+                stack.push(left - right)
+            elif operator == "*":
+                stack.push(left * right)
+            elif operator == "div":
+                stack.push(left // right)
+            else:
+                stack.push(left % right)
+        except ZeroDivisionError as exc:
+            raise RuntimeError(f"runtime arithmetic error: {operator} by zero") from exc
+        return
+
+    if operator in {"+.", "-.", "*.", "/."}:
+        right = stack.pop()
+        left = stack.pop()
+        _ensure_matches_type(left, "Float", context="left operand")
+        _ensure_matches_type(right, "Float", context="right operand")
+        try:
+            if operator == "+.":
+                stack.push(left + right)
+            elif operator == "-.":
+                stack.push(left - right)
+            elif operator == "*.":
+                stack.push(left * right)
+            else:
+                stack.push(left / right)
+        except ZeroDivisionError as exc:
+            raise RuntimeError(f"runtime arithmetic error: {operator} by zero") from exc
+        return
+
+    raise RuntimeError(f"runtime feature not supported in phase 1: operator {operator}")
+
+
+def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None:
+    if type_name == "Int":
+        ok = type(value) is int
+    elif type_name == "Float":
+        ok = type(value) is float
+    elif type_name == "String":
+        ok = isinstance(value, str)
+    elif type_name == "Bool":
+        ok = type(value) is bool
+    else:
+        raise RuntimeError(f"runtime feature not supported in phase 1: type {type_name}")
+
+    if ok:
+        return
+    raise RuntimeError(f"wrong runtime signature for {context}: expected {type_name}")
