@@ -613,6 +613,56 @@ def test_runtime_call_with_multiple_inputs() -> None:
     assert run_export(checked, "app.run", RuntimeHostBindings({})) == 3
 
 
+def test_runtime_call_non_commutative_input_order() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  7 3\n"
+        "  :[ | x:Int y:Int -- z:Int | x y - ;]\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 4
+
+
+def test_runtime_call_with_capture_end_to_end() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  5\n"
+        "  10\n"
+        "  :[ a:Int | x:Int -- y:Int | a x + ;]\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 15
+
+
+def test_runtime_call_capture_and_input_interaction() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  4\n"
+        "  3\n"
+        "  :[ k:Int | x:Int -- y:Int | x k * ;]\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 12
+
+
+def test_runtime_call_multiple_output_order() -> None:
+    checked = analyze_program(
+        "export : app.run { -- first:Int second:Int }\n"
+        "  1 2\n"
+        "  :[ | x:Int y:Int -- first:Int second:Int | y x ;]\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (2, 1)
+
+
 def test_runtime_call_can_call_nicole_word() -> None:
     checked = analyze_program(
         ": plus-one { x:Int -- y:Int }\n"
@@ -661,6 +711,18 @@ def test_runtime_nested_quotes_are_not_auto_executed() -> None:
 
     result = run_export(checked, "app.run", RuntimeHostBindings({}))
     assert isinstance(result, RuntimeQuote)
+
+
+def test_runtime_nested_quote_executes_only_with_explicit_second_call() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  :[ | -- q:Quote<{ | -- n:Int }> | :[ | -- n:Int | 1 ;] ;]\n"
+        "  call\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 1
 
 
 def test_runtime_unsupported_collection_builtin() -> None:
