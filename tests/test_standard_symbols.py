@@ -99,6 +99,14 @@ def test_map_contains_signature_shape() -> None:
     assert symbol.signature.outputs[0].type_node.name == "Bool"
 
 
+def test_map_set_signature_shape() -> None:
+    symbol = next(symbol for symbol in load_standard_symbols() if symbol.name == "map.set")
+
+    assert len(symbol.signature.inputs) == 3
+    assert len(symbol.signature.outputs) == 1
+    assert symbol.signature.outputs[0].type_node.name == "Map"
+
+
 def test_map_remove_signature_shape() -> None:
     symbol = next(symbol for symbol in load_standard_symbols() if symbol.name == "map.remove")
 

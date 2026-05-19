@@ -662,6 +662,30 @@ def test_checker_rejects_map_set_with_wrong_value_type():
         )
 
 
+def test_checker_rejects_map_set_with_non_map_input():
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- m:Map<String,Int> }\n"
+            '  "not-a-map"\n'
+            '  "hello"\n'
+            "  1\n"
+            "  map.set\n"
+            ";"
+        )
+
+
+def test_checker_rejects_map_set_with_wrong_key_type():
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- m:Map<String,Int> }\n"
+            '  map.empty:Map<String,Int>\n'
+            "  42\n"
+            "  1\n"
+            "  map.set\n"
+            ";"
+        )
+
+
 def test_checker_accepts_map_remove_builtin():
     check_source(
         ": remove { -- r:Result<Map<String,Int>,MapError> }\n"
@@ -678,6 +702,17 @@ def test_checker_rejects_map_remove_with_wrong_key_type():
             ": bad { -- m:Map<String,Int> }\n"
             '  map.empty:Map<String,Int>\n'
             "  42\n"
+            "  map.remove\n"
+            ";"
+        )
+
+
+def test_checker_rejects_map_remove_with_non_map_input():
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- r:Result<Map<String,Int>,MapError> }\n"
+            '  "not-a-map"\n'
+            '  "hello"\n'
             "  map.remove\n"
             ";"
         )

@@ -232,6 +232,28 @@ def _execute_identifier(
         _ensure_supported_map_key(key, context="map.contains key")
         stack.push(key in map_value)
         return
+    if node.name == "map.set":
+        value = stack.pop()
+        key = stack.pop()
+        map_value = stack.pop()
+        _ensure_matches_type(map_value, "Map", context="map.set map")
+        _ensure_supported_map_key(key, context="map.set key")
+        new_map = dict(map_value)
+        new_map[key] = value
+        stack.push(new_map)
+        return
+    if node.name == "map.remove":
+        key = stack.pop()
+        map_value = stack.pop()
+        _ensure_matches_type(map_value, "Map", context="map.remove map")
+        _ensure_supported_map_key(key, context="map.remove key")
+        if key in map_value:
+            new_map = dict(map_value)
+            del new_map[key]
+            stack.push(Ok(new_map))
+        else:
+            stack.push(Err("MissingKey"))
+        return
     if node.name == "list.len":
         value = stack.pop()
         _ensure_matches_type(value, "List", context="list.len input")
