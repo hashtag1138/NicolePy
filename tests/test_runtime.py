@@ -1043,6 +1043,63 @@ def test_runtime_list_get_malformed_list_is_controlled_error() -> None:
         _execute_identifier(list_get_node, {}, stack, {}, RuntimeHostBindings({}))
 
 
+def test_runtime_list_get_preserves_stored_ok_value() -> None:
+    stored_ok = Ok(123)
+    host_signature = signature_from_source(": hostok { -- r:Result<Int,MapError> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.ok", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Result<Int,MapError>,ListError> }\n"
+        "  [host.ok]\n"
+        "  0\n"
+        "  list.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.ok": lambda: stored_ok}))
+    assert isinstance(result, Ok)
+    assert result.value is stored_ok
+    assert result.value == stored_ok
+
+
+def test_runtime_list_get_preserves_stored_err_value() -> None:
+    stored_err = Err("x")
+    host_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Result<Int,MapError>,ListError> }\n"
+        "  [host.err]\n"
+        "  0\n"
+        "  list.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.err": lambda: stored_err}))
+    assert isinstance(result, Ok)
+    assert result.value is stored_err
+    assert result.value == stored_err
+
+
+def test_runtime_list_get_preserves_stored_tuple_identity() -> None:
+    stored_tuple = (1, 2)
+    host_signature = signature_from_source(": hosttuple { -- xs:List<Int> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.tuple", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [host.tuple]\n"
+        "  0\n"
+        "  list.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.tuple": lambda: stored_tuple}))
+    assert isinstance(result, Ok)
+    assert result.value is stored_tuple
+    assert result.value == stored_tuple
+
+
 def test_runtime_unsupported_collection_builtin() -> None:
     checked = analyze_program(
         "export : app.run { -- ys:List<Int> }\n"
