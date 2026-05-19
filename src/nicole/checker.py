@@ -294,7 +294,7 @@ class Checker:
             expected_key_type, value_type = map_parts
             if not _same_type(key_type, expected_key_type):
                 self._raise_error("map.remove key type does not match map key type", node.span.line, node.span.column)
-            stack.append(StackValue(TypeNode(span=node.span, name="Map", args=(expected_key_type, value_type))))
+            stack.append(StackValue(_result_type(node.span, TypeNode(span=node.span, name="Map", args=(expected_key_type, value_type)), _builtin_type("MapError"))))
             return
 
         if node.name == "map.keys":

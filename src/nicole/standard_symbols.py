@@ -124,7 +124,7 @@ def load_standard_symbols() -> list[WordSymbol]:
                 _param("m", _map_of("K", "V")),
                 _param("k", _named_type("K")),
             ),
-            outputs=(_param("m2", _map_of("K", "V")),),
+            outputs=(_param("r", _result_of(_map_of("K", "V"), _named_type("MapError"))),),
         ),
         _builtin(
             "map.len",

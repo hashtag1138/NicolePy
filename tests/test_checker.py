@@ -664,7 +664,7 @@ def test_checker_rejects_map_set_with_wrong_value_type():
 
 def test_checker_accepts_map_remove_builtin():
     check_source(
-        ": remove { -- m:Map<String,Int> }\n"
+        ": remove { -- r:Result<Map<String,Int>,MapError> }\n"
         '  map.empty:Map<String,Int>\n'
         '  "hello"\n'
         "  map.remove\n"
