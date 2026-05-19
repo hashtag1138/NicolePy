@@ -98,8 +98,50 @@ This spec does not redefine syntax.
 The current repository already has typed empty maps through `map.empty:Map<K,V>`.
 At runtime that value is an empty `dict`.
 
-Non-empty map literal syntax is implementation-dependent in the current repository.
+Non-empty map literal runtime semantics are deferred until frontend support is confirmed.
 If a future parser form already exists, it must still use `dict`-backed runtime values and the same immutability contract.
+
+## Collection literal evaluation semantics
+
+Collection literals are evaluated before they are packed into their runtime value.
+This section fixes the runtime evaluation order for literals already accepted by the current frontend.
+
+### Evaluation model
+
+- list literal elements are evaluated left-to-right
+- each element expression must produce exactly one runtime value, as already guaranteed statically
+- after all elements are evaluated successfully, the runtime packs them into one tuple
+
+### Atomicity
+
+- if any element evaluation raises a runtime error, the list literal is not produced
+- no partial list value is pushed
+
+### Nested values
+
+Nested runtime values are preserved as values:
+
+- nested lists remain tuple values
+- runtime quotations remain `RuntimeQuote` values and are not auto-executed
+- `Ok(value)` and `Err(error)` remain ordinary runtime values
+- host call results are packed after the host call returns successfully
+
+### Runtime boundary
+
+Collection literal evaluation must not introduce:
+
+- new scopes
+- runtime parsing
+- runtime checking
+- runtime signature inference
+- IR
+- VM
+- bytecode
+- iterator framework
+- collection execution engine
+
+Collection literal evaluation does not call analyzer or checker logic at runtime.
+It only executes the already checked AST nodes that make up the literal elements.
 
 ## Minimal runtime builtin scope
 
@@ -212,6 +254,15 @@ Higher-order builtins are intentionally deferred because they significantly incr
 
 The later implementation phase should include tests for:
 
+- list literal elements are evaluated left-to-right
+- list literal packs values into a tuple
+- nested list literal is preserved as a nested tuple
+- quotation inside list is preserved as a runtime quotation and is not called
+- `Ok` / `Err` values can be list elements if statically allowed
+- runtime error during element evaluation aborts construction
+- no partial list is pushed after failed construction
+- host call result can be packed into a list
+- unsupported element runtime feature fails cleanly
 - empty list runtime value
 - list literal runtime value
 - `list.len`
