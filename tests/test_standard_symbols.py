@@ -70,6 +70,20 @@ def test_list_push_signature_shape() -> None:
     assert symbol.signature.outputs[0].type_node.name == "List"
 
 
+def test_list_set_signature_shape() -> None:
+    symbol = next(symbol for symbol in load_standard_symbols() if symbol.name == "list.set")
+
+    assert len(symbol.signature.inputs) == 3
+    assert symbol.signature.inputs[0].type_node.name == "List"
+    assert symbol.signature.inputs[1].type_node.name == "Int"
+    assert symbol.signature.inputs[2].type_node.name == "T"
+    assert len(symbol.signature.outputs) == 1
+    assert symbol.signature.outputs[0].type_node.name == "Result"
+    value_type, error_type = symbol.signature.outputs[0].type_node.args
+    assert value_type.name == "List"
+    assert error_type.name == "ListError"
+
+
 def test_map_get_signature_shape():
     symbol = next(symbol for symbol in load_standard_symbols() if symbol.name == "map.get")
 

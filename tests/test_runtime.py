@@ -1002,6 +1002,229 @@ def test_runtime_list_push_malformed_runtime_value_is_controlled_error() -> None
         _execute_identifier(list_push_node, {}, stack, {}, RuntimeHostBindings({}))
 
 
+def test_runtime_list_set_valid_replacement_returns_ok() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [10, 20, 30]\n"
+        "  0\n"
+        "  99\n"
+        "  list.set\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok((99, 20, 30))
+
+
+def test_runtime_list_set_replacement_in_middle_position() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [10, 20, 30]\n"
+        "  1\n"
+        "  99\n"
+        "  list.set\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok((10, 99, 30))
+
+
+def test_runtime_list_set_replacement_in_last_position() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [10, 20, 30]\n"
+        "  2\n"
+        "  99\n"
+        "  list.set\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok((10, 20, 99))
+
+
+def test_runtime_list_set_empty_list_returns_out_of_bounds() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  []:List<Int>\n"
+        "  0\n"
+        "  1\n"
+        "  list.set\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+
+
+def test_runtime_list_set_negative_index_returns_out_of_bounds() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [10, 20, 30]\n"
+        "  0 1 -\n"
+        "  99\n"
+        "  list.set\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+
+
+def test_runtime_list_set_index_equal_to_length_returns_out_of_bounds() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [10, 20, 30]\n"
+        "  3\n"
+        "  99\n"
+        "  list.set\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+
+
+def test_runtime_list_set_index_greater_than_length_returns_out_of_bounds() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [10, 20, 30]\n"
+        "  4\n"
+        "  99\n"
+        "  list.set\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+
+
+def test_runtime_list_set_nested_tuple_is_preserved() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<List<Int>>,ListError> }\n"
+        "  [[1], [2], [3]]\n"
+        "  1\n"
+        "  [9]\n"
+        "  list.set\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok(((1,), (9,), (3,)))
+
+
+def test_runtime_list_set_runtime_quote_is_preserved() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Quote<{ | -- n:Int }>>,ListError> }\n"
+        "  [:[ | -- n:Int | 1 ;], :[ | -- n:Int | 2 ;]]\n"
+        "  1\n"
+        "  :[ | -- n:Int | 3 ;]\n"
+        "  list.set\n"
+        ";\n"
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({}))
+    assert isinstance(result, Ok)
+    assert isinstance(result.value, tuple)
+    assert len(result.value) == 2
+    assert isinstance(result.value[0], RuntimeQuote)
+    assert isinstance(result.value[1], RuntimeQuote)
+
+
+def test_runtime_list_set_preserves_stored_ok_value() -> None:
+    stored_ok = Ok(123)
+    host_signature = signature_from_source(": hostok { -- r:Result<Int,MapError> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.ok", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Result<Int,MapError>>,ListError> }\n"
+        "  [host.ok]\n"
+        "  0\n"
+        "  host.ok\n"
+        "  list.set\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.ok": lambda: stored_ok}))
+    assert isinstance(result, Ok)
+    assert result.value == (stored_ok,)
+    assert result.value[0] is stored_ok
+
+
+def test_runtime_list_set_preserves_stored_err_value() -> None:
+    stored_err = Err("x")
+    host_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Result<Int,MapError>>,ListError> }\n"
+        "  [host.err]\n"
+        "  0\n"
+        "  host.err\n"
+        "  list.set\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.err": lambda: stored_err}))
+    assert isinstance(result, Ok)
+    assert result.value == (stored_err,)
+    assert result.value[0] is stored_err
+
+
+def test_runtime_list_set_returns_new_tuple_value() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [1, 2, 3]\n"
+        "  1\n"
+        "  9\n"
+        "  list.set\n"
+        ";\n"
+    )
+    list_set_node = checked.program.words[0].body.items[3]
+    original = (1, 2, 3)
+    stack = RuntimeStack()
+    stack.push(original)
+    stack.push(1)
+    stack.push(9)
+
+    _execute_identifier(list_set_node, {}, stack, {}, RuntimeHostBindings({}))
+    result = stack.pop()
+    assert isinstance(result, Ok)
+    assert result.value == (1, 9, 3)
+    assert result.value is not original
+
+
+def test_runtime_list_set_malformed_runtime_list_is_controlled_error() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [1, 2, 3]\n"
+        "  1\n"
+        "  9\n"
+        "  list.set\n"
+        ";\n"
+    )
+    list_set_node = checked.program.words[0].body.items[3]
+    stack = RuntimeStack()
+    stack.push("not-a-list")
+    stack.push(1)
+    stack.push(9)
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for list\\.set list: expected List"):
+        _execute_identifier(list_set_node, {}, stack, {}, RuntimeHostBindings({}))
+
+
+def test_runtime_list_set_malformed_runtime_index_is_controlled_error() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
+        "  [1, 2, 3]\n"
+        "  1\n"
+        "  9\n"
+        "  list.set\n"
+        ";\n"
+    )
+    list_set_node = checked.program.words[0].body.items[3]
+    stack = RuntimeStack()
+    stack.push((1, 2, 3))
+    stack.push("not-an-int")
+    stack.push(9)
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for list\\.set index: expected Int"):
+        _execute_identifier(list_set_node, {}, stack, {}, RuntimeHostBindings({}))
+
+
 def test_runtime_list_get_valid_index_zero_returns_ok() -> None:
     checked = analyze_program(
         "export : app.run { -- r:Result<Int,ListError> }\n"

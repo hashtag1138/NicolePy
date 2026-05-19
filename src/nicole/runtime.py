@@ -222,6 +222,17 @@ def _execute_identifier(
         _ensure_matches_type(list_value, "List", context="list.push list")
         stack.push(list_value + (value,))
         return
+    if node.name == "list.set":
+        value = stack.pop()
+        index = stack.pop()
+        list_value = stack.pop()
+        _ensure_matches_type(index, "Int", context="list.set index")
+        _ensure_matches_type(list_value, "List", context="list.set list")
+        if 0 <= index < len(list_value):
+            stack.push(Ok(list_value[:index] + (value,) + list_value[index + 1 :]))
+        else:
+            stack.push(Err("OutOfBounds"))
+        return
     if node.name == "list.get":
         index = stack.pop()
         list_value = stack.pop()

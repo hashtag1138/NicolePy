@@ -561,6 +561,41 @@ def test_checker_rejects_list_set_with_wrong_value_type():
         )
 
 
+def test_checker_rejects_list_set_with_non_int_index():
+    with pytest.raises(CheckerError):
+        check_source(
+            ': bad { -- r:Result<List<Int>,ListError> }\n'
+            "  []:List<Int>\n"
+            '  "zero"\n'
+            "  1\n"
+            "  list.set\n"
+            ";"
+        )
+
+
+def test_checker_rejects_list_set_with_non_list_input():
+    with pytest.raises(CheckerError):
+        check_source(
+            ': bad { -- r:Result<List<Int>,ListError> }\n'
+            "  1\n"
+            "  0\n"
+            "  2\n"
+            "  list.set\n"
+            ";"
+        )
+
+
+def test_checker_accepts_list_set_for_other_item_type():
+    check_source(
+        ": set { -- r:Result<List<String>,ListError> }\n"
+        "  []:List<String>\n"
+        "  0\n"
+        '  "x"\n'
+        "  list.set\n"
+        ";"
+    )
+
+
 def test_checker_accepts_map_get_builtin():
     check_source(
         ": get { -- r:Result<Int,MapError> }\n"
