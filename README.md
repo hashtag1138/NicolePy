@@ -111,6 +111,7 @@ Runtime ABI Phase 1:
 - the runtime executes the already checked AST directly
 - it does not re-parse, re-resolve, or re-check
 - `if`, `case`, runtime quotations, and `call` are documented in [docs/runtime-quotations-call.md](docs/runtime-quotations-call.md)
+- runtime collection core Phase 1 is documented in [docs/runtime-collection-core-phase1.md](docs/runtime-collection-core-phase1.md)
 
 Numeric note:
 
