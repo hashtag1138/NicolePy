@@ -182,6 +182,8 @@ Concatenation must preserve order.
 It must return a new tuple value.
 It must not mutate either input value.
 
+## Runtime List Core Phase 1D — `list.get`
+
 ### `list.get`
 
 Type shape:
@@ -190,12 +192,78 @@ Type shape:
 List<T> Int -- Result<T, ListError>
 ```
 
+Runtime representation stays tuple-backed:
+
+```text
+List<T> -> tuple
+```
+
+`list.get` operates only on runtime tuple-backed list values.
+
 Semantics:
 
-- valid indices return `Ok(value)`
-- out-of-bounds indices return `Err("OutOfBounds")`
-- negative indices are invalid and must also return `Err("OutOfBounds")`
-- Python negative-index behavior must not leak through
+- stack before: `List<T> Int`
+- runtime execution:
+  - `index = stack.pop()`
+  - `list_value = stack.pop()`
+- stack after valid access: `Ok(value)`
+- stack after invalid index: `Err("OutOfBounds")`
+- pop index
+- pop list
+- validate index as runtime `Int`
+- validate list as runtime `List`
+- if the index is valid, push `Ok(list[index])`
+- otherwise push `Err("OutOfBounds")`
+
+The `Result` produced by `list.get` is pushed as a normal runtime value.
+It is not automatically unwrapped or pattern-matched.
+Programs must use `case` or other explicit Nicole constructs to inspect it.
+
+Indexing is zero-based.
+
+Examples:
+
+```text
+[10, 20, 30] 0 list.get -> Ok(10)
+[10, 20, 30] 1 list.get -> Ok(20)
+[10, 20, 30] 2 list.get -> Ok(30)
+```
+
+Out-of-bounds cases:
+
+- index < 0
+- index >= len(list)
+- empty list access
+
+Examples:
+
+```text
+[10, 20, 30] -1 list.get -> Err("OutOfBounds")
+[10, 20, 30] 3 list.get  -> Err("OutOfBounds")
+[]:List<Int> 0 list.get  -> Err("OutOfBounds")
+```
+
+Python negative indexing must not leak into Nicole semantics.
+
+`list.get` must not mutate the list.
+Since runtime lists are tuples, no copy is required for successful reads.
+
+Nested values are returned unchanged:
+
+- nested list returns tuple
+- runtime quotation returns `RuntimeQuote`
+- `Ok(value)` remains `Ok(value)`
+- `Err(error)` remains `Err(error)`
+- no auto-execution occurs
+
+Malformed runtime values are runtime integrity failures.
+They raise controlled `RuntimeError`.
+They must not be converted into `Err("OutOfBounds")`.
+
+Examples:
+
+- non-tuple list value -> `RuntimeError`
+- non-`Int` index value -> `RuntimeError`
 
 ## Runtime error behavior
 
@@ -224,6 +292,14 @@ This phase preserves the current architecture:
 - no runtime stack-effect inference
 - no execution framework
 - no hidden VM semantics
+- no IR
+- no VM
+- no bytecode
+- no runtime checker
+- no runtime parser
+- no generic collection executor
+- no iterator abstraction
+- no generalized collection dispatch
 
 The runtime must not introduce speculative layers such as:
 
@@ -270,6 +346,13 @@ The later implementation phase should include tests for:
 - `list.get` valid index
 - `list.get` invalid index
 - `list.get` negative index
+- `list.get` empty list access
+- `list.get` returns nested tuple unchanged
+- `list.get` returns `RuntimeQuote` unchanged
+- `list.get` returns `Ok(value)` unchanged
+- `list.get` returns `Err(error)` unchanged
+- `list.get` malformed index fails cleanly
+- `list.get` malformed list fails cleanly
 - runtime immutability expectations
 - unsupported higher-order builtin runtime failure
 
