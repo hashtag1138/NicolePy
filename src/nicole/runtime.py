@@ -3,8 +3,19 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Any
 
-from .ast_nodes import BlockNode, IdentifierNode, IfNode, LiteralNode, OperatorNode, WordDefNode
+from .ast_nodes import (
+    BlockNode,
+    CaseNode,
+    IdentifierNode,
+    IfNode,
+    LiteralNode,
+    OperatorNode,
+    PatternKind,
+    PatternNode,
+    WordDefNode,
+)
 from .pipeline import CheckedProgram
 from .symbols import SymbolSource, WordSymbol
 
@@ -12,6 +23,8 @@ __all__ = [
     "RuntimeError",
     "RuntimeStack",
     "RuntimeHostBindings",
+    "Ok",
+    "Err",
     "run_export",
 ]
 
@@ -22,6 +35,16 @@ class RuntimeError(Exception):
 
     def __str__(self) -> str:
         return self.message
+
+
+@dataclass(frozen=True, slots=True)
+class Ok:
+    value: Any
+
+
+@dataclass(frozen=True, slots=True)
+class Err:
+    error: str
 
 
 class RuntimeStack:
@@ -143,6 +166,9 @@ def _execute_block(
         if isinstance(item, IfNode):
             _execute_if(item, locals_env, stack, word_index, runtime_bindings)
             continue
+        if isinstance(item, CaseNode):
+            _execute_case(item, locals_env, stack, word_index, runtime_bindings)
+            continue
         raise RuntimeError(f"runtime feature not supported in phase 1: {type(item).__name__}")
 
 
@@ -245,6 +271,57 @@ def _execute_if(
     _execute_block(node.else_block, locals_env, stack, word_index, runtime_bindings)
 
 
+def _execute_case(
+    node: CaseNode,
+    locals_env: dict[str, object],
+    stack: RuntimeStack,
+    word_index: dict[str, WordDefNode],
+    runtime_bindings: RuntimeHostBindings,
+) -> None:
+    scrutinee = stack.pop()
+    for branch in node.branches:
+        matched, bound_name, bound_value = _match_case_pattern(branch.pattern, scrutinee)
+        if not matched:
+            continue
+        branch_locals = dict(locals_env)
+        if bound_name is not None:
+            branch_locals[bound_name] = bound_value
+        _execute_block(branch.body, branch_locals, stack, word_index, runtime_bindings)
+        return
+    raise RuntimeError("runtime case match failure")
+
+
+def _match_case_pattern(
+    pattern: PatternNode,
+    scrutinee: object,
+) -> tuple[bool, str | None, object | None]:
+    if pattern.kind is PatternKind.WILDCARD:
+        return True, None, None
+    if pattern.kind is PatternKind.LITERAL:
+        return scrutinee == pattern.value, None, None
+    if pattern.kind is PatternKind.OK:
+        if not isinstance(scrutinee, Ok):
+            return False, None, None
+        if pattern.binding is None:
+            return True, None, None
+        return True, pattern.binding, scrutinee.value
+    if pattern.kind is PatternKind.ERR:
+        if not isinstance(scrutinee, Err):
+            return False, None, None
+        if pattern.binding is not None:
+            return True, pattern.binding, scrutinee.error
+        if isinstance(pattern.value, str):
+            return scrutinee.error == pattern.value, None, None
+        return True, None, None
+    if pattern.kind is PatternKind.NAME:
+        if pattern.value == "MissingKey":
+            return scrutinee == "MissingKey", None, None
+        if pattern.value == "OutOfBounds":
+            return scrutinee == "OutOfBounds", None, None
+        return False, None, None
+    return False, None, None
+
+
 def _execute_operator(operator: str, stack: RuntimeStack) -> None:
     if operator == "drop":
         stack.pop()
@@ -311,6 +388,12 @@ def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None
         ok = isinstance(value, str)
     elif type_name == "Bool":
         ok = type(value) is bool
+    elif type_name == "Result":
+        ok = isinstance(value, (Ok, Err))
+    elif type_name == "MapError":
+        ok = value == "MissingKey"
+    elif type_name == "ListError":
+        ok = value == "OutOfBounds"
     else:
         raise RuntimeError(f"runtime feature not supported in phase 1: type {type_name}")
 

@@ -9,7 +9,7 @@ from nicole.host_abi import HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.pipeline import analyze_program
-from nicole.runtime import RuntimeError, RuntimeHostBindings, RuntimeStack, _execute_operator, run_export
+from nicole.runtime import Err, Ok, RuntimeError, RuntimeHostBindings, RuntimeStack, _execute_operator, run_export
 
 
 def signature_from_source(source: str):
@@ -351,18 +351,151 @@ def test_runtime_nested_if_in_nested_word() -> None:
     assert result == 1
 
 
-def test_runtime_unsupported_case() -> None:
+def test_runtime_case_bool_true_false_branches() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  1 case\n"
-        "    0 => 0\n"
-        "    _ => 1\n"
+        "export : app.choose { flag:Bool -- n:Int }\n"
+        "  flag\n"
+        "  case\n"
+        "    true => 1\n"
+        "    false => 2\n"
         "  end\n"
         ";\n"
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported in phase 1"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 1
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 2
+
+
+def test_runtime_case_produces_stack_output() -> None:
+    checked = analyze_program(
+        "export : app.choose { flag:Bool -- n:Int }\n"
+        "  flag\n"
+        "  case\n"
+        "    true => 1\n"
+        "    false => 2\n"
+        "  end\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 1
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 2
+
+
+def test_runtime_case_can_call_nicole_word() -> None:
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"))]
+    )
+    checked = analyze_program(
+        ": log-yes { -- }\n"
+        '  "yes" host.log\n'
+        ";\n"
+        "export : app.run { flag:Bool -- }\n"
+        "  flag\n"
+        "  case\n"
+        "    true => log-yes\n"
+        "    false => log-yes\n"
+        "  end\n"
+        ";",
+        host_contract=host_contract,
+    )
+
+    seen: list[str] = []
+    run_export(checked, "app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}), True)
+
+    assert seen == ["yes"]
+
+
+def test_runtime_nested_case() -> None:
+    checked = analyze_program(
+        "export : app.run { flag:Bool -- n:Int }\n"
+        "  flag\n"
+        "  case\n"
+        "    true =>\n"
+        "      false\n"
+        "      case\n"
+        "        true => 1\n"
+        "        false => 2\n"
+        "      end\n"
+        "    false => 3\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({}), True) == 2
+    assert run_export(checked, "app.run", RuntimeHostBindings({}), False) == 3
+
+
+def test_runtime_case_result_ok_binding() -> None:
+    checked = analyze_program(
+        "export : app.unwrap { r:Result<Int,MapError> -- n:Int }\n"
+        "  r\n"
+        "  case\n"
+        "    Ok(v) => v\n"
+        "    Err(MissingKey) => 0\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.unwrap", RuntimeHostBindings({}), Ok(42)) == 42
+
+
+def test_runtime_case_result_err_missing_key_variant() -> None:
+    checked = analyze_program(
+        "export : app.unwrap { r:Result<Int,MapError> -- n:Int }\n"
+        "  r\n"
+        "  case\n"
+        "    Ok(v) => v\n"
+        "    Err(MissingKey) => 0\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.unwrap", RuntimeHostBindings({}), Err("MissingKey")) == 0
+
+
+def test_runtime_case_result_err_out_of_bounds_variant() -> None:
+    checked = analyze_program(
+        "export : app.unwrap { r:Result<Int,ListError> -- n:Int }\n"
+        "  r\n"
+        "  case\n"
+        "    Ok(v) => v\n"
+        "    Err(OutOfBounds) => 0\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.unwrap", RuntimeHostBindings({}), Err("OutOfBounds")) == 0
+
+
+def test_runtime_case_result_other_error_no_match() -> None:
+    checked = analyze_program(
+        "export : app.unwrap { r:Result<Int,MapError> -- n:Int }\n"
+        "  r\n"
+        "  case\n"
+        "    Err(MissingKey) => 0\n"
+        "    Ok(v) => v\n"
+        "  end\n"
+        ";"
+    )
+
+    with pytest.raises(RuntimeError, match="runtime case match failure"):
+        run_export(checked, "app.unwrap", RuntimeHostBindings({}), Err("Other"))
+
+
+def test_runtime_case_first_matching_branch_wins() -> None:
+    checked = analyze_program(
+        "export : app.choose { b:Bool -- n:Int }\n"
+        "  b\n"
+        "  case\n"
+        "    _ => 10\n"
+        "    true => 1\n"
+        "    false => 2\n"
+        "  end\n"
+        ";"
+    )
+
+    # Wildcard comes first in source/AST order, so it must win.
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 10
 
 
 def test_runtime_unsupported_call() -> None:
