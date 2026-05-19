@@ -17,6 +17,7 @@ from .ast_nodes import (
     PatternNode,
     QuoteNode,
     TypedEmptyListNode,
+    TypedEmptyMapNode,
     WordDefNode,
 )
 from .pipeline import CheckedProgram
@@ -170,6 +171,9 @@ def _execute_block(
         if isinstance(item, TypedEmptyListNode):
             stack.push(())
             continue
+        if isinstance(item, TypedEmptyMapNode):
+            stack.push({})
+            continue
         if isinstance(item, ListLiteralNode):
             _execute_list_literal(item, locals_env, stack, word_index, runtime_bindings)
             continue
@@ -211,6 +215,23 @@ def _execute_identifier(
         _execute_host_call(node, stack, runtime_bindings)
         return
 
+    if node.name == "map.get":
+        key = stack.pop()
+        map_value = stack.pop()
+        _ensure_matches_type(map_value, "Map", context="map.get map")
+        _ensure_supported_map_key(key, context="map.get key")
+        if key in map_value:
+            stack.push(Ok(map_value[key]))
+        else:
+            stack.push(Err("MissingKey"))
+        return
+    if node.name == "map.contains":
+        key = stack.pop()
+        map_value = stack.pop()
+        _ensure_matches_type(map_value, "Map", context="map.contains map")
+        _ensure_supported_map_key(key, context="map.contains key")
+        stack.push(key in map_value)
+        return
     if node.name == "list.len":
         value = stack.pop()
         _ensure_matches_type(value, "List", context="list.len input")
@@ -525,6 +546,8 @@ def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None
         ok = isinstance(value, (Ok, Err))
     elif type_name == "List":
         ok = isinstance(value, tuple)
+    elif type_name == "Map":
+        ok = isinstance(value, dict)
     elif type_name == "MapError":
         ok = value == "MissingKey"
     elif type_name == "ListError":
@@ -535,3 +558,13 @@ def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None
     if ok:
         return
     raise RuntimeError(f"wrong runtime signature for {context}: expected {type_name}")
+
+
+def _ensure_supported_map_key(value: object, *, context: str) -> None:
+    if type(value) is int:
+        return
+    if isinstance(value, str):
+        return
+    if type(value) is bool:
+        return
+    raise RuntimeError(f"wrong runtime signature for {context}: expected Int/String/Bool")

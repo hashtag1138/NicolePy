@@ -91,6 +91,14 @@ def test_map_get_signature_shape():
     assert len(symbol.signature.outputs) == 1
 
 
+def test_map_contains_signature_shape() -> None:
+    symbol = next(symbol for symbol in load_standard_symbols() if symbol.name == "map.contains")
+
+    assert len(symbol.signature.inputs) == 2
+    assert len(symbol.signature.outputs) == 1
+    assert symbol.signature.outputs[0].type_node.name == "Bool"
+
+
 def test_result_ok_and_result_err_are_not_standard_builtins():
     names = {symbol.name for symbol in load_standard_symbols()}
 

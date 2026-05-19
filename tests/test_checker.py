@@ -426,6 +426,17 @@ def test_checker_rejects_map_contains_with_wrong_key_type():
         )
 
 
+def test_checker_rejects_map_contains_with_non_map_input():
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- b:Bool }\n"
+            "  1\n"
+            '  "hello"\n'
+            "  map.contains\n"
+            ";"
+        )
+
+
 def test_checker_accepts_map_keys_builtin():
     check_source(
         ": keys { -- ks:List<String> }\n"
@@ -612,6 +623,17 @@ def test_checker_rejects_map_get_with_wrong_key_type():
             ": bad { -- r:Result<Int,MapError> }\n"
             '  map.empty:Map<String,Int>\n'
             "  42\n"
+            "  map.get\n"
+            ";"
+        )
+
+
+def test_checker_rejects_map_get_with_non_map_input():
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- r:Result<Int,MapError> }\n"
+            "  1\n"
+            '  "hello"\n'
             "  map.get\n"
             ";"
         )

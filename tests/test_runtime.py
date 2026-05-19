@@ -1448,6 +1448,274 @@ def test_runtime_list_get_preserves_stored_tuple_identity() -> None:
     assert result.value == stored_tuple
 
 
+def test_runtime_map_empty_returns_empty_dict() -> None:
+    checked = analyze_program(
+        "export : app.run { -- m:Map<String,Int> }\n"
+        "  map.empty:Map<String,Int>\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == {}
+
+
+def test_runtime_map_get_int_key_returns_ok() -> None:
+    host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<String,MapError> }\n"
+        "  host.map\n"
+        "  1\n"
+        "  map.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {1: "one"}}))
+    assert result == Ok("one")
+
+
+def test_runtime_map_get_string_key_returns_ok() -> None:
+    host_signature = signature_from_source(": hostmap { -- m:Map<String,Int> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,MapError> }\n"
+        "  host.map\n"
+        '  "hello"\n'
+        "  map.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"hello": 7}}))
+    assert result == Ok(7)
+
+
+def test_runtime_map_get_bool_key_returns_ok() -> None:
+    host_signature = signature_from_source(": hostmap { -- m:Map<Bool,Int> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,MapError> }\n"
+        "  host.map\n"
+        "  true\n"
+        "  map.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {True: 7}}))
+    assert result == Ok(7)
+
+
+def test_runtime_map_get_missing_key_returns_missing_key() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "missing"\n'
+        "  map.get\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("MissingKey")
+
+
+def test_runtime_map_get_nested_tuple_is_preserved() -> None:
+    stored_tuple = (1, 2)
+    host_signature = signature_from_source(": hostmap { -- m:Map<String,List<Int>> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<List<Int>,MapError> }\n"
+        "  host.map\n"
+        '  "pair"\n'
+        "  map.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"pair": stored_tuple}}))
+    assert isinstance(result, Ok)
+    assert result.value is stored_tuple
+    assert result.value == stored_tuple
+
+
+def test_runtime_map_get_runtime_quote_is_preserved() -> None:
+    quote_checked = analyze_program(
+        "export : app.quote { -- q:Quote<{ | -- n:Int }> }\n"
+        "  :[ | -- n:Int | 1 ;]\n"
+        ";"
+    )
+    quote_value = run_export(quote_checked, "app.quote", RuntimeHostBindings({}))
+    assert isinstance(quote_value, RuntimeQuote)
+
+    host_signature = signature_from_source(": hostmap { -- m:Map<String,Quote<{ | -- n:Int }>> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Quote<{ | -- n:Int }>,MapError> }\n"
+        "  host.map\n"
+        '  "quote"\n'
+        "  map.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"quote": quote_value}}))
+    assert isinstance(result, Ok)
+    assert result.value is quote_value
+    assert isinstance(result.value, RuntimeQuote)
+
+
+def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
+    stored_ok = Ok(123)
+    stored_err = Err("x")
+    host_signature = signature_from_source(": hostmap { -- m:Map<String,Result<Int,MapError>> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Result<Int,MapError>,MapError> }\n"
+        "  host.map\n"
+        '  "ok"\n'
+        "  map.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result_ok = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"ok": stored_ok, "err": stored_err}}))
+    assert isinstance(result_ok, Ok)
+    assert result_ok.value is stored_ok
+    assert result_ok.value == stored_ok
+
+    checked_err = analyze_program(
+        "export : app.run { -- r:Result<Result<Int,MapError>,MapError> }\n"
+        "  host.map\n"
+        '  "err"\n'
+        "  map.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+    result_err = run_export(checked_err, "app.run", RuntimeHostBindings({"host.map": lambda: {"ok": stored_ok, "err": stored_err}}))
+    assert isinstance(result_err, Ok)
+    assert result_err.value is stored_err
+    assert result_err.value == stored_err
+
+
+def test_runtime_map_get_unsupported_list_key_raises_runtime_error() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<List<Int>,Int>\n"
+        "  [1]\n"
+        "  map.get\n"
+        ";\n"
+    )
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.get key: expected Int/String/Bool"):
+        run_export(checked, "app.run", RuntimeHostBindings({}))
+
+
+def test_runtime_map_get_unsupported_result_key_raises_runtime_error() -> None:
+    host_signature = signature_from_source(": hostkey { -- k:Result<Int,MapError> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.key", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<Result<Int,MapError>,Int>\n"
+        "  host.key\n"
+        "  map.get\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.get key: expected Int/String/Bool"):
+        run_export(checked, "app.run", RuntimeHostBindings({"host.key": lambda: Ok(1)}))
+
+
+def test_runtime_map_contains_existing_key_returns_true() -> None:
+    host_signature = signature_from_source(": hostmap { -- m:Map<String,Int> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- b:Bool }\n"
+        "  host.map\n"
+        '  "hello"\n'
+        "  map.contains\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"hello": 7}}))
+    assert result is True
+
+
+def test_runtime_map_contains_missing_key_returns_false() -> None:
+    checked = analyze_program(
+        "export : app.run { -- b:Bool }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "missing"\n'
+        "  map.contains\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) is False
+
+
+def test_runtime_map_contains_bool_key_returns_true() -> None:
+    host_signature = signature_from_source(": hostmap { -- m:Map<Bool,Int> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- b:Bool }\n"
+        "  host.map\n"
+        "  true\n"
+        "  map.contains\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {True: 7}}))
+    assert result is True
+
+
+def test_runtime_map_contains_unsupported_quote_key_raises_runtime_error() -> None:
+    checked = analyze_program(
+        "export : app.run { -- b:Bool }\n"
+        "  map.empty:Map<Quote<{ | -- n:Int }>,Int>\n"
+        "  :[ | -- n:Int | 1 ;]\n"
+        "  map.contains\n"
+        ";\n"
+    )
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.contains key: expected Int/String/Bool"):
+        run_export(checked, "app.run", RuntimeHostBindings({}))
+
+
+def test_runtime_map_get_malformed_runtime_map_is_controlled_error() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "hello"\n'
+        "  map.get\n"
+        ";\n"
+    )
+    map_get_node = checked.program.words[0].body.items[2]
+    stack = RuntimeStack()
+    stack.push(["not-a-map"])
+    stack.push("hello")
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.get map: expected Map"):
+        _execute_identifier(map_get_node, {}, stack, {}, RuntimeHostBindings({}))
+
+
+def test_runtime_map_contains_malformed_runtime_map_is_controlled_error() -> None:
+    checked = analyze_program(
+        "export : app.run { -- b:Bool }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "hello"\n'
+        "  map.contains\n"
+        ";\n"
+    )
+    map_contains_node = checked.program.words[0].body.items[2]
+    stack = RuntimeStack()
+    stack.push(["not-a-map"])
+    stack.push("hello")
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.contains map: expected Map"):
+        _execute_identifier(map_contains_node, {}, stack, {}, RuntimeHostBindings({}))
+
+
 def test_runtime_unsupported_collection_builtin() -> None:
     checked = analyze_program(
         "export : app.run { -- ys:List<Int> }\n"
