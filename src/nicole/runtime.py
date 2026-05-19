@@ -14,6 +14,7 @@ from .ast_nodes import (
     OperatorNode,
     PatternKind,
     PatternNode,
+    QuoteNode,
     WordDefNode,
 )
 from .pipeline import CheckedProgram
@@ -25,6 +26,7 @@ __all__ = [
     "RuntimeHostBindings",
     "Ok",
     "Err",
+    "RuntimeQuote",
     "run_export",
 ]
 
@@ -45,6 +47,12 @@ class Ok:
 @dataclass(frozen=True, slots=True)
 class Err:
     error: str
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeQuote:
+    node: QuoteNode
+    captured_locals: Mapping[str, object]
 
 
 class RuntimeStack:
@@ -157,7 +165,13 @@ def _execute_block(
         if isinstance(item, LiteralNode):
             stack.push(item.value)
             continue
+        if isinstance(item, QuoteNode):
+            stack.push(_create_runtime_quote(item, stack))
+            continue
         if isinstance(item, OperatorNode):
+            if item.operator == "call":
+                _execute_call(locals_env, stack, word_index, runtime_bindings)
+                continue
             _execute_operator(item.operator, stack)
             continue
         if isinstance(item, IdentifierNode):
@@ -291,6 +305,51 @@ def _execute_case(
     raise RuntimeError("runtime case match failure")
 
 
+def _create_runtime_quote(node: QuoteNode, stack: RuntimeStack) -> RuntimeQuote:
+    captured: dict[str, object] = {}
+    for parameter in reversed(node.captures):
+        value = stack.pop()
+        _ensure_matches_type(value, parameter.type_node.name, context=f"quotation capture '{parameter.name}'")
+        captured[parameter.name] = value
+    return RuntimeQuote(node=node, captured_locals=MappingProxyType(captured))
+
+
+def _execute_call(
+    locals_env: dict[str, object],
+    stack: RuntimeStack,
+    word_index: dict[str, WordDefNode],
+    runtime_bindings: RuntimeHostBindings,
+) -> None:
+    quote_value = stack.pop()
+    if not isinstance(quote_value, RuntimeQuote):
+        raise RuntimeError("call expects runtime quotation")
+
+    quote = quote_value.node
+    input_values: list[object] = []
+    for parameter in reversed(quote.inputs):
+        value = stack.pop()
+        _ensure_matches_type(value, parameter.type_node.name, context=f"quotation input '{parameter.name}'")
+        input_values.append(value)
+    input_values.reverse()
+
+    quote_locals = dict(quote_value.captured_locals)
+    for parameter, value in zip(quote.inputs, input_values):
+        quote_locals[parameter.name] = value
+
+    quote_stack = RuntimeStack()
+    _execute_block(quote.body, quote_locals, quote_stack, word_index, runtime_bindings)
+
+    result_values = quote_stack.values()
+    if len(result_values) != len(quote.outputs):
+        raise RuntimeError(
+            "wrong runtime signature for quotation: "
+            f"expected {len(quote.outputs)} outputs, got {len(result_values)}"
+        )
+    for parameter, value in zip(quote.outputs, result_values):
+        _ensure_matches_type(value, parameter.type_node.name, context=f"quotation output '{parameter.name}'")
+        stack.push(value)
+
+
 def _match_case_pattern(
     pattern: PatternNode,
     scrutinee: object,
@@ -388,6 +447,8 @@ def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None
         ok = isinstance(value, str)
     elif type_name == "Bool":
         ok = type(value) is bool
+    elif type_name == "Quote":
+        ok = isinstance(value, RuntimeQuote)
     elif type_name == "Result":
         ok = isinstance(value, (Ok, Err))
     elif type_name == "MapError":

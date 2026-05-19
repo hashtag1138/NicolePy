@@ -10,7 +10,17 @@ from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.pipeline import analyze_program
 from nicole.resolver import ResolutionError
-from nicole.runtime import Err, Ok, RuntimeError, RuntimeHostBindings, RuntimeStack, _execute_operator, run_export
+from nicole.runtime import (
+    Err,
+    Ok,
+    RuntimeError,
+    RuntimeHostBindings,
+    RuntimeQuote,
+    RuntimeStack,
+    _execute_call,
+    _execute_operator,
+    run_export,
+)
 
 
 def signature_from_source(source: str):
@@ -546,30 +556,111 @@ def test_runtime_case_first_matching_branch_wins() -> None:
     assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 10
 
 
-def test_runtime_unsupported_call() -> None:
-    host_signature = signature_from_source(": hostsig { -- q:Quote<{ | -- }> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.mkquote", signature=host_signature)])
+def test_runtime_quote_literal_returns_runtime_quote_value() -> None:
     checked = analyze_program(
-        "export : app.run { -- }\n"
-        "  host.mkquote\n"
+        "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
+        "  :[ | -- n:Int | 1 ;]\n"
+        ";\n"
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({}))
+    assert isinstance(result, RuntimeQuote)
+
+
+def test_runtime_call_returns_literal() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  :[ | -- n:Int | 7 ;]\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 7
+
+
+def test_runtime_call_executes_arithmetic() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  :[ | -- n:Int | 1 2 + ;]\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 3
+
+
+def test_runtime_call_with_one_input() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  5\n"
+        "  :[ | x:Int -- y:Int | x 1 + ;]\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 6
+
+
+def test_runtime_call_with_multiple_inputs() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  1 2\n"
+        "  :[ | x:Int y:Int -- z:Int | x y + ;]\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 3
+
+
+def test_runtime_call_can_call_nicole_word() -> None:
+    checked = analyze_program(
+        ": plus-one { x:Int -- y:Int }\n"
+        "  x 1 +\n"
+        ";\n"
+        "export : app.run { -- n:Int }\n"
+        "  5\n"
+        "  :[ | x:Int -- y:Int | x plus-one ;]\n"
+        "  call\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 6
+
+
+def test_runtime_call_can_call_host_word() -> None:
+    host_signature = signature_from_source(": hostsig { n:Int -- out:Int } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.inc", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  5\n"
+        "  :[ | x:Int -- y:Int | x host.inc ;]\n"
         "  call\n"
         ";\n",
         host_contract=host_contract,
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported"):
-        run_export(checked, "app.run", RuntimeHostBindings({"host.mkquote": lambda: object()}))
+    assert run_export(checked, "app.run", RuntimeHostBindings({"host.inc": lambda n: n + 1})) == 6
 
 
-def test_runtime_unsupported_quote() -> None:
+def test_runtime_call_on_non_quote_is_controlled_error() -> None:
+    stack = RuntimeStack()
+    stack.push(123)
+
+    with pytest.raises(RuntimeError, match="call expects runtime quotation"):
+        _execute_call({}, stack, {}, RuntimeHostBindings({}))
+
+
+def test_runtime_nested_quotes_are_not_auto_executed() -> None:
     checked = analyze_program(
-        "export : app.run { -- q:Quote<{ | x:Int -- y:Int }> }\n"
-        "  :[ | x:Int -- y:Int | x ;]\n"
+        "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
+        "  :[ | -- q:Quote<{ | -- n:Int }> | :[ | -- n:Int | 1 ;] ;]\n"
+        "  call\n"
         ";\n"
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    result = run_export(checked, "app.run", RuntimeHostBindings({}))
+    assert isinstance(result, RuntimeQuote)
 
 
 def test_runtime_unsupported_collection_builtin() -> None:
@@ -577,6 +668,21 @@ def test_runtime_unsupported_collection_builtin() -> None:
         "export : app.run { -- n:Int }\n"
         "  []:List<Int>\n"
         "  list.len\n"
+        ";\n"
+    )
+
+    with pytest.raises(RuntimeError, match="runtime feature not supported"):
+        run_export(checked, "app.run", RuntimeHostBindings({}))
+
+
+def test_runtime_unsupported_collection_builtin_inside_quote_still_fails() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  :[ | -- n:Int |\n"
+        "    []:List<Int>\n"
+        "    list.len\n"
+        "  ;]\n"
+        "  call\n"
         ";\n"
     )
 
