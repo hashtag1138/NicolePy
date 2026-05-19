@@ -110,7 +110,7 @@ Runtime ABI Phase 1:
 - `run_export(checked, "app.run", runtime_bindings)` consumes a `CheckedProgram`
 - the runtime executes the already checked AST directly
 - it does not re-parse, re-resolve, or re-check
-- `if` and `case` are supported at runtime; runtime quotations and `call` remain out of scope
+- `if`, `case`, runtime quotations, and `call` are documented in [docs/runtime-quotations-call.md](docs/runtime-quotations-call.md)
 
 Numeric note:
 
