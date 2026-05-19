@@ -216,6 +216,16 @@ def _execute_identifier(
         _ensure_matches_type(value, "List", context="list.len input")
         stack.push(len(value))
         return
+    if node.name == "list.get":
+        index = stack.pop()
+        list_value = stack.pop()
+        _ensure_matches_type(index, "Int", context="list.get index")
+        _ensure_matches_type(list_value, "List", context="list.get list")
+        if 0 <= index < len(list_value):
+            stack.push(Ok(list_value[index]))
+        else:
+            stack.push(Err("OutOfBounds"))
+        return
     if node.name == "list.concat":
         right = stack.pop()
         left = stack.pop()
