@@ -216,6 +216,13 @@ def _execute_identifier(
         _ensure_matches_type(value, "List", context="list.len input")
         stack.push(len(value))
         return
+    if node.name == "list.concat":
+        right = stack.pop()
+        left = stack.pop()
+        _ensure_matches_type(left, "List", context="list.concat left input")
+        _ensure_matches_type(right, "List", context="list.concat right input")
+        stack.push(left + right)
+        return
 
     symbol = node.resolution.resolved_symbol
     if symbol is None:

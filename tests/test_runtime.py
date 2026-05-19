@@ -877,6 +877,121 @@ def test_runtime_list_len_malformed_runtime_value_is_controlled_error() -> None:
         _execute_identifier(list_len_node, {}, stack, {}, RuntimeHostBindings({}))
 
 
+def test_runtime_list_concat_empty_lists_returns_empty_tuple() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  []:List<Int>\n"
+        "  []:List<Int>\n"
+        "  list.concat\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == ()
+
+
+def test_runtime_list_concat_preserves_source_order() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  [1, 2]\n"
+        "  [3, 4]\n"
+        "  list.concat\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (1, 2, 3, 4)
+
+
+def test_runtime_list_concat_with_empty_left_list() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  []:List<Int>\n"
+        "  [3, 4]\n"
+        "  list.concat\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (3, 4)
+
+
+def test_runtime_list_concat_with_empty_right_list() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  [1, 2]\n"
+        "  []:List<Int>\n"
+        "  list.concat\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (1, 2)
+
+
+def test_runtime_list_concat_nested_lists_remain_nested_tuples() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<List<Int>> }\n"
+        "  [[1], [2, 3]]\n"
+        "  [[4]]\n"
+        "  list.concat\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == ((1,), (2, 3), (4,))
+
+
+def test_runtime_list_concat_quotation_elements_remain_runtime_quotes() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Quote<{ | -- n:Int }>> }\n"
+        "  [:[ | -- n:Int | 1 ;]]\n"
+        "  [:[ | -- n:Int | 2 ;]]\n"
+        "  list.concat\n"
+        ";\n"
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({}))
+    assert isinstance(result, tuple)
+    assert len(result) == 2
+    assert isinstance(result[0], RuntimeQuote)
+    assert isinstance(result[1], RuntimeQuote)
+
+
+def test_runtime_list_concat_returns_new_tuple_value() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  [1, 2]\n"
+        "  [3, 4]\n"
+        "  list.concat\n"
+        ";\n"
+    )
+    list_concat_node = checked.program.words[0].body.items[2]
+    left = (1, 2)
+    right = (3, 4)
+    stack = RuntimeStack()
+    stack.push(left)
+    stack.push(right)
+
+    _execute_identifier(list_concat_node, {}, stack, {}, RuntimeHostBindings({}))
+    out = stack.pop()
+    assert out == (1, 2, 3, 4)
+    assert out is not left
+    assert out is not right
+
+
+def test_runtime_list_concat_malformed_runtime_value_is_controlled_error() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  []:List<Int>\n"
+        "  []:List<Int>\n"
+        "  list.concat\n"
+        ";\n"
+    )
+    list_concat_node = checked.program.words[0].body.items[2]
+    stack = RuntimeStack()
+    stack.push((1, 2))
+    stack.push("not-a-list")
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for list\\.concat right input: expected List"):
+        _execute_identifier(list_concat_node, {}, stack, {}, RuntimeHostBindings({}))
+
+
 def test_runtime_unsupported_collection_builtin() -> None:
     checked = analyze_program(
         "export : app.run { -- r:Result<Int,ListError> }\n"
