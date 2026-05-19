@@ -9,6 +9,7 @@ from nicole.host_abi import HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.pipeline import analyze_program
+from nicole.resolver import ResolutionError
 from nicole.runtime import Err, Ok, RuntimeError, RuntimeHostBindings, RuntimeStack, _execute_operator, run_export
 
 
@@ -482,6 +483,53 @@ def test_runtime_case_result_other_error_no_match() -> None:
         run_export(checked, "app.unwrap", RuntimeHostBindings({}), Err("Other"))
 
 
+def test_runtime_case_branch_local_binding_does_not_escape_branch_scope() -> None:
+    host_signature = signature_from_source(": hostfetch { -- r:Result<Int,MapError> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.fetch", signature=host_signature)])
+
+    with pytest.raises(ResolutionError):
+        analyze_program(
+            "export : app.run { -- n:Int }\n"
+            "  host.fetch\n"
+            "  case\n"
+            "    Ok(v) => v\n"
+            "    Err(MissingKey) => 0\n"
+            "  end\n"
+            "  v\n"
+            ";",
+            host_contract=host_contract,
+        )
+
+
+def test_runtime_case_err_binding_returns_runtime_error_value() -> None:
+    fetch_signature = signature_from_source(": hostfetch { -- r:Result<Int,MapError> } ;")
+    fallback_signature = signature_from_source(": hostfallback { -- e:MapError } ;")
+    host_contract = host_contract_from_words(
+        [
+            HostWord(name="host.fetch", signature=fetch_signature),
+            HostWord(name="host.fallback-error", signature=fallback_signature),
+        ]
+    )
+    checked = analyze_program(
+        "export : app.run { -- e:MapError }\n"
+        "  host.fetch\n"
+        "  case\n"
+        "    Ok(v) => host.fallback-error\n"
+        "    Err(e) => e\n"
+        "  end\n"
+        ";",
+        host_contract=host_contract,
+    )
+
+    runtime = RuntimeHostBindings(
+        {
+            "host.fetch": lambda: Err("MissingKey"),
+            "host.fallback-error": lambda: "MissingKey",
+        }
+    )
+    assert run_export(checked, "app.run", runtime) == "MissingKey"
+
+
 def test_runtime_case_first_matching_branch_wins() -> None:
     checked = analyze_program(
         "export : app.choose { b:Bool -- n:Int }\n"
@@ -509,7 +557,7 @@ def test_runtime_unsupported_call() -> None:
         host_contract=host_contract,
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported in phase 1"):
+    with pytest.raises(RuntimeError, match="runtime feature not supported"):
         run_export(checked, "app.run", RuntimeHostBindings({"host.mkquote": lambda: object()}))
 
 
@@ -520,7 +568,7 @@ def test_runtime_unsupported_quote() -> None:
         ";\n"
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported in phase 1"):
+    with pytest.raises(RuntimeError, match="runtime feature not supported"):
         run_export(checked, "app.run", RuntimeHostBindings({}))
 
 
@@ -532,7 +580,7 @@ def test_runtime_unsupported_collection_builtin() -> None:
         ";\n"
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported in phase 1"):
+    with pytest.raises(RuntimeError, match="runtime feature not supported"):
         run_export(checked, "app.run", RuntimeHostBindings({}))
 
 

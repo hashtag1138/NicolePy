@@ -169,7 +169,7 @@ def _execute_block(
         if isinstance(item, CaseNode):
             _execute_case(item, locals_env, stack, word_index, runtime_bindings)
             continue
-        raise RuntimeError(f"runtime feature not supported in phase 1: {type(item).__name__}")
+        raise RuntimeError(f"runtime feature not supported: {type(item).__name__}")
 
 
 def _execute_identifier(
@@ -193,7 +193,7 @@ def _execute_identifier(
     if symbol is None:
         raise RuntimeError(f"unresolved identifier at runtime: {node.name}")
     if isinstance(symbol, WordSymbol) and symbol.source is SymbolSource.BUILTIN:
-        raise RuntimeError(f"runtime feature not supported in phase 1: builtin {node.name}")
+        raise RuntimeError(f"runtime feature not supported: builtin {node.name}")
 
     word = word_index.get(symbol.qualified_name)
     if word is None:
@@ -376,7 +376,7 @@ def _execute_operator(operator: str, stack: RuntimeStack) -> None:
             raise RuntimeError(f"runtime arithmetic error: {operator} by zero") from exc
         return
 
-    raise RuntimeError(f"runtime feature not supported in phase 1: operator {operator}")
+    raise RuntimeError(f"runtime feature not supported: operator {operator}")
 
 
 def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None:
@@ -395,7 +395,7 @@ def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None
     elif type_name == "ListError":
         ok = value == "OutOfBounds"
     else:
-        raise RuntimeError(f"runtime feature not supported in phase 1: type {type_name}")
+        raise RuntimeError(f"runtime feature not supported: type {type_name}")
 
     if ok:
         return
