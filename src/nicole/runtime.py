@@ -10,11 +10,13 @@ from .ast_nodes import (
     CaseNode,
     IdentifierNode,
     IfNode,
+    ListLiteralNode,
     LiteralNode,
     OperatorNode,
     PatternKind,
     PatternNode,
     QuoteNode,
+    TypedEmptyListNode,
     WordDefNode,
 )
 from .pipeline import CheckedProgram
@@ -164,6 +166,12 @@ def _execute_block(
     for item in block.items:
         if isinstance(item, LiteralNode):
             stack.push(item.value)
+            continue
+        if isinstance(item, TypedEmptyListNode):
+            stack.push(())
+            continue
+        if isinstance(item, ListLiteralNode):
+            _execute_list_literal(item, locals_env, stack, word_index, runtime_bindings)
             continue
         if isinstance(item, QuoteNode):
             stack.push(_create_runtime_quote(item, stack))
@@ -350,6 +358,30 @@ def _execute_call(
         stack.push(value)
 
 
+def _execute_list_literal(
+    node: ListLiteralNode,
+    locals_env: dict[str, object],
+    stack: RuntimeStack,
+    word_index: dict[str, WordDefNode],
+    runtime_bindings: RuntimeHostBindings,
+) -> None:
+    values: list[object] = []
+    for element in node.elements:
+        element_stack = RuntimeStack()
+        _execute_block(
+            BlockNode(span=element.span, items=(element,)),
+            locals_env,
+            element_stack,
+            word_index,
+            runtime_bindings,
+        )
+        element_values = element_stack.values()
+        if len(element_values) != 1:
+            raise RuntimeError("list literal element must produce exactly one runtime value")
+        values.append(element_values[0])
+    stack.push(tuple(values))
+
+
 def _match_case_pattern(
     pattern: PatternNode,
     scrutinee: object,
@@ -451,6 +483,8 @@ def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None
         ok = isinstance(value, RuntimeQuote)
     elif type_name == "Result":
         ok = isinstance(value, (Ok, Err))
+    elif type_name == "List":
+        ok = isinstance(value, tuple)
     elif type_name == "MapError":
         ok = value == "MissingKey"
     elif type_name == "ListError":

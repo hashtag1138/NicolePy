@@ -725,6 +725,98 @@ def test_runtime_nested_quote_executes_only_with_explicit_second_call() -> None:
     assert run_export(checked, "app.run", RuntimeHostBindings({})) == 1
 
 
+def test_runtime_typed_empty_list_returns_empty_tuple() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  []:List<Int>\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == ()
+
+
+def test_runtime_list_literal_returns_tuple_in_source_order() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  [1, 2, 3]\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (1, 2, 3)
+
+
+def test_runtime_list_literal_elements_evaluate_left_to_right() -> None:
+    host_signature = signature_from_source(": hostnext { -- n:Int } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.next", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  [host.next, host.next, host.next]\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    counter = {"value": 0}
+
+    def next_value() -> int:
+        counter["value"] += 1
+        return counter["value"]
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({"host.next": next_value})) == (1, 2, 3)
+
+
+def test_runtime_nested_list_literal_returns_nested_tuple() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<List<Int>> }\n"
+        "  [[1, 2], [3, 4]]\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == ((1, 2), (3, 4))
+
+
+def test_runtime_quotation_inside_list_is_preserved_not_executed() -> None:
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Quote<{ | -- n:Int }>> }\n"
+        "  [:[ | -- n:Int | 1 ;]]\n"
+        ";\n"
+    )
+
+    result = run_export(checked, "app.run", RuntimeHostBindings({}))
+    assert isinstance(result, tuple)
+    assert len(result) == 1
+    assert isinstance(result[0], RuntimeQuote)
+
+
+def test_runtime_host_result_can_be_packed_into_list_literal() -> None:
+    host_signature = signature_from_source(": hostnum { -- n:Int } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.num", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  [host.num, 2]\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({"host.num": lambda: 1})) == (1, 2)
+
+
+def test_runtime_list_literal_error_in_element_aborts_construction() -> None:
+    host_signature = signature_from_source(": hostfail { -- n:Int } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.fail", signature=host_signature)])
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Int> }\n"
+        "  [1, host.fail, 3]\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    def fail() -> int:
+        raise ValueError("boom")
+
+    with pytest.raises(RuntimeError, match="runtime host error: host.fail"):
+        run_export(checked, "app.run", RuntimeHostBindings({"host.fail": fail}))
+
+
 def test_runtime_unsupported_collection_builtin() -> None:
     checked = analyze_program(
         "export : app.run { -- n:Int }\n"
