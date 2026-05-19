@@ -25,6 +25,7 @@ def test_load_standard_symbols_contains_all_v1_builtins():
         "list.get",
         "list.set",
         "list.concat",
+        "list.push",
         "list.map",
         "list.fold",
         "list.reduce",
@@ -57,6 +58,16 @@ def test_list_get_signature_shape():
 
     assert len(symbol.signature.inputs) == 2
     assert len(symbol.signature.outputs) == 1
+
+
+def test_list_push_signature_shape() -> None:
+    symbol = next(symbol for symbol in load_standard_symbols() if symbol.name == "list.push")
+
+    assert len(symbol.signature.inputs) == 2
+    assert symbol.signature.inputs[0].type_node.name == "List"
+    assert symbol.signature.inputs[1].type_node.name == "T"
+    assert len(symbol.signature.outputs) == 1
+    assert symbol.signature.outputs[0].type_node.name == "List"
 
 
 def test_map_get_signature_shape():

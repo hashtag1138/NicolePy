@@ -139,6 +139,17 @@ class Checker:
             stack.append(StackValue(TypeNode(span=node.span, name="List", args=(left_item_type,))))
             return
 
+        if node.name == "list.push":
+            value_type = self._pop_type(stack, node.span.line, node.span.column)
+            list_type = self._pop_type(stack, node.span.line, node.span.column)
+            item_type = _extract_list_item_type(list_type)
+            if item_type is None:
+                self._raise_error("list.push expects List<T> T", node.span.line, node.span.column)
+            if not _same_type(value_type, item_type):
+                self._raise_error("list.push value type does not match list element type", node.span.line, node.span.column)
+            stack.append(StackValue(TypeNode(span=node.span, name="List", args=(item_type,))))
+            return
+
         if node.name == "list.get":
             index_type = self._pop_type(stack, node.span.line, node.span.column)
             list_type = self._pop_type(stack, node.span.line, node.span.column)

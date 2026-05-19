@@ -58,6 +58,14 @@ def load_standard_symbols() -> list[WordSymbol]:
             outputs=(_param("zs", _list_of("T")),),
         ),
         _builtin(
+            "list.push",
+            inputs=(
+                _param("xs", _list_of("T")),
+                _param("value", _named_type("T")),
+            ),
+            outputs=(_param("ys", _list_of("T")),),
+        ),
+        _builtin(
             "list.map",
             inputs=(
                 _param("xs", _list_of("T")),

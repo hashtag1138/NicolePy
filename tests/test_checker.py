@@ -451,7 +451,49 @@ def test_checker_accepts_list_concat_with_matching_item_types():
         "  []:List<Int>\n"
         "  list.concat\n"
         ";"
+        )
+
+
+def test_checker_accepts_list_push_builtin() -> None:
+    check_source(
+        ": push { -- xs:List<Int> }\n"
+        "  []:List<Int>\n"
+        "  1\n"
+        "  list.push\n"
+        ";"
     )
+
+
+def test_checker_accepts_list_push_other_item_type() -> None:
+    check_source(
+        ": push { -- xs:List<String> }\n"
+        "  []:List<String>\n"
+        '  "x"\n'
+        "  list.push\n"
+        ";"
+    )
+
+
+def test_checker_rejects_list_push_with_wrong_value_type() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- xs:List<Int> }\n"
+            "  []:List<Int>\n"
+            '  "x"\n'
+            "  list.push\n"
+            ";"
+        )
+
+
+def test_checker_rejects_list_push_with_non_list_input() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- xs:List<Int> }\n"
+            "  1\n"
+            "  2\n"
+            "  list.push\n"
+            ";"
+        )
 
 
 def test_checker_rejects_list_concat_with_mismatched_item_types():
