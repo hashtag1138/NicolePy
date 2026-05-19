@@ -211,6 +211,12 @@ def _execute_identifier(
         _execute_host_call(node, stack, runtime_bindings)
         return
 
+    if node.name == "list.len":
+        value = stack.pop()
+        _ensure_matches_type(value, "List", context="list.len input")
+        stack.push(len(value))
+        return
+
     symbol = node.resolution.resolved_symbol
     if symbol is None:
         raise RuntimeError(f"unresolved identifier at runtime: {node.name}")

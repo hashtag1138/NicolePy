@@ -18,6 +18,7 @@ from nicole.runtime import (
     RuntimeQuote,
     RuntimeStack,
     _execute_call,
+    _execute_identifier,
     _execute_operator,
     run_export,
 )
@@ -817,11 +818,71 @@ def test_runtime_list_literal_error_in_element_aborts_construction() -> None:
         run_export(checked, "app.run", RuntimeHostBindings({"host.fail": fail}))
 
 
-def test_runtime_unsupported_collection_builtin() -> None:
+def test_runtime_list_len_typed_empty_list_is_zero() -> None:
     checked = analyze_program(
         "export : app.run { -- n:Int }\n"
         "  []:List<Int>\n"
         "  list.len\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 0
+
+
+def test_runtime_list_len_non_empty_list_literal() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  [1, 2, 3]\n"
+        "  list.len\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 3
+
+
+def test_runtime_list_len_nested_list_counts_top_level_only() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  [[1, 2], [3, 4], [5]]\n"
+        "  list.len\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 3
+
+
+def test_runtime_list_len_quotation_inside_list_counts_as_one() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  [:[ | -- n:Int | 1 ;], :[ | -- n:Int | 2 ;]]\n"
+        "  list.len\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 2
+
+
+def test_runtime_list_len_malformed_runtime_value_is_controlled_error() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  []:List<Int>\n"
+        "  list.len\n"
+        ";\n"
+    )
+    list_len_node = checked.program.words[0].body.items[1]
+    stack = RuntimeStack()
+    stack.push("not-a-list")
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for list\\.len input: expected List"):
+        _execute_identifier(list_len_node, {}, stack, {}, RuntimeHostBindings({}))
+
+
+def test_runtime_unsupported_collection_builtin() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,ListError> }\n"
+        "  []:List<Int>\n"
+        "  0\n"
+        "  list.get\n"
         ";\n"
     )
 
@@ -831,10 +892,11 @@ def test_runtime_unsupported_collection_builtin() -> None:
 
 def test_runtime_unsupported_collection_builtin_inside_quote_still_fails() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  :[ | -- n:Int |\n"
+        "export : app.run { -- r:Result<Int,ListError> }\n"
+        "  :[ | -- r:Result<Int,ListError> |\n"
         "    []:List<Int>\n"
-        "    list.len\n"
+        "    0\n"
+        "    list.get\n"
         "  ;]\n"
         "  call\n"
         ";\n"
