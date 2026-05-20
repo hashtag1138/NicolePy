@@ -655,6 +655,21 @@ def _execute_operator(operator: str, stack: RuntimeStack) -> None:
         stack.push(right)
         stack.push(left)
         return
+    if operator == "over":
+        right = stack.pop()
+        left = stack.pop()
+        stack.push(left)
+        stack.push(right)
+        stack.push(left)
+        return
+    if operator == "rot":
+        third = stack.pop()
+        second = stack.pop()
+        first = stack.pop()
+        stack.push(second)
+        stack.push(third)
+        stack.push(first)
+        return
 
     if operator in {"+", "-", "*", "div", "mod"}:
         right = stack.pop()
@@ -692,6 +707,59 @@ def _execute_operator(operator: str, stack: RuntimeStack) -> None:
                 stack.push(left / right)
         except ZeroDivisionError as exc:
             raise RuntimeError(f"runtime arithmetic error: {operator} by zero") from exc
+        return
+
+    if operator in {"<", "<=", ">", ">="}:
+        right = stack.pop()
+        left = stack.pop()
+        if type(left) is int and type(right) is int:
+            if operator == "<":
+                stack.push(left < right)
+            elif operator == "<=":
+                stack.push(left <= right)
+            elif operator == ">":
+                stack.push(left > right)
+            else:
+                stack.push(left >= right)
+            return
+        if type(left) is float and type(right) is float:
+            if operator == "<":
+                stack.push(left < right)
+            elif operator == "<=":
+                stack.push(left <= right)
+            elif operator == ">":
+                stack.push(left > right)
+            else:
+                stack.push(left >= right)
+            return
+        raise RuntimeError("wrong runtime signature for comparison operands: expected Int/Int or Float/Float")
+
+    if operator in {"=", "!="}:
+        right = stack.pop()
+        left = stack.pop()
+        if type(left) is not type(right):
+            raise RuntimeError("wrong runtime signature for equality operands: expected matching types")
+        if operator == "=":
+            stack.push(left == right)
+        else:
+            stack.push(left != right)
+        return
+
+    if operator in {"and", "or"}:
+        right = stack.pop()
+        left = stack.pop()
+        _ensure_matches_type(left, "Bool", context="left operand")
+        _ensure_matches_type(right, "Bool", context="right operand")
+        if operator == "and":
+            stack.push(left and right)
+        else:
+            stack.push(left or right)
+        return
+
+    if operator == "not":
+        value = stack.pop()
+        _ensure_matches_type(value, "Bool", context="operand")
+        stack.push(not value)
         return
 
     raise RuntimeError(f"runtime feature not supported: operator {operator}")

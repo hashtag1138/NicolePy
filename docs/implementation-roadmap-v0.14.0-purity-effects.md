@@ -561,6 +561,22 @@ Phase 1-6.
 
 medium
 
+### Implementation notes
+
+- runtime support for <
+- runtime support for <=
+- runtime support for >
+- runtime support for >=
+- runtime support for =
+- runtime support for !=
+- runtime support for and
+- runtime support for or
+- runtime support for not
+- runtime support for over
+- runtime support for rot
+- runtime checker parity restored
+- runtime remains effect-agnostic
+
 ## Milestones
 
 M1
@@ -587,7 +603,9 @@ runtime aligned
 Status: completed
 
 M6
-full conformance suite passing
+runtime operator parity
+
+Status: completed
 
 ## Phase status tracking
 
@@ -609,8 +627,8 @@ Status: implemented
 - [x] Phase 6
 Status: implemented
 
-- [ ] Phase 7
-Status: not started
+- [x] Phase 7
+Status: implemented
 
 Status values:
 - not started

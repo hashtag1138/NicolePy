@@ -67,6 +67,23 @@ def test_runtime_swap_underflow() -> None:
         _execute_operator("swap", stack)
 
 
+def test_runtime_over_underflow() -> None:
+    stack = RuntimeStack()
+    stack.push(1)
+
+    with pytest.raises(RuntimeError, match="runtime stack underflow"):
+        _execute_operator("over", stack)
+
+
+def test_runtime_rot_underflow() -> None:
+    stack = RuntimeStack()
+    stack.push(1)
+    stack.push(2)
+
+    with pytest.raises(RuntimeError, match="runtime stack underflow"):
+        _execute_operator("rot", stack)
+
+
 def test_runtime_missing_host_binding() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
     host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
@@ -146,6 +163,77 @@ def test_runtime_typed_arithmetic_export() -> None:
     result = run_export(checked, "app.add", RuntimeHostBindings({}), 2, 3)
 
     assert result == 5
+
+
+def test_runtime_comparison_operators_execute() -> None:
+    checked = analyze_program(
+        "export : app.lt-int { -- b:Bool }\n"
+        "  1 2 <\n"
+        ";\n"
+        "export : app.ge-float { -- b:Bool }\n"
+        "  2.0 3.0 >=\n"
+        ";\n"
+        "export : app.eq { -- b:Bool }\n"
+        "  3 3 =\n"
+        ";\n"
+        "export : app.ne { -- b:Bool }\n"
+        "  3 4 !=\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.lt-int", RuntimeHostBindings({})) is True
+    assert run_export(checked, "app.ge-float", RuntimeHostBindings({})) is False
+    assert run_export(checked, "app.eq", RuntimeHostBindings({})) is True
+    assert run_export(checked, "app.ne", RuntimeHostBindings({})) is True
+
+
+def test_runtime_boolean_operators_execute() -> None:
+    checked = analyze_program(
+        "export : app.andv { -- b:Bool }\n"
+        "  true false and\n"
+        ";\n"
+        "export : app.orv { -- b:Bool }\n"
+        "  true false or\n"
+        ";\n"
+        "export : app.not-true { -- b:Bool }\n"
+        "  true not\n"
+        ";\n"
+        "export : app.not-false { -- b:Bool }\n"
+        "  false not\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.andv", RuntimeHostBindings({})) is False
+    assert run_export(checked, "app.orv", RuntimeHostBindings({})) is True
+    assert run_export(checked, "app.not-true", RuntimeHostBindings({})) is False
+    assert run_export(checked, "app.not-false", RuntimeHostBindings({})) is True
+
+
+def test_runtime_boolean_operators_reject_non_bool() -> None:
+    stack = RuntimeStack()
+    stack.push(1)
+    stack.push(2)
+    with pytest.raises(RuntimeError, match="expected Bool"):
+        _execute_operator("and", stack)
+
+    stack = RuntimeStack()
+    stack.push(1)
+    with pytest.raises(RuntimeError, match="expected Bool"):
+        _execute_operator("not", stack)
+
+
+def test_runtime_over_and_rot_execute() -> None:
+    checked = analyze_program(
+        "export : app.over { -- a:Int b:Int c:Int }\n"
+        "  1 2 over\n"
+        ";\n"
+        "export : app.rot { -- a:Int b:Int c:Int }\n"
+        "  1 2 3 rot\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.over", RuntimeHostBindings({})) == (1, 2, 1)
+    assert run_export(checked, "app.rot", RuntimeHostBindings({})) == (2, 3, 1)
 
 
 def test_runtime_division_by_zero_is_normalized() -> None:
