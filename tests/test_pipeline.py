@@ -163,3 +163,31 @@ def test_pipeline_accepts_capturing_quote_for_list_reduce() -> None:
     )
 
     assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_accepts_propagate_with_matching_result_error_type() -> None:
+    result = analyze_program(
+        "export : ok { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "k"\n'
+        "  map.get\n"
+        "  ?\n"
+        "  1 +\n"
+        "  Ok!\n"
+        ";"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_rejects_propagate_with_mismatched_error_type() -> None:
+    with pytest.raises(CheckerError):
+        analyze_program(
+            "export : bad { -- r:Result<Int,MapError> }\n"
+            "  []:List<Int>\n"
+            "  0\n"
+            "  list.get\n"
+            "  ?\n"
+            "  Ok!\n"
+            ";"
+        )

@@ -471,6 +471,109 @@ def test_checker_accepts_result_unwrap_or_builtin():
     )
 
 
+def test_checker_accepts_ok_constructor_in_result_frame() -> None:
+    check_source(
+        ": ok { -- r:Result<Int,MapError> }\n"
+        "  1\n"
+        "  Ok!\n"
+        ";"
+    )
+
+
+def test_checker_accepts_err_constructor_in_result_frame() -> None:
+    check_source(
+        ": err { e:MapError -- r:Result<Int,MapError> }\n"
+        "  e\n"
+        "  Err!\n"
+        ";"
+    )
+
+
+def test_checker_accepts_propagate_with_matching_result_error_type() -> None:
+    check_source(
+        ": ok { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "k"\n'
+        "  map.get\n"
+        "  ?\n"
+        "  1 +\n"
+        "  Ok!\n"
+        ";"
+    )
+
+
+def test_checker_accepts_propagate_inside_quotation_with_result_output() -> None:
+    check_source(
+        ": q { -- q:Quote<{ | -- r:Result<Int,MapError> }> }\n"
+        "  :[ | -- r:Result<Int,MapError> |\n"
+        "    map.empty:Map<String,Int>\n"
+        '    "k"\n'
+        "    map.get\n"
+        "    ?\n"
+        "    1 +\n"
+        "    Ok!\n"
+        "  ;]\n"
+        ";"
+    )
+
+
+def test_checker_accepts_nested_propagate_in_valid_contexts() -> None:
+    check_source(
+        ": nested { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "a"\n'
+        "  map.get\n"
+        "  ?\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "b"\n'
+        "  map.get\n"
+        "  ?\n"
+        "  +\n"
+        "  Ok!\n"
+        ";"
+    )
+
+
+def test_checker_rejects_ok_constructor_with_wrong_value_type() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- r:Result<Int,MapError> }\n"
+            '  "bad"\n'
+            "  Ok!\n"
+            ";"
+        )
+
+
+def test_checker_rejects_err_constructor_with_wrong_error_type() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { e:ListError -- r:Result<Int,MapError> }\n"
+            "  e\n"
+            "  Err!\n"
+            ";"
+        )
+
+
+def test_checker_rejects_ok_constructor_in_non_result_frame() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- n:Int }\n"
+            "  1\n"
+            "  Ok!\n"
+            ";"
+        )
+
+
+def test_checker_rejects_err_constructor_in_non_result_frame() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { e:MapError -- n:Int }\n"
+            "  e\n"
+            "  Err!\n"
+            ";"
+        )
+
+
 def test_checker_accepts_list_concat_with_matching_item_types():
     check_source(
         ": xs { -- out:List<Int> }\n"
@@ -500,6 +603,84 @@ def test_checker_rejects_result_unwrap_or_with_wrong_fallback_type() -> None:
             "  list.get\n"
             '  "fallback"\n'
             "  result.unwrap-or\n"
+            ";"
+        )
+
+
+def test_checker_rejects_propagate_on_non_result_input() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- r:Result<Int,MapError> }\n"
+            "  1\n"
+            "  ?\n"
+            "  Ok!\n"
+            ";"
+        )
+
+
+def test_checker_rejects_propagate_with_non_result_frame_output() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- n:Int }\n"
+            "  map.empty:Map<String,Int>\n"
+            '  "k"\n'
+            "  map.get\n"
+            "  ?\n"
+            ";"
+        )
+
+
+def test_checker_rejects_propagate_with_multiple_frame_outputs() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- a:Int b:Int }\n"
+            "  map.empty:Map<String,Int>\n"
+            '  "k"\n'
+            "  map.get\n"
+            "  ?\n"
+            "  1 2\n"
+            ";"
+        )
+
+
+def test_checker_rejects_propagate_with_mismatched_error_type() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- r:Result<Int,MapError> }\n"
+            "  []:List<Int>\n"
+            "  0\n"
+            "  list.get\n"
+            "  ?\n"
+            "  Ok!\n"
+            ";"
+        )
+
+
+def test_checker_rejects_propagate_inside_quotation_with_non_result_output() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- q:Quote<{ | -- n:Int }> }\n"
+            "  :[ | -- n:Int |\n"
+            "    map.empty:Map<String,Int>\n"
+            '    "k"\n'
+            "    map.get\n"
+            "    ?\n"
+            "  ;]\n"
+            ";"
+        )
+
+
+def test_checker_rejects_propagate_inside_quotation_with_mismatched_error_type() -> None:
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { -- q:Quote<{ | -- r:Result<Int,MapError> }> }\n"
+            "  :[ | -- r:Result<Int,MapError> |\n"
+            "    []:List<Int>\n"
+            "    0\n"
+            "    list.get\n"
+            "    ?\n"
+            "    Ok!\n"
+            "  ;]\n"
             ";"
         )
 

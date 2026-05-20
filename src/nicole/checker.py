@@ -12,9 +12,12 @@ from .ast_nodes import (
     LiteralNode,
     OperatorNode,
     PatternKind,
+    PropagateNode,
     ProgramNode,
     QuoteNode,
     QuoteTypeNode,
+    ResultErrNode,
+    ResultOkNode,
     TypeNode,
     TypedEmptyListNode,
     TypedEmptyMapNode,
@@ -52,7 +55,8 @@ class Checker:
 
     def _check_word(self, word: WordDefNode) -> None:
         local_types = {parameter.name: parameter.type_node for parameter in word.signature.inputs}
-        end_stack = self._check_block(word.body, [], local_types)
+        propagate_result_type = _single_result_output_type(word.signature.outputs)
+        end_stack = self._check_block(word.body, [], local_types, propagate_result_type=propagate_result_type)
         expected_outputs = [parameter.type_node for parameter in word.signature.outputs]
         if not _same_stack(end_stack, expected_outputs):
             self._raise_error("word body does not match declared outputs", word.span.line, word.span.column)
@@ -65,6 +69,8 @@ class Checker:
         block: BlockNode,
         stack: list[TypeNode],
         local_types: dict[str, TypeNode],
+        *,
+        propagate_result_type: TypeNode | None,
     ) -> list[TypeNode]:
         current_stack = list(stack)
         for item in block.items:
@@ -79,16 +85,98 @@ class Checker:
             elif isinstance(item, TypedEmptyMapNode):
                 current_stack.append(StackValue(item.type_node))
             elif isinstance(item, IfNode):
-                current_stack = self._check_if(item, current_stack, local_types)
+                current_stack = self._check_if(
+                    item,
+                    current_stack,
+                    local_types,
+                    propagate_result_type=propagate_result_type,
+                )
             elif isinstance(item, CaseNode):
-                current_stack = self._check_case(item, current_stack, local_types)
+                current_stack = self._check_case(
+                    item,
+                    current_stack,
+                    local_types,
+                    propagate_result_type=propagate_result_type,
+                )
             elif isinstance(item, ListLiteralNode):
                 current_stack.append(StackValue(self._check_list_literal(item, local_types)))
             elif isinstance(item, QuoteNode):
                 current_stack = self._check_quote(item, current_stack)
+            elif isinstance(item, ResultOkNode):
+                self._check_result_ok(item, current_stack, propagate_result_type=propagate_result_type)
+            elif isinstance(item, ResultErrNode):
+                self._check_result_err(item, current_stack, propagate_result_type=propagate_result_type)
+            elif isinstance(item, PropagateNode):
+                self._check_propagate(item, current_stack, propagate_result_type=propagate_result_type)
             else:
                 raise NotImplementedError(f"checking not implemented for {type(item).__name__}")
         return current_stack
+
+    def _check_result_ok(
+        self,
+        node: ResultOkNode,
+        stack,
+        *,
+        propagate_result_type: TypeNode | None,
+    ) -> None:
+        value_type = self._pop_type(stack, node.span.line, node.span.column)
+        if propagate_result_type is not None:
+            result_parts = _extract_result_types(propagate_result_type)
+            assert result_parts is not None
+            expected_value_type, expected_error_type = result_parts
+            if not _same_type(value_type, expected_value_type):
+                self._raise_error("Ok! value type does not match frame Result value type", node.span.line, node.span.column)
+            stack.append(StackValue(_result_type(node.span, expected_value_type, expected_error_type)))
+            return
+        stack.append(StackValue(_result_type(node.span, value_type, _builtin_type("_UnknownError"))))
+
+    def _check_result_err(
+        self,
+        node: ResultErrNode,
+        stack,
+        *,
+        propagate_result_type: TypeNode | None,
+    ) -> None:
+        error_type = self._pop_type(stack, node.span.line, node.span.column)
+        if propagate_result_type is not None:
+            result_parts = _extract_result_types(propagate_result_type)
+            assert result_parts is not None
+            expected_value_type, expected_error_type = result_parts
+            if not _same_type(error_type, expected_error_type):
+                self._raise_error("Err! error type does not match frame Result error type", node.span.line, node.span.column)
+            stack.append(StackValue(_result_type(node.span, expected_value_type, expected_error_type)))
+            return
+        stack.append(StackValue(_result_type(node.span, _builtin_type("_UnknownValue"), error_type)))
+
+    def _check_propagate(
+        self,
+        node: PropagateNode,
+        stack,
+        *,
+        propagate_result_type: TypeNode | None,
+    ) -> None:
+        result_input = self._pop_type(stack, node.span.line, node.span.column)
+        result_parts = _extract_result_types(result_input)
+        if result_parts is None:
+            self._raise_error("? expects Result<T,E>", node.span.line, node.span.column)
+        value_type, error_type = result_parts
+
+        if propagate_result_type is None:
+            self._raise_error(
+                "? requires frame output to be exactly one Result<T,E>",
+                node.span.line,
+                node.span.column,
+            )
+        frame_result_parts = _extract_result_types(propagate_result_type)
+        assert frame_result_parts is not None
+        _, frame_error_type = frame_result_parts
+        if not _same_type(error_type, frame_error_type):
+            self._raise_error(
+                "? error type must exactly match frame Result error type",
+                node.span.line,
+                node.span.column,
+            )
+        stack.append(StackValue(value_type))
 
     def _check_identifier(
         self,
@@ -431,14 +519,26 @@ class Checker:
         node: IfNode,
         stack: list[TypeNode],
         local_types: dict[str, TypeNode],
+        *,
+        propagate_result_type: TypeNode | None,
     ) -> list[TypeNode]:
         condition_type = self._pop_type(stack, node.span.line, node.span.column)
         if not _is_named_type(condition_type, "Bool"):
             self._raise_error("if condition must be Bool", node.span.line, node.span.column)
 
         base_stack = list(stack)
-        then_stack = self._check_block(node.then_block, list(base_stack), local_types)
-        else_stack = self._check_block(node.else_block, list(base_stack), local_types)
+        then_stack = self._check_block(
+            node.then_block,
+            list(base_stack),
+            local_types,
+            propagate_result_type=propagate_result_type,
+        )
+        else_stack = self._check_block(
+            node.else_block,
+            list(base_stack),
+            local_types,
+            propagate_result_type=propagate_result_type,
+        )
         if not _same_stack(then_stack, else_stack):
             self._raise_error("if branches have incompatible stack effects", node.span.line, node.span.column)
         return then_stack
@@ -448,6 +548,8 @@ class Checker:
         node: CaseNode,
         stack: list[TypeNode],
         local_types: dict[str, TypeNode],
+        *,
+        propagate_result_type: TypeNode | None,
     ) -> list[TypeNode]:
         scrutinee_type = self._pop_type(stack, node.span.line, node.span.column)
         base_stack = list(stack)
@@ -456,7 +558,12 @@ class Checker:
         for branch in node.branches:
             branch_locals = dict(local_types)
             self._bind_case_pattern(branch.pattern, scrutinee_type, branch_locals)
-            branch_stack = self._check_block(branch.body, list(base_stack), branch_locals)
+            branch_stack = self._check_block(
+                branch.body,
+                list(base_stack),
+                branch_locals,
+                propagate_result_type=propagate_result_type,
+            )
             branch_stacks.append(branch_stack)
 
         if not branch_stacks:
@@ -533,7 +640,13 @@ class Checker:
 
         quote_locals = {parameter.name: parameter.type_node for parameter in node.captures}
         quote_locals.update({parameter.name: parameter.type_node for parameter in node.inputs})
-        quote_end_stack = self._check_block(node.body, [], quote_locals)
+        quote_propagate_result_type = _single_result_output_type(node.outputs)
+        quote_end_stack = self._check_block(
+            node.body,
+            [],
+            quote_locals,
+            propagate_result_type=quote_propagate_result_type,
+        )
         expected_outputs = [parameter.type_node for parameter in node.outputs]
         if not _same_stack(quote_end_stack, expected_outputs):
             self._raise_error("quotation body does not match declared outputs", node.span.line, node.span.column)
@@ -574,6 +687,7 @@ class Checker:
             BlockNode(span=element.span, items=(element,)),
             [],
             local_types,
+            propagate_result_type=None,
         )
         if len(stack) != 1:
             self._raise_error("list literal element must produce exactly one value", element.span.line, element.span.column)
@@ -669,6 +783,15 @@ def _extract_result_types(type_node: TypeNode) -> tuple[TypeNode, TypeNode] | No
     if not isinstance(value_type, TypeNode) or not isinstance(error_type, TypeNode):
         return None
     return value_type, error_type
+
+
+def _single_result_output_type(outputs) -> TypeNode | None:
+    if len(outputs) != 1:
+        return None
+    result_type = outputs[0].type_node
+    if _extract_result_types(result_type) is None:
+        return None
+    return result_type
 
 
 def _pattern_literal_type(value: object) -> TypeNode:
