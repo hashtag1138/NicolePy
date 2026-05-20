@@ -201,3 +201,33 @@ def test_export_contract_integration_with_host_checked_program() -> None:
 
     assert "send" in export_contract.words
     assert export_contract.words["send"].signature is symbols.words["send"][0].signature
+
+
+def test_host_contract_rejects_quote_input_type() -> None:
+    signature = signature_from_source(": hostsig { q:Quote<{ | -- }> -- } ;")
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature)])
+
+
+def test_host_contract_rejects_quote_output_type() -> None:
+    signature = signature_from_source(": hostsig { -- q:Quote<{ | -- }> } ;")
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.make", signature=signature)])
+
+
+def test_host_contract_rejects_quote_nested_in_list() -> None:
+    signature = signature_from_source(": hostsig { xs:List<Quote<{ | -- }>> -- } ;")
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature)])
+
+
+def test_host_contract_rejects_quote_nested_in_result() -> None:
+    signature = signature_from_source(": hostsig { -- r:Result<List<Quote<{ | -- }>>,MapError> } ;")
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature)])
+
+
+def test_host_contract_rejects_invalid_map_key_type() -> None:
+    signature = signature_from_source(": hostsig { -- m:Map<List<Int>,String> } ;")
+    with pytest.raises(HostABIError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature)])

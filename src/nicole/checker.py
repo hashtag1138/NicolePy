@@ -23,6 +23,7 @@ from .ast_nodes import (
     TypedEmptyMapNode,
     WordDefNode,
 )
+from .host_abi import HostABIError, validate_type_v1
 from .symbols import SymbolSource, SymbolTable
 
 __all__ = ["Checker", "CheckerError", "check", "check_program"]
@@ -49,9 +50,72 @@ class Checker:
         self._symbols = symbols
 
     def check(self, program: ProgramNode) -> ProgramNode:
+        self._validate_program_types(program)
         for word in program.words:
             self._check_word(word)
         return program
+
+    def _validate_program_types(self, program: ProgramNode) -> None:
+        for word in program.words:
+            self._validate_word_types(word)
+
+    def _validate_word_types(self, word: WordDefNode) -> None:
+        self._validate_signature_types(word.signature)
+        self._validate_block_types(word.body)
+        for nested_word in word.nested_words:
+            self._validate_word_types(nested_word)
+
+    def _validate_signature_types(self, signature) -> None:
+        for parameter in signature.inputs:
+            self._validate_type_node(parameter.type_node)
+        for parameter in signature.outputs:
+            self._validate_type_node(parameter.type_node)
+
+    def _validate_block_types(self, block: BlockNode) -> None:
+        for item in block.items:
+            if isinstance(item, TypedEmptyListNode):
+                self._validate_type_node(item.type_node)
+                continue
+            if isinstance(item, TypedEmptyMapNode):
+                self._validate_type_node(item.type_node)
+                continue
+            if isinstance(item, QuoteNode):
+                for parameter in item.captures:
+                    self._validate_type_node(parameter.type_node)
+                for parameter in item.inputs:
+                    self._validate_type_node(parameter.type_node)
+                for parameter in item.outputs:
+                    self._validate_type_node(parameter.type_node)
+                self._validate_block_types(item.body)
+                continue
+            if isinstance(item, ListLiteralNode):
+                for element in item.elements:
+                    if isinstance(element, QuoteNode):
+                        for parameter in element.captures:
+                            self._validate_type_node(parameter.type_node)
+                        for parameter in element.inputs:
+                            self._validate_type_node(parameter.type_node)
+                        for parameter in element.outputs:
+                            self._validate_type_node(parameter.type_node)
+                        self._validate_block_types(element.body)
+                    elif isinstance(element, TypedEmptyListNode):
+                        self._validate_type_node(element.type_node)
+                    elif isinstance(element, TypedEmptyMapNode):
+                        self._validate_type_node(element.type_node)
+                continue
+            if isinstance(item, IfNode):
+                self._validate_block_types(item.then_block)
+                self._validate_block_types(item.else_block)
+                continue
+            if isinstance(item, CaseNode):
+                for branch in item.branches:
+                    self._validate_block_types(branch.body)
+
+    def _validate_type_node(self, type_node: TypeNode) -> None:
+        try:
+            validate_type_v1(type_node, forbid_quote=False)
+        except HostABIError as error:
+            self._raise_error(error.message, type_node.span.line, type_node.span.column)
 
     def _check_word(self, word: WordDefNode) -> None:
         local_types = {parameter.name: parameter.type_node for parameter in word.signature.inputs}

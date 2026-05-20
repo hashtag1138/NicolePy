@@ -5,7 +5,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from nicole.host_abi import HostWord, host_contract_from_words
+from nicole.checker import CheckerError
+from nicole.host_abi import HostABIError, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.pipeline import analyze_program
@@ -558,14 +559,12 @@ def test_runtime_case_first_matching_branch_wins() -> None:
 
 
 def test_runtime_quote_literal_returns_runtime_quote_value() -> None:
-    checked = analyze_program(
-        "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
-        "  :[ | -- n:Int | 1 ;]\n"
-        ";\n"
-    )
-
-    result = run_export(checked, "app.run", RuntimeHostBindings({}))
-    assert isinstance(result, RuntimeQuote)
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        analyze_program(
+            "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
+            "  :[ | -- n:Int | 1 ;]\n"
+            ";\n"
+        )
 
 
 def test_runtime_call_returns_literal() -> None:
@@ -703,15 +702,13 @@ def test_runtime_call_on_non_quote_is_controlled_error() -> None:
 
 
 def test_runtime_nested_quotes_are_not_auto_executed() -> None:
-    checked = analyze_program(
-        "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
-        "  :[ | -- q:Quote<{ | -- n:Int }> | :[ | -- n:Int | 1 ;] ;]\n"
-        "  call\n"
-        ";\n"
-    )
-
-    result = run_export(checked, "app.run", RuntimeHostBindings({}))
-    assert isinstance(result, RuntimeQuote)
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        analyze_program(
+            "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
+            "  :[ | -- q:Quote<{ | -- n:Int }> | :[ | -- n:Int | 1 ;] ;]\n"
+            "  call\n"
+            ";\n"
+        )
 
 
 def test_runtime_nested_quote_executes_only_with_explicit_second_call() -> None:
@@ -776,16 +773,12 @@ def test_runtime_nested_list_literal_returns_nested_tuple() -> None:
 
 
 def test_runtime_quotation_inside_list_is_preserved_not_executed() -> None:
-    checked = analyze_program(
-        "export : app.run { -- xs:List<Quote<{ | -- n:Int }>> }\n"
-        "  [:[ | -- n:Int | 1 ;]]\n"
-        ";\n"
-    )
-
-    result = run_export(checked, "app.run", RuntimeHostBindings({}))
-    assert isinstance(result, tuple)
-    assert len(result) == 1
-    assert isinstance(result[0], RuntimeQuote)
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        analyze_program(
+            "export : app.run { -- xs:List<Quote<{ | -- n:Int }>> }\n"
+            "  [:[ | -- n:Int | 1 ;]]\n"
+            ";\n"
+        )
 
 
 def test_runtime_host_result_can_be_packed_into_list_literal() -> None:
@@ -993,21 +986,15 @@ def test_runtime_list_set_nested_tuple_is_preserved() -> None:
 
 
 def test_runtime_list_set_runtime_quote_is_preserved() -> None:
-    checked = analyze_program(
-        "export : app.run { -- r:Result<List<Quote<{ | -- n:Int }>>,ListError> }\n"
-        "  [:[ | -- n:Int | 1 ;], :[ | -- n:Int | 2 ;]]\n"
-        "  1\n"
-        "  :[ | -- n:Int | 3 ;]\n"
-        "  list.set\n"
-        ";\n"
-    )
-
-    result = run_export(checked, "app.run", RuntimeHostBindings({}))
-    assert isinstance(result, Ok)
-    assert isinstance(result.value, tuple)
-    assert len(result.value) == 2
-    assert isinstance(result.value[0], RuntimeQuote)
-    assert isinstance(result.value[1], RuntimeQuote)
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        analyze_program(
+            "export : app.run { -- r:Result<List<Quote<{ | -- n:Int }>>,ListError> }\n"
+            "  [:[ | -- n:Int | 1 ;], :[ | -- n:Int | 2 ;]]\n"
+            "  1\n"
+            "  :[ | -- n:Int | 3 ;]\n"
+            "  list.set\n"
+            ";\n"
+        )
 
 
 def test_runtime_list_set_preserves_stored_ok_value() -> None:
@@ -1216,31 +1203,12 @@ def test_runtime_list_get_nested_tuple_returned_unchanged() -> None:
 
 
 def test_runtime_list_get_runtime_quote_returned_unchanged() -> None:
-    checked = analyze_program(
-        "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
-        "  :[ | -- n:Int | 1 ;]\n"
-        ";\n"
-    )
-    quote_value = run_export(checked, "app.run", RuntimeHostBindings({}))
-    assert isinstance(quote_value, RuntimeQuote)
-
-    list_get_checked = analyze_program(
-        "export : app.run { -- r:Result<Quote<{ | -- n:Int }>,ListError> }\n"
-        "  [:[ | -- n:Int | 1 ;]]\n"
-        "  0\n"
-        "  list.get\n"
-        ";\n"
-    )
-    list_get_node = list_get_checked.program.words[0].body.items[2]
-    stack = RuntimeStack()
-    stack.push((quote_value,))
-    stack.push(0)
-
-    _execute_identifier(list_get_node, {}, stack, {}, RuntimeHostBindings({}))
-    result = stack.pop()
-    assert isinstance(result, Ok)
-    assert result.value is quote_value
-    assert isinstance(result.value, RuntimeQuote)
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        analyze_program(
+            "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
+            "  :[ | -- n:Int | 1 ;]\n"
+            ";\n"
+        )
 
 
 def test_runtime_list_get_malformed_index_is_controlled_error() -> None:
@@ -1424,29 +1392,9 @@ def test_runtime_map_get_nested_tuple_is_preserved() -> None:
 
 
 def test_runtime_map_get_runtime_quote_is_preserved() -> None:
-    quote_checked = analyze_program(
-        "export : app.quote { -- q:Quote<{ | -- n:Int }> }\n"
-        "  :[ | -- n:Int | 1 ;]\n"
-        ";"
-    )
-    quote_value = run_export(quote_checked, "app.quote", RuntimeHostBindings({}))
-    assert isinstance(quote_value, RuntimeQuote)
-
     host_signature = signature_from_source(": hostmap { -- m:Map<String,Quote<{ | -- n:Int }>> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
-    checked = analyze_program(
-        "export : app.run { -- r:Result<Quote<{ | -- n:Int }>,MapError> }\n"
-        "  host.map\n"
-        '  "quote"\n'
-        "  map.get\n"
-        ";\n",
-        host_contract=host_contract,
-    )
-
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"quote": quote_value}}))
-    assert isinstance(result, Ok)
-    assert result.value is quote_value
-    assert isinstance(result.value, RuntimeQuote)
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
 
 
 def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
@@ -1483,32 +1431,28 @@ def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
 
 
 def test_runtime_map_get_unsupported_list_key_raises_runtime_error() -> None:
-    checked = analyze_program(
-        "export : app.run { -- r:Result<Int,MapError> }\n"
-        "  map.empty:Map<List<Int>,Int>\n"
-        "  [1]\n"
-        "  map.get\n"
-        ";\n"
-    )
-
-    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.get key: expected Int/String/Bool"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        analyze_program(
+            "export : app.run { -- r:Result<Int,MapError> }\n"
+            "  map.empty:Map<List<Int>,Int>\n"
+            "  [1]\n"
+            "  map.get\n"
+            ";\n"
+        )
 
 
 def test_runtime_map_get_unsupported_result_key_raises_runtime_error() -> None:
     host_signature = signature_from_source(": hostkey { -- k:Result<Int,MapError> } ;")
     host_contract = host_contract_from_words([HostWord(name="host.key", signature=host_signature)])
-    checked = analyze_program(
-        "export : app.run { -- r:Result<Int,MapError> }\n"
-        "  map.empty:Map<Result<Int,MapError>,Int>\n"
-        "  host.key\n"
-        "  map.get\n"
-        ";\n",
-        host_contract=host_contract,
-    )
-
-    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.get key: expected Int/String/Bool"):
-        run_export(checked, "app.run", RuntimeHostBindings({"host.key": lambda: Ok(1)}))
+    with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        analyze_program(
+            "export : app.run { -- r:Result<Int,MapError> }\n"
+            "  map.empty:Map<Result<Int,MapError>,Int>\n"
+            "  host.key\n"
+            "  map.get\n"
+            ";\n",
+            host_contract=host_contract,
+        )
 
 
 def test_runtime_map_contains_existing_key_returns_true() -> None:
@@ -1556,16 +1500,14 @@ def test_runtime_map_contains_bool_key_returns_true() -> None:
 
 
 def test_runtime_map_contains_unsupported_quote_key_raises_runtime_error() -> None:
-    checked = analyze_program(
-        "export : app.run { -- b:Bool }\n"
-        "  map.empty:Map<Quote<{ | -- n:Int }>,Int>\n"
-        "  :[ | -- n:Int | 1 ;]\n"
-        "  map.contains\n"
-        ";\n"
-    )
-
-    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.contains key: expected Int/String/Bool"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        analyze_program(
+            "export : app.run { -- b:Bool }\n"
+            "  map.empty:Map<Quote<{ | -- n:Int }>,Int>\n"
+            "  :[ | -- n:Int | 1 ;]\n"
+            "  map.contains\n"
+            ";\n"
+        )
 
 
 def test_runtime_map_get_malformed_runtime_map_is_controlled_error() -> None:
@@ -1695,29 +1637,9 @@ def test_runtime_map_set_preserves_nested_tuple_value() -> None:
 
 
 def test_runtime_map_set_preserves_runtime_quote_value() -> None:
-    quote_checked = analyze_program(
-        "export : app.quote { -- q:Quote<{ | -- n:Int }> }\n"
-        "  :[ | -- n:Int | 1 ;]\n"
-        ";"
-    )
-    quote_value = run_export(quote_checked, "app.quote", RuntimeHostBindings({}))
     host_signature = signature_from_source(": hostquote { -- q:Quote<{ | -- n:Int }> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.quote", signature=host_signature)])
-    checked = analyze_program(
-        "export : app.run { -- r:Result<Quote<{ | -- n:Int }>,MapError> }\n"
-        "  map.empty:Map<String,Quote<{ | -- n:Int }>>\n"
-        '  "quote"\n'
-        "  host.quote\n"
-        "  map.set\n"
-        '  "quote"\n'
-        "  map.get\n"
-        ";\n",
-        host_contract=host_contract,
-    )
-
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.quote": lambda: quote_value}))
-    assert isinstance(result, Ok)
-    assert result.value is quote_value
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.quote", signature=host_signature)])
 
 
 def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
@@ -1791,17 +1713,15 @@ def test_runtime_map_set_malformed_runtime_map_is_controlled_error() -> None:
 
 
 def test_runtime_map_set_unsupported_key_type_raises_runtime_error() -> None:
-    checked = analyze_program(
-        "export : app.run { -- m:Map<List<Int>,Int> }\n"
-        "  map.empty:Map<List<Int>,Int>\n"
-        "  [1]\n"
-        "  1\n"
-        "  map.set\n"
-        ";\n"
-    )
-
-    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.set key: expected Int/String/Bool"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        analyze_program(
+            "export : app.run { -- m:Map<List<Int>,Int> }\n"
+            "  map.empty:Map<List<Int>,Int>\n"
+            "  [1]\n"
+            "  1\n"
+            "  map.set\n"
+            ";\n"
+        )
 
 
 def test_runtime_map_remove_existing_key_returns_ok_new_dict() -> None:
@@ -1905,31 +1825,9 @@ def test_runtime_map_remove_preserves_remaining_nested_values() -> None:
 
 
 def test_runtime_map_remove_preserves_remaining_quote_values() -> None:
-    quote_checked = analyze_program(
-        "export : app.quote { -- q:Quote<{ | -- n:Int }> }\n"
-        "  :[ | -- n:Int | 1 ;]\n"
-        ";"
-    )
-    quote_value = run_export(quote_checked, "app.quote", RuntimeHostBindings({}))
     host_signature = signature_from_source(": hostmap { -- m:Map<String,Quote<{ | -- n:Int }>> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
-    checked = analyze_program(
-        "export : app.run { -- r:Result<Map<String,Quote<{ | -- n:Int }>>,MapError> }\n"
-        "  host.map\n"
-        '  "drop"\n'
-        "  map.remove\n"
-        ";\n",
-        host_contract=host_contract,
-    )
-
-    result = run_export(
-        checked,
-        "app.run",
-        RuntimeHostBindings({"host.map": lambda: {"drop": quote_value, "keep": quote_value}}),
-    )
-    assert isinstance(result, Ok)
-    assert result.value == {"keep": quote_value}
-    assert result.value["keep"] is quote_value
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
 
 
 def test_runtime_map_remove_malformed_runtime_map_is_controlled_error() -> None:
@@ -1950,16 +1848,14 @@ def test_runtime_map_remove_malformed_runtime_map_is_controlled_error() -> None:
 
 
 def test_runtime_map_remove_unsupported_key_type_raises_runtime_error() -> None:
-    checked = analyze_program(
-        "export : app.run { -- r:Result<Map<List<Int>,Int>,MapError> }\n"
-        "  map.empty:Map<List<Int>,Int>\n"
-        "  [1]\n"
-        "  map.remove\n"
-        ";\n"
-    )
-
-    with pytest.raises(RuntimeError, match="wrong runtime signature for map\\.remove key: expected Int/String/Bool"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        analyze_program(
+            "export : app.run { -- r:Result<Map<List<Int>,Int>,MapError> }\n"
+            "  map.empty:Map<List<Int>,Int>\n"
+            "  [1]\n"
+            "  map.remove\n"
+            ";\n"
+        )
 
 
 def test_runtime_unsupported_collection_builtin() -> None:

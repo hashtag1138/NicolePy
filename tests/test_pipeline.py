@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.checker import CheckerError
-from nicole.host_abi import BindingAvailability, HostWord, host_contract_from_words
+from nicole.host_abi import BindingAvailability, HostABIError, HostWord, host_contract_from_words
 from nicole.pipeline import CheckedProgram, analyze_program
 from nicole.resolver import ResolutionError
 from nicole.parser import ParseError, Parser
@@ -70,6 +70,41 @@ def test_pipeline_rejects_missing_host_contract_entry() -> None:
             "  msg host.log\n"
             ";"
         )
+
+
+def test_pipeline_rejects_export_quote_input() -> None:
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        analyze_program(
+            "export : run { q:Quote<{ | -- }> -- }\n"
+            ";\n"
+        )
+
+
+def test_pipeline_rejects_export_quote_output() -> None:
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        analyze_program(
+            "export : run { -- q:Quote<{ | -- }> }\n"
+            "  :[ | -- | ;]\n"
+            ";\n"
+        )
+
+
+def test_pipeline_rejects_export_quote_nested_output() -> None:
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        analyze_program(
+            "export : run { xs:List<Quote<{ | -- }>> -- }\n"
+            ";\n"
+        )
+
+
+def test_pipeline_accepts_local_quote_usage() -> None:
+    result = analyze_program(
+        ": local-ok { -- q:Quote<{ | -- }> }\n"
+        "  :[ | -- | ;]\n"
+        ";"
+    )
+
+    assert isinstance(result, CheckedProgram)
 
 
 def test_pipeline_rejects_host_call_with_wrong_input_type() -> None:

@@ -336,6 +336,58 @@ def test_checker_accepts_typed_empty_map_value():
     )
 
 
+def test_checker_accepts_map_with_valid_string_key_type() -> None:
+    check_source(
+        ": ok { -- m:Map<String,Int> }\n"
+        "  map.empty:Map<String,Int>\n"
+        ";"
+    )
+
+
+def test_checker_accepts_map_with_valid_bool_key_type_and_nested_value() -> None:
+    check_source(
+        ": ok { -- m:Map<Bool,List<Int>> }\n"
+        "  map.empty:Map<Bool,List<Int>>\n"
+        ";"
+    )
+
+
+def test_checker_rejects_map_with_list_key_type() -> None:
+    with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        check_source(
+            ": bad { -- m:Map<List<Int>,Int> }\n"
+            "  map.empty:Map<List<Int>,Int>\n"
+            ";"
+        )
+
+
+def test_checker_rejects_map_with_result_key_type() -> None:
+    with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        check_source(
+            ": bad { -- m:Map<Result<Int,MapError>,Int> }\n"
+            "  map.empty:Map<Result<Int,MapError>,Int>\n"
+            ";"
+        )
+
+
+def test_checker_rejects_map_with_float_key_type() -> None:
+    with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        check_source(
+            ": bad-float-key { -- m:Map<Float,Int> }\n"
+            "  map.empty:Map<Float,Int>\n"
+            ";"
+        )
+
+
+def test_checker_rejects_map_with_quote_key_type() -> None:
+    with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        check_source(
+            ": bad-quote-key { -- m:Map<Quote<{ | -- }>,Int> }\n"
+            "  map.empty:Map<Quote<{ | -- }>,Int>\n"
+            ";"
+        )
+
+
 def test_checker_rejects_typed_empty_list_with_wrong_return_type():
     with pytest.raises(CheckerError):
         check_source(

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from types import MappingProxyType
 
-from .ast_nodes import SignatureNode, Visibility
+from .ast_nodes import QuoteTypeNode, SignatureNode, TypeNode, Visibility
 from .symbols import SymbolTable
 
 
@@ -52,6 +52,7 @@ def host_contract_from_words(words: Iterable[HostWord]) -> HostContract:
             raise HostABIError(f"host word name must start with 'host.': {word.name}")
         if word.name in entries:
             raise HostABIError(f"duplicate host word: {word.name}")
+        _validate_signature_types(word.signature, forbid_quote=True)
         entries[word.name] = word
     return HostContract(words=MappingProxyType(entries))
 
@@ -80,6 +81,7 @@ def collect_exports(symbols: SymbolTable) -> ExportContract:
         for symbol in symbols_for_name:
             if symbol.visibility is not Visibility.EXPORT:
                 continue
+            _validate_signature_types(symbol.signature, forbid_quote=True)
             exports.append(
                 ExportWord(
                     export_name=symbol.name,
@@ -88,3 +90,51 @@ def collect_exports(symbols: SymbolTable) -> ExportContract:
                 )
             )
     return export_contract_from_words(exports)
+
+
+def validate_type_v1(
+    type_node: TypeNode,
+    *,
+    forbid_quote: bool,
+) -> None:
+    if type_node.name == "Map" and len(type_node.args) == 2:
+        key_type = type_node.args[0]
+        if isinstance(key_type, TypeNode) and key_type.name not in {"Int", "String", "Bool"}:
+            raise HostABIError("Map<K,V> key type must be Int, String, or Bool in v1")
+
+    if type_node.name == "Quote":
+        if forbid_quote:
+            raise HostABIError("Quote is forbidden across ABI in v1")
+        if len(type_node.args) != 1:
+            return
+        quote_signature = type_node.args[0]
+        if not isinstance(quote_signature, QuoteTypeNode):
+            return
+        for parameter in quote_signature.captures:
+            validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
+        for parameter in quote_signature.inputs:
+            validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
+        for parameter in quote_signature.outputs:
+            validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
+        return
+
+    for argument in type_node.args:
+        if isinstance(argument, TypeNode):
+            validate_type_v1(argument, forbid_quote=forbid_quote)
+            continue
+        if isinstance(argument, QuoteTypeNode):
+            if forbid_quote:
+                raise HostABIError("Quote is forbidden across ABI in v1")
+            for parameter in argument.captures:
+                validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
+            for parameter in argument.inputs:
+                validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
+            for parameter in argument.outputs:
+                validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
+
+
+def _validate_signature_types(signature: SignatureNode, *, forbid_quote: bool) -> None:
+    for parameter in signature.inputs:
+        validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
+    for parameter in signature.outputs:
+        validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
