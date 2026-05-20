@@ -120,6 +120,25 @@ class Checker:
         self._apply_signature(node.span.line, node.span.column, stack, symbol.signature.inputs, symbol.signature.outputs)
 
     def _check_builtin(self, node: IdentifierNode, stack: list[TypeNode]) -> None:
+        if node.name in {"result.is-ok", "result.is-err"}:
+            result_type = self._pop_type(stack, node.span.line, node.span.column)
+            if _extract_result_types(result_type) is None:
+                self._raise_error(f"{node.name} expects Result<T,E>", node.span.line, node.span.column)
+            stack.append(StackValue(_builtin_type("Bool")))
+            return
+
+        if node.name == "result.unwrap-or":
+            fallback_type = self._pop_type(stack, node.span.line, node.span.column)
+            result_type = self._pop_type(stack, node.span.line, node.span.column)
+            result_parts = _extract_result_types(result_type)
+            if result_parts is None:
+                self._raise_error("result.unwrap-or expects Result<T,E> T", node.span.line, node.span.column)
+            value_type, _ = result_parts
+            if not _same_type(fallback_type, value_type):
+                self._raise_error("result.unwrap-or fallback type must match Result value type", node.span.line, node.span.column)
+            stack.append(StackValue(value_type))
+            return
+
         if node.name == "list.len":
             collection_type = self._pop_type(stack, node.span.line, node.span.column)
             if _extract_list_item_type(collection_type) is None:
@@ -137,17 +156,6 @@ class Checker:
             if not _same_type(left_item_type, right_item_type):
                 self._raise_error("list.concat expects matching list element types", node.span.line, node.span.column)
             stack.append(StackValue(TypeNode(span=node.span, name="List", args=(left_item_type,))))
-            return
-
-        if node.name == "list.push":
-            value_type = self._pop_type(stack, node.span.line, node.span.column)
-            list_type = self._pop_type(stack, node.span.line, node.span.column)
-            item_type = _extract_list_item_type(list_type)
-            if item_type is None:
-                self._raise_error("list.push expects List<T> T", node.span.line, node.span.column)
-            if not _same_type(value_type, item_type):
-                self._raise_error("list.push value type does not match list element type", node.span.line, node.span.column)
-            stack.append(StackValue(TypeNode(span=node.span, name="List", args=(item_type,))))
             return
 
         if node.name == "list.get":
@@ -175,6 +183,24 @@ class Checker:
             if not _same_type(quote_input_type, item_type):
                 self._raise_error("list.map quotation input type does not match list element type", node.span.line, node.span.column)
             stack.append(StackValue(TypeNode(span=node.span, name="List", args=(quote_output_type,))))
+            return
+
+        if node.name == "list.filter":
+            quote_type = self._pop_type(stack, node.span.line, node.span.column)
+            list_type = self._pop_type(stack, node.span.line, node.span.column)
+            item_type = _extract_list_item_type(list_type)
+            quote_signature = _extract_quote_signature(quote_type)
+            if item_type is None or quote_signature is None:
+                self._raise_error("list.filter expects List<T> Quote<{ | x:T -- keep:Bool }>", node.span.line, node.span.column)
+            if len(quote_signature.inputs) != 1 or len(quote_signature.outputs) != 1:
+                self._raise_error("list.filter quotation must have one input and one output", node.span.line, node.span.column)
+            quote_input_type = quote_signature.inputs[0].type_node
+            quote_output_type = quote_signature.outputs[0].type_node
+            if not _same_type(quote_input_type, item_type):
+                self._raise_error("list.filter quotation input type does not match list element type", node.span.line, node.span.column)
+            if not _is_named_type(quote_output_type, "Bool"):
+                self._raise_error("list.filter quotation output type must be Bool", node.span.line, node.span.column)
+            stack.append(StackValue(TypeNode(span=node.span, name="List", args=(item_type,))))
             return
 
         if node.name == "list.set":
@@ -295,24 +321,6 @@ class Checker:
             if not _same_type(key_type, expected_key_type):
                 self._raise_error("map.remove key type does not match map key type", node.span.line, node.span.column)
             stack.append(StackValue(_result_type(node.span, TypeNode(span=node.span, name="Map", args=(expected_key_type, value_type)), _builtin_type("MapError"))))
-            return
-
-        if node.name == "map.keys":
-            map_type = self._pop_type(stack, node.span.line, node.span.column)
-            map_parts = _extract_map_types(map_type)
-            if map_parts is None:
-                self._raise_error("map.keys expects Map<K,V>", node.span.line, node.span.column)
-            key_type, _ = map_parts
-            stack.append(StackValue(TypeNode(span=node.span, name="List", args=(key_type,))))
-            return
-
-        if node.name == "map.values":
-            map_type = self._pop_type(stack, node.span.line, node.span.column)
-            map_parts = _extract_map_types(map_type)
-            if map_parts is None:
-                self._raise_error("map.values expects Map<K,V>", node.span.line, node.span.column)
-            _, value_type = map_parts
-            stack.append(StackValue(TypeNode(span=node.span, name="List", args=(value_type,))))
             return
 
         raise NotImplementedError("builtin checking is not implemented")
@@ -651,6 +659,16 @@ def _extract_quote_signature(type_node: TypeNode) -> QuoteTypeNode | None:
     if not isinstance(signature, QuoteTypeNode):
         return None
     return signature
+
+
+def _extract_result_types(type_node: TypeNode) -> tuple[TypeNode, TypeNode] | None:
+    if type_node.name != "Result" or len(type_node.args) != 2:
+        return None
+    value_type = type_node.args[0]
+    error_type = type_node.args[1]
+    if not isinstance(value_type, TypeNode) or not isinstance(error_type, TypeNode):
+        return None
+    return value_type, error_type
 
 
 def _pattern_literal_type(value: object) -> TypeNode:

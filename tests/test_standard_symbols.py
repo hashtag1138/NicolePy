@@ -21,12 +21,15 @@ def test_load_standard_symbols_contains_all_v1_builtins():
     names = {symbol.name for symbol in builtins}
 
     assert names == {
+        "result.is-ok",
+        "result.is-err",
+        "result.unwrap-or",
         "list.len",
         "list.get",
         "list.set",
         "list.concat",
-        "list.push",
         "list.map",
+        "list.filter",
         "list.fold",
         "list.reduce",
         "map.get",
@@ -34,8 +37,6 @@ def test_load_standard_symbols_contains_all_v1_builtins():
         "map.set",
         "map.remove",
         "map.len",
-        "map.keys",
-        "map.values",
     }
 
 
@@ -58,16 +59,6 @@ def test_list_get_signature_shape():
 
     assert len(symbol.signature.inputs) == 2
     assert len(symbol.signature.outputs) == 1
-
-
-def test_list_push_signature_shape() -> None:
-    symbol = next(symbol for symbol in load_standard_symbols() if symbol.name == "list.push")
-
-    assert len(symbol.signature.inputs) == 2
-    assert symbol.signature.inputs[0].type_node.name == "List"
-    assert symbol.signature.inputs[1].type_node.name == "T"
-    assert len(symbol.signature.outputs) == 1
-    assert symbol.signature.outputs[0].type_node.name == "List"
 
 
 def test_list_set_signature_shape() -> None:
@@ -118,17 +109,52 @@ def test_map_remove_signature_shape() -> None:
     assert result_type.args[1].name == "MapError"
 
 
-def test_result_ok_and_result_err_are_not_standard_builtins():
+def test_result_constructor_words_are_not_standard_builtins():
     names = {symbol.name for symbol in load_standard_symbols()}
 
-    assert "result.ok" not in names
-    assert "result.err" not in names
+    assert "Ok!" not in names
+    assert "Err!" not in names
+
+
+def test_result_helper_signature_shapes() -> None:
+    builtins = {symbol.name: symbol for symbol in load_standard_symbols()}
+
+    is_ok = builtins["result.is-ok"]
+    assert len(is_ok.signature.inputs) == 1
+    assert is_ok.signature.inputs[0].type_node.name == "Result"
+    assert len(is_ok.signature.outputs) == 1
+    assert is_ok.signature.outputs[0].type_node.name == "Bool"
+
+    is_err = builtins["result.is-err"]
+    assert len(is_err.signature.inputs) == 1
+    assert is_err.signature.inputs[0].type_node.name == "Result"
+    assert len(is_err.signature.outputs) == 1
+    assert is_err.signature.outputs[0].type_node.name == "Bool"
+
+    unwrap_or = builtins["result.unwrap-or"]
+    assert len(unwrap_or.signature.inputs) == 2
+    assert unwrap_or.signature.inputs[0].type_node.name == "Result"
+    assert unwrap_or.signature.inputs[1].type_node.name == "T"
+    assert len(unwrap_or.signature.outputs) == 1
+    assert unwrap_or.signature.outputs[0].type_node.name == "T"
+
+
+def test_non_v1_builtins_are_not_in_standard_symbol_inventory() -> None:
+    names = {symbol.name for symbol in load_standard_symbols()}
+
+    assert "list.push" not in names
+    assert "list.pop" not in names
+    assert "list.contains" not in names
+    assert "map.keys" not in names
+    assert "map.values" not in names
+    assert "map.items" not in names
 
 
 def test_higher_order_builtins_are_marked_callable_only_for_quotes():
     builtins = {symbol.name: symbol for symbol in load_standard_symbols()}
 
     assert builtins["list.map"].quote_callable_only is True
+    assert builtins["list.filter"].quote_callable_only is True
     assert builtins["list.fold"].quote_callable_only is True
     assert builtins["list.reduce"].quote_callable_only is True
     assert builtins["list.get"].quote_callable_only is False

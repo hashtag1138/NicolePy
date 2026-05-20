@@ -437,20 +437,36 @@ def test_checker_rejects_map_contains_with_non_map_input():
         )
 
 
-def test_checker_accepts_map_keys_builtin():
+def test_checker_accepts_result_is_ok_builtin():
     check_source(
-        ": keys { -- ks:List<String> }\n"
-        '  map.empty:Map<String,Int>\n'
-        "  map.keys\n"
+        ": ok { -- b:Bool }\n"
+        "  []:List<Int>\n"
+        "  0\n"
+        "  list.get\n"
+        "  result.is-ok\n"
         ";"
     )
 
 
-def test_checker_accepts_map_values_builtin():
+def test_checker_accepts_result_is_err_builtin():
     check_source(
-        ": values { -- vs:List<Int> }\n"
-        '  map.empty:Map<String,Int>\n'
-        "  map.values\n"
+        ": ok { -- b:Bool }\n"
+        "  []:List<Int>\n"
+        "  0\n"
+        "  list.get\n"
+        "  result.is-err\n"
+        ";"
+    )
+
+
+def test_checker_accepts_result_unwrap_or_builtin():
+    check_source(
+        ": ok { -- n:Int }\n"
+        "  []:List<Int>\n"
+        "  0\n"
+        "  list.get\n"
+        "  42\n"
+        "  result.unwrap-or\n"
         ";"
     )
 
@@ -465,44 +481,36 @@ def test_checker_accepts_list_concat_with_matching_item_types():
         )
 
 
-def test_checker_accepts_list_push_builtin() -> None:
+def test_checker_accepts_list_filter_builtin() -> None:
     check_source(
-        ": push { -- xs:List<Int> }\n"
+        ": filter { -- xs:List<Int> }\n"
         "  []:List<Int>\n"
-        "  1\n"
-        "  list.push\n"
+        "  :[ | x:Int -- keep:Bool | true ;]\n"
+        "  list.filter\n"
         ";"
     )
 
 
-def test_checker_accepts_list_push_other_item_type() -> None:
-    check_source(
-        ": push { -- xs:List<String> }\n"
-        "  []:List<String>\n"
-        '  "x"\n'
-        "  list.push\n"
-        ";"
-    )
-
-
-def test_checker_rejects_list_push_with_wrong_value_type() -> None:
+def test_checker_rejects_result_unwrap_or_with_wrong_fallback_type() -> None:
     with pytest.raises(CheckerError):
         check_source(
-            ": bad { -- xs:List<Int> }\n"
+            ": bad { -- n:Int }\n"
             "  []:List<Int>\n"
-            '  "x"\n'
-            "  list.push\n"
+            "  0\n"
+            "  list.get\n"
+            '  "fallback"\n'
+            "  result.unwrap-or\n"
             ";"
         )
 
 
-def test_checker_rejects_list_push_with_non_list_input() -> None:
+def test_checker_rejects_list_filter_with_non_bool_quote_output() -> None:
     with pytest.raises(CheckerError):
         check_source(
             ": bad { -- xs:List<Int> }\n"
-            "  1\n"
-            "  2\n"
-            "  list.push\n"
+            "  []:List<Int>\n"
+            "  :[ | x:Int -- keep:Int | x ;]\n"
+            "  list.filter\n"
             ";"
         )
 
@@ -514,16 +522,6 @@ def test_checker_rejects_list_concat_with_mismatched_item_types():
             "  []:List<Int>\n"
             "  []:List<String>\n"
             "  list.concat\n"
-            ";"
-        )
-
-
-def test_checker_rejects_wrong_return_type_after_map_keys():
-    with pytest.raises(CheckerError):
-        check_source(
-            ": bad { -- ks:List<Int> }\n"
-            '  map.empty:Map<String,Int>\n'
-            "  map.keys\n"
             ";"
         )
 

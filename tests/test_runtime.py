@@ -877,129 +877,15 @@ def test_runtime_list_len_malformed_runtime_value_is_controlled_error() -> None:
         _execute_identifier(list_len_node, {}, stack, {}, RuntimeHostBindings({}))
 
 
-def test_runtime_list_push_empty_list_appends_value() -> None:
-    checked = analyze_program(
-        "export : app.run { -- xs:List<Int> }\n"
-        "  []:List<Int>\n"
-        "  10\n"
-        "  list.push\n"
-        ";\n"
-    )
-
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (10,)
-
-
-def test_runtime_list_push_non_empty_list_appends_value() -> None:
-    checked = analyze_program(
-        "export : app.run { -- xs:List<Int> }\n"
-        "  [1, 2]\n"
-        "  3\n"
-        "  list.push\n"
-        ";\n"
-    )
-
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (1, 2, 3)
-
-
-def test_runtime_list_push_nested_tuple_is_preserved() -> None:
-    checked = analyze_program(
-        "export : app.run { -- xs:List<List<Int>> }\n"
-        "  [[1], [2]]\n"
-        "  [3]\n"
-        "  list.push\n"
-        ";\n"
-    )
-
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == ((1,), (2,), (3,))
-
-
-def test_runtime_list_push_runtime_quote_is_preserved() -> None:
-    checked = analyze_program(
-        "export : app.run { -- xs:List<Quote<{ | -- n:Int }>> }\n"
-        "  [:[ | -- n:Int | 1 ;]]\n"
-        "  :[ | -- n:Int | 2 ;]\n"
-        "  list.push\n"
-        ";\n"
-    )
-
-    result = run_export(checked, "app.run", RuntimeHostBindings({}))
-    assert isinstance(result, tuple)
-    assert len(result) == 2
-    assert isinstance(result[0], RuntimeQuote)
-    assert isinstance(result[1], RuntimeQuote)
-
-
-def test_runtime_list_push_preserves_stored_ok_value() -> None:
-    stored_ok = Ok(123)
-    host_signature = signature_from_source(": hostok { -- r:Result<Int,MapError> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.ok", signature=host_signature)])
-    checked = analyze_program(
-        "export : app.run { -- xs:List<Result<Int,MapError>> }\n"
-        "  []:List<Result<Int,MapError>>\n"
-        "  host.ok\n"
-        "  list.push\n"
-        ";\n",
-        host_contract=host_contract,
-    )
-
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.ok": lambda: stored_ok}))
-    assert result == (stored_ok,)
-    assert result[0] is stored_ok
-
-
-def test_runtime_list_push_preserves_stored_err_value() -> None:
-    stored_err = Err("x")
-    host_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature)])
-    checked = analyze_program(
-        "export : app.run { -- xs:List<Result<Int,MapError>> }\n"
-        "  []:List<Result<Int,MapError>>\n"
-        "  host.err\n"
-        "  list.push\n"
-        ";\n",
-        host_contract=host_contract,
-    )
-
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.err": lambda: stored_err}))
-    assert result == (stored_err,)
-    assert result[0] is stored_err
-
-
-def test_runtime_list_push_returns_new_tuple_value() -> None:
-    checked = analyze_program(
-        "export : app.run { -- xs:List<Int> }\n"
-        "  [1, 2]\n"
-        "  3\n"
-        "  list.push\n"
-        ";\n"
-    )
-    list_push_node = checked.program.words[0].body.items[2]
-    original = (1, 2)
-    stack = RuntimeStack()
-    stack.push(original)
-    stack.push(3)
-
-    _execute_identifier(list_push_node, {}, stack, {}, RuntimeHostBindings({}))
-    result = stack.pop()
-    assert result == (1, 2, 3)
-    assert result is not original
-
-
-def test_runtime_list_push_malformed_runtime_value_is_controlled_error() -> None:
-    checked = analyze_program(
-        "export : app.run { -- xs:List<Int> }\n"
-        "  []:List<Int>\n"
-        "  10\n"
-        "  list.push\n"
-        ";\n"
-    )
-    list_push_node = checked.program.words[0].body.items[2]
-    stack = RuntimeStack()
-    stack.push("not-a-list")
-    stack.push(10)
-
-    with pytest.raises(RuntimeError, match="wrong runtime signature for list\\.push list: expected List"):
-        _execute_identifier(list_push_node, {}, stack, {}, RuntimeHostBindings({}))
+def test_runtime_list_push_is_not_available_in_v1_surface() -> None:
+    with pytest.raises(ResolutionError, match="unresolved name"):
+        analyze_program(
+            "export : app.run { -- xs:List<Int> }\n"
+            "  []:List<Int>\n"
+            "  10\n"
+            "  list.push\n"
+            ";\n"
+        )
 
 
 def test_runtime_list_set_valid_replacement_returns_ok() -> None:

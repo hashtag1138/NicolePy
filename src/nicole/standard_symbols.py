@@ -28,6 +28,24 @@ class StandardSymbolError(Exception):
 def load_standard_symbols() -> list[WordSymbol]:
     return [
         _builtin(
+            "result.is-ok",
+            inputs=(_param("r", _result_of(_named_type("T"), _named_type("E"))),),
+            outputs=(_param("b", _named_type("Bool")),),
+        ),
+        _builtin(
+            "result.is-err",
+            inputs=(_param("r", _result_of(_named_type("T"), _named_type("E"))),),
+            outputs=(_param("b", _named_type("Bool")),),
+        ),
+        _builtin(
+            "result.unwrap-or",
+            inputs=(
+                _param("r", _result_of(_named_type("T"), _named_type("E"))),
+                _param("fallback", _named_type("T")),
+            ),
+            outputs=(_param("value", _named_type("T")),),
+        ),
+        _builtin(
             "list.len",
             inputs=(_param("xs", _list_of("T")),),
             outputs=(_param("n", _named_type("Int")),),
@@ -58,20 +76,21 @@ def load_standard_symbols() -> list[WordSymbol]:
             outputs=(_param("zs", _list_of("T")),),
         ),
         _builtin(
-            "list.push",
-            inputs=(
-                _param("xs", _list_of("T")),
-                _param("value", _named_type("T")),
-            ),
-            outputs=(_param("ys", _list_of("T")),),
-        ),
-        _builtin(
             "list.map",
             inputs=(
                 _param("xs", _list_of("T")),
                 _param("q", _quote_type((), (("x", "T"),), (("y", "U"),))),
             ),
             outputs=(_param("ys", _list_of("U")),),
+            quote_callable_only=True,
+        ),
+        _builtin(
+            "list.filter",
+            inputs=(
+                _param("xs", _list_of("T")),
+                _param("q", _quote_type((), (("x", "T"),), (("keep", "Bool"),))),
+            ),
+            outputs=(_param("ys", _list_of("T")),),
             quote_callable_only=True,
         ),
         _builtin(
@@ -130,16 +149,6 @@ def load_standard_symbols() -> list[WordSymbol]:
             "map.len",
             inputs=(_param("m", _map_of("K", "V")),),
             outputs=(_param("n", _named_type("Int")),),
-        ),
-        _builtin(
-            "map.keys",
-            inputs=(_param("m", _map_of("K", "V")),),
-            outputs=(_param("ks", _list_of("K")),),
-        ),
-        _builtin(
-            "map.values",
-            inputs=(_param("m", _map_of("K", "V")),),
-            outputs=(_param("vs", _list_of("V")),),
         ),
     ]
 
