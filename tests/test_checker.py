@@ -262,6 +262,59 @@ def test_checker_rejects_non_exhaustive_result_map_error_case():
         )
 
 
+def test_checker_rejects_result_map_error_case_with_err_only():
+    with pytest.raises(CheckerError):
+        check_source(
+            ": bad { r:Result<Int,MapError> -- n:Int }\n"
+            "  r case\n"
+            "    Err(MissingKey) => 0\n"
+            "  end\n"
+            ";"
+        )
+
+
+def test_checker_accepts_exhaustive_map_error_single_variant_case():
+    check_source(
+        ": ok { e:MapError -- n:Int }\n"
+        "  e case\n"
+        "    MissingKey => 0\n"
+        "  end\n"
+        ";"
+    )
+
+
+def test_checker_accepts_exhaustive_map_error_case_with_wildcard():
+    check_source(
+        ": ok { e:MapError -- n:Int }\n"
+        "  e case\n"
+        "    MissingKey => 0\n"
+        "    _ => 1\n"
+        "  end\n"
+        ";"
+    )
+
+
+def test_checker_accepts_exhaustive_list_error_single_variant_case():
+    check_source(
+        ": ok { e:ListError -- n:Int }\n"
+        "  e case\n"
+        "    OutOfBounds => 0\n"
+        "  end\n"
+        ";"
+    )
+
+
+def test_checker_accepts_exhaustive_list_error_case_with_wildcard():
+    check_source(
+        ": ok { e:ListError -- n:Int }\n"
+        "  e case\n"
+        "    OutOfBounds => 0\n"
+        "    _ => 1\n"
+        "  end\n"
+        ";"
+    )
+
+
 def test_checker_accepts_result_map_error_case_with_specific_err_variant():
     check_source(
         ": ok { r:Result<Int,MapError> -- n:Int }\n"

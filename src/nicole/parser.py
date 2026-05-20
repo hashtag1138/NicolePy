@@ -446,7 +446,6 @@ class Parser:
 
         if token.kind in {
             TokenKind.INT_LITERAL,
-            TokenKind.FLOAT_LITERAL,
             TokenKind.STRING_LITERAL,
             TokenKind.BOOL_LITERAL,
         }:

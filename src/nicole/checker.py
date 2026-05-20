@@ -940,6 +940,24 @@ def _is_case_exhaustive(node: CaseNode, scrutinee_type: TypeNode) -> bool:
                 break
         return err_covered
 
+    if _is_named_type(scrutinee_type, "MapError"):
+        return any(
+            (
+                pattern.kind is PatternKind.NAME
+                and pattern.value == "MissingKey"
+            )
+            for pattern in patterns
+        )
+
+    if _is_named_type(scrutinee_type, "ListError"):
+        return any(
+            (
+                pattern.kind is PatternKind.NAME
+                and pattern.value == "OutOfBounds"
+            )
+            for pattern in patterns
+        )
+
     return True
 
 

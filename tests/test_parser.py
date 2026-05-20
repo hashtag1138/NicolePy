@@ -280,6 +280,18 @@ def test_parser_rejects_arbitrary_identifier_pattern():
         )
 
 
+def test_parser_rejects_float_literal_pattern():
+    with pytest.raises(ParseError):
+        parse_source(
+            ": bad-case { n:Float -- text:String }\n"
+            "  n case\n"
+            "    1.5 => \"bad\"\n"
+            "    _ => \"ok\"\n"
+            "  end\n"
+            ";"
+        )
+
+
 def test_parser_accepts_ok_binding_pattern():
     program = parse_source(
         ": ok-case { r:Result<Int,MapError> -- n:Int }\n"

@@ -135,9 +135,23 @@ def test_string_with_space():
     assert tokens[-1].kind is TokenKind.EOF
 
 
+def test_string_with_tab_escape():
+    tokens = lex('"a\\tb"')
+
+    assert tokens[0].kind is TokenKind.STRING_LITERAL
+    assert tokens[0].lexeme == "a\tb"
+    assert tokens[-1].kind is TokenKind.EOF
+
+
 def test_unterminated_string_raises():
     with pytest.raises(LexError):
         lex('"hello world')
+
+
+@pytest.mark.parametrize("source", ['"\\x"', '"\\q"'])
+def test_invalid_escape_sequences_raise(source):
+    with pytest.raises(LexError, match="invalid escape sequence"):
+        lex(source)
 
 
 def test_generic_type_separators():

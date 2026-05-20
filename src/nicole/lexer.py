@@ -267,6 +267,7 @@ class Lexer:
                     '"': '"',
                     "\\": "\\",
                     "n": "\n",
+                    "t": "\t",
                 }
                 if escape not in mapping:
                     self._raise_error("invalid escape sequence")
