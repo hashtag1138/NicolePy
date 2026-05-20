@@ -1443,3 +1443,188 @@ def test_checker_rejects_list_map_with_non_quotation_argument():
             "  list.map\n"
             ";"
         )
+
+
+def test_checker_phase4_pure_implicit_passes():
+    check_source(
+        ": helper { -- n:Int }\n"
+        "  1\n"
+        ";\n"
+        ": main { -- n:Int }\n"
+        "  helper\n"
+        ";"
+    )
+
+
+def test_checker_phase4_dirty_explicit_passes():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    check_source_with_host_contract(
+        "dirty : write-log { msg:String -- }\n"
+        "  msg host.log\n"
+        ";",
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+    )
+
+
+def test_checker_phase4_rejects_missing_dirty_for_direct_host_source():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match=r"inferred dirty.*missing dirty annotation"):
+        check_source_with_host_contract(
+            ": write-log { msg:String -- }\n"
+            "  msg host.log\n"
+            ";",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+
+
+def test_checker_phase4_rejects_redundant_dirty_annotation():
+    with pytest.raises(CheckerError, match=r"annotated dirty.*inferred pure"):
+        check_source(
+            "dirty : no-side-effect { -- n:Int }\n"
+            "  1\n"
+            ";"
+        )
+
+
+def test_checker_phase4_host_pure_source_remains_pure():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    check_source_with_host_contract(
+        ": write-log { msg:String -- }\n"
+        "  msg host.log\n"
+        ";",
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)],
+    )
+
+
+def test_checker_phase4_transitive_dirty_propagation_passes_with_annotations():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    check_source_with_host_contract(
+        "dirty : leaf { msg:String -- }\n"
+        "  msg host.log\n"
+        ";\n"
+        "dirty : middle { msg:String -- }\n"
+        "  msg leaf\n"
+        ";\n"
+        "dirty : root { msg:String -- }\n"
+        "  msg middle\n"
+        ";",
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+    )
+
+
+def test_checker_phase4_allows_pure_self_recursion_without_dirty_source():
+    check_source(
+        ": loop { n:Int -- n2:Int }\n"
+        "  n 0 = if\n"
+        "    n\n"
+        "  else\n"
+        "    n 1 - loop\n"
+        "  end\n"
+        ";"
+    )
+
+
+def test_checker_phase4_allows_pure_mutual_recursion_without_dirty_source():
+    check_source(
+        ": even { n:Int -- b:Bool }\n"
+        "  n 0 = if\n"
+        "    true\n"
+        "  else\n"
+        "    n 1 - odd\n"
+        "  end\n"
+        ";\n"
+        ": odd { n:Int -- b:Bool }\n"
+        "  n 0 = if\n"
+        "    false\n"
+        "  else\n"
+        "    n 1 - even\n"
+        "  end\n"
+        ";"
+    )
+
+
+def test_checker_phase4_scc_dirty_propagation_passes_with_annotations():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    check_source_with_host_contract(
+        "dirty : even { msg:String -- }\n"
+        "  msg odd\n"
+        ";\n"
+        "dirty : odd { msg:String -- }\n"
+        "  msg host.log\n"
+        "  msg even\n"
+        ";",
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+    )
+
+
+def test_checker_phase4_rejects_pure_to_dirty_direct_call():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match=r"pure word 'a' cannot call dirty word 'b'"):
+        check_source_with_host_contract(
+            ": a { msg:String -- }\n"
+            "  msg b\n"
+            ";\n"
+            "dirty : b { msg:String -- }\n"
+            "  msg host.log\n"
+            ";",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+
+
+def test_checker_phase4_export_effect_preservation():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    check_source_with_host_contract(
+        "export dirty : send { msg:String -- }\n"
+        "  msg host.log\n"
+        ";",
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+    )
+
+
+def test_checker_phase4_subword_dirty_propagation_requires_dirty_parent():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match=r"pure word 'outer' cannot call dirty word 'outer\.inner'"):
+        check_source_with_host_contract(
+            ": outer { msg:String -- }\n"
+            "  dirty : inner { msg:String -- }\n"
+            "    msg host.log\n"
+            "  ;\n"
+            "  msg inner\n"
+            ";",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+
+
+def test_checker_phase4_if_branch_union_is_conservative():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match=r"pure word 'main' cannot call dirty word 'dirty-worker'"):
+        check_source_with_host_contract(
+            "dirty : dirty-worker { msg:String -- }\n"
+            "  msg host.log\n"
+            ";\n"
+            ": main { b:Bool msg:String -- }\n"
+            "  b if\n"
+            "    msg dirty-worker\n"
+            "  else\n"
+            "    msg drop\n"
+            "  end\n"
+            ";",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+
+
+def test_checker_phase4_case_branch_union_is_conservative():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match=r"pure word 'main' cannot call dirty word 'dirty-worker'"):
+        check_source_with_host_contract(
+            "dirty : dirty-worker { msg:String -- }\n"
+            "  msg host.log\n"
+            ";\n"
+            ": main { b:Bool msg:String -- }\n"
+            "  b case\n"
+            "    true => msg dirty-worker\n"
+            "    false => msg drop\n"
+            "  end\n"
+            ";",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )

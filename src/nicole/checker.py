@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import deque
 
 from .ast_nodes import (
     BlockNode,
@@ -23,8 +24,8 @@ from .ast_nodes import (
     TypedEmptyMapNode,
     WordDefNode,
 )
-from .host_abi import HostABIError, validate_type_v1
-from .symbols import SymbolSource, SymbolTable
+from .host_abi import HostABIError, HostEffect, validate_type_v1
+from .symbols import SymbolSource, SymbolTable, WordSymbol
 
 __all__ = ["Checker", "CheckerError", "check", "check_program"]
 
@@ -45,6 +46,29 @@ class StackValue:
     known_empty_list: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class WordEffectInfo:
+    declared_dirty: bool
+    inferred_dirty: bool
+    direct_dirty_source: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _CallEdge:
+    caller: str
+    callee: str
+    line: int
+    column: int
+
+
+@dataclass(frozen=True, slots=True)
+class EffectAnalysisResult:
+    effects: dict[str, WordEffectInfo]
+    calls_by_word: dict[str, tuple[_CallEdge, ...]]
+    word_order: tuple[str, ...]
+    word_spans: dict[str, tuple[int, int]]
+
+
 class Checker:
     def __init__(self, symbols: SymbolTable) -> None:
         self._symbols = symbols
@@ -53,6 +77,9 @@ class Checker:
         self._validate_program_types(program)
         for word in program.words:
             self._check_word(word)
+        effect_analysis = self._analyze_effects(program)
+        self._validate_pure_to_dirty_calls(effect_analysis)
+        self._validate_effect_annotations(effect_analysis)
         return program
 
     def _validate_program_types(self, program: ProgramNode) -> None:
@@ -776,6 +803,261 @@ class Checker:
     def _raise_error(self, message: str, line: int, column: int) -> None:
         raise CheckerError(message=message, line=line, column=column)
 
+    def _analyze_effects(self, program: ProgramNode) -> EffectAnalysisResult:
+        words = self._collect_words(program)
+        word_order = [qualified_name for qualified_name, _ in words]
+        known_words = set(word_order)
+        declared_dirty_by_word = {qualified_name: word.is_dirty_annotation for qualified_name, word in words}
+        spans_by_word = {
+            qualified_name: (word.span.line, word.span.column)
+            for qualified_name, word in words
+        }
+        graph: dict[str, set[str]] = {qualified_name: set() for qualified_name in word_order}
+        direct_dirty_source_by_word = {qualified_name: False for qualified_name in word_order}
+        calls_by_word: dict[str, list[_CallEdge]] = {qualified_name: [] for qualified_name in word_order}
+
+        for qualified_name, word in words:
+            edges, has_direct_dirty_source = self._collect_effect_inputs_from_block(
+                word.body,
+                caller=qualified_name,
+                known_words=known_words,
+            )
+            for edge in edges:
+                graph[qualified_name].add(edge.callee)
+            calls_by_word[qualified_name].extend(edges)
+            direct_dirty_source_by_word[qualified_name] = has_direct_dirty_source
+
+        components, component_for_word = _compute_sccs(graph, word_order)
+        component_edges: dict[int, set[int]] = {component_id: set() for component_id in range(len(components))}
+        reverse_component_edges: dict[int, set[int]] = {component_id: set() for component_id in range(len(components))}
+        direct_dirty_components: set[int] = set()
+
+        for component_id, component_words in enumerate(components):
+            if any(direct_dirty_source_by_word[word_name] for word_name in component_words):
+                direct_dirty_components.add(component_id)
+
+        for caller_name, callees in graph.items():
+            caller_component = component_for_word[caller_name]
+            for callee_name in callees:
+                callee_component = component_for_word[callee_name]
+                component_edges[caller_component].add(callee_component)
+                reverse_component_edges[callee_component].add(caller_component)
+
+        dirty_components = set(direct_dirty_components)
+        queue: deque[int] = deque(sorted(direct_dirty_components))
+        while queue:
+            dirty_component = queue.popleft()
+            for caller_component in sorted(reverse_component_edges[dirty_component]):
+                if caller_component in dirty_components:
+                    continue
+                dirty_components.add(caller_component)
+                queue.append(caller_component)
+
+        effects = {
+            word_name: WordEffectInfo(
+                declared_dirty=declared_dirty_by_word[word_name],
+                inferred_dirty=component_for_word[word_name] in dirty_components,
+                direct_dirty_source=direct_dirty_source_by_word[word_name],
+            )
+            for word_name in word_order
+        }
+        frozen_calls_by_word = {
+            word_name: tuple(calls_by_word[word_name])
+            for word_name in word_order
+        }
+        return EffectAnalysisResult(
+            effects=effects,
+            calls_by_word=frozen_calls_by_word,
+            word_order=tuple(word_order),
+            word_spans=spans_by_word,
+        )
+
+    def _collect_words(self, program: ProgramNode) -> list[tuple[str, WordDefNode]]:
+        collected: list[tuple[str, WordDefNode]] = []
+        for word in program.words:
+            self._collect_nested_words(word, owner=None, out=collected)
+        return collected
+
+    def _collect_nested_words(
+        self,
+        word: WordDefNode,
+        *,
+        owner: str | None,
+        out: list[tuple[str, WordDefNode]],
+    ) -> None:
+        qualified_name = _qualified_name(owner, word.name)
+        out.append((qualified_name, word))
+        for nested_word in word.nested_words:
+            self._collect_nested_words(nested_word, owner=qualified_name, out=out)
+
+    def _collect_effect_inputs_from_block(
+        self,
+        block: BlockNode,
+        *,
+        caller: str,
+        known_words: set[str],
+    ) -> tuple[list[_CallEdge], bool]:
+        edges: list[_CallEdge] = []
+        has_direct_dirty_source = False
+        for item in block.items:
+            if isinstance(item, IdentifierNode):
+                edge, is_direct_dirty = self._classify_identifier_effect_input(
+                    item,
+                    caller=caller,
+                    known_words=known_words,
+                )
+                if edge is not None:
+                    edges.append(edge)
+                has_direct_dirty_source = has_direct_dirty_source or is_direct_dirty
+                continue
+            if isinstance(item, IfNode):
+                then_edges, then_direct_dirty = self._collect_effect_inputs_from_block(
+                    item.then_block,
+                    caller=caller,
+                    known_words=known_words,
+                )
+                else_edges, else_direct_dirty = self._collect_effect_inputs_from_block(
+                    item.else_block,
+                    caller=caller,
+                    known_words=known_words,
+                )
+                edges.extend(then_edges)
+                edges.extend(else_edges)
+                has_direct_dirty_source = has_direct_dirty_source or then_direct_dirty or else_direct_dirty
+                continue
+            if isinstance(item, CaseNode):
+                for branch in item.branches:
+                    branch_edges, branch_direct_dirty = self._collect_effect_inputs_from_block(
+                        branch.body,
+                        caller=caller,
+                        known_words=known_words,
+                    )
+                    edges.extend(branch_edges)
+                    has_direct_dirty_source = has_direct_dirty_source or branch_direct_dirty
+                continue
+            if isinstance(item, ListLiteralNode):
+                list_edges, list_direct_dirty = self._collect_effect_inputs_from_list_literal(
+                    item,
+                    caller=caller,
+                    known_words=known_words,
+                )
+                edges.extend(list_edges)
+                has_direct_dirty_source = has_direct_dirty_source or list_direct_dirty
+                continue
+            # Quotations are intentionally ignored in Phase 4 effect inference.
+        return edges, has_direct_dirty_source
+
+    def _collect_effect_inputs_from_list_literal(
+        self,
+        list_literal: ListLiteralNode,
+        *,
+        caller: str,
+        known_words: set[str],
+    ) -> tuple[list[_CallEdge], bool]:
+        edges: list[_CallEdge] = []
+        has_direct_dirty_source = False
+        for element in list_literal.elements:
+            if isinstance(element, IdentifierNode):
+                edge, is_direct_dirty = self._classify_identifier_effect_input(
+                    element,
+                    caller=caller,
+                    known_words=known_words,
+                )
+                if edge is not None:
+                    edges.append(edge)
+                has_direct_dirty_source = has_direct_dirty_source or is_direct_dirty
+                continue
+            if isinstance(element, IfNode):
+                then_edges, then_direct_dirty = self._collect_effect_inputs_from_block(
+                    element.then_block,
+                    caller=caller,
+                    known_words=known_words,
+                )
+                else_edges, else_direct_dirty = self._collect_effect_inputs_from_block(
+                    element.else_block,
+                    caller=caller,
+                    known_words=known_words,
+                )
+                edges.extend(then_edges)
+                edges.extend(else_edges)
+                has_direct_dirty_source = has_direct_dirty_source or then_direct_dirty or else_direct_dirty
+                continue
+            if isinstance(element, CaseNode):
+                for branch in element.branches:
+                    branch_edges, branch_direct_dirty = self._collect_effect_inputs_from_block(
+                        branch.body,
+                        caller=caller,
+                        known_words=known_words,
+                    )
+                    edges.extend(branch_edges)
+                    has_direct_dirty_source = has_direct_dirty_source or branch_direct_dirty
+                continue
+            if isinstance(element, ListLiteralNode):
+                nested_edges, nested_direct_dirty = self._collect_effect_inputs_from_list_literal(
+                    element,
+                    caller=caller,
+                    known_words=known_words,
+                )
+                edges.extend(nested_edges)
+                has_direct_dirty_source = has_direct_dirty_source or nested_direct_dirty
+                continue
+            # Quotations are intentionally ignored in Phase 4 effect inference.
+        return edges, has_direct_dirty_source
+
+    def _classify_identifier_effect_input(
+        self,
+        identifier: IdentifierNode,
+        *,
+        caller: str,
+        known_words: set[str],
+    ) -> tuple[_CallEdge | None, bool]:
+        if identifier.resolution.owner_scope == "host":
+            return None, identifier.resolution.host_effect is HostEffect.DIRTY
+
+        symbol = identifier.resolution.resolved_symbol
+        if not isinstance(symbol, WordSymbol):
+            return None, False
+        if symbol.source is not SymbolSource.USER:
+            return None, False
+
+        callee = symbol.qualified_name
+        if callee not in known_words:
+            return None, False
+        return _CallEdge(caller=caller, callee=callee, line=identifier.span.line, column=identifier.span.column), False
+
+    def _validate_pure_to_dirty_calls(self, analysis: EffectAnalysisResult) -> None:
+        for caller in analysis.word_order:
+            caller_effect = analysis.effects[caller]
+            if caller_effect.declared_dirty:
+                continue
+            for edge in analysis.calls_by_word[caller]:
+                callee_effect = analysis.effects.get(edge.callee)
+                if callee_effect is None:
+                    continue
+                if callee_effect.inferred_dirty:
+                    self._raise_error(
+                        f"pure word '{caller}' cannot call dirty word '{edge.callee}'",
+                        edge.line,
+                        edge.column,
+                    )
+
+    def _validate_effect_annotations(self, analysis: EffectAnalysisResult) -> None:
+        for word_name in analysis.word_order:
+            effect = analysis.effects[word_name]
+            line, column = analysis.word_spans[word_name]
+            if effect.inferred_dirty and not effect.declared_dirty:
+                self._raise_error(
+                    f"word '{word_name}' inferred dirty but missing dirty annotation",
+                    line,
+                    column,
+                )
+            if not effect.inferred_dirty and effect.declared_dirty:
+                self._raise_error(
+                    f"word '{word_name}' annotated dirty but inferred pure",
+                    line,
+                    column,
+                )
+
 
 def check(program: ProgramNode, symbols: SymbolTable) -> ProgramNode:
     return Checker(symbols).check(program)
@@ -987,3 +1269,56 @@ def _result_error_variants(scrutinee_type: TypeNode) -> set[str] | None:
     if _is_named_type(error_type, "ListError"):
         return {"OutOfBounds"}
     return None
+
+
+def _qualified_name(owner: str | None, name: str) -> str:
+    if owner is None:
+        return name
+    return f"{owner}.{name}"
+
+
+def _compute_sccs(
+    graph: dict[str, set[str]],
+    node_order: list[str],
+) -> tuple[list[list[str]], dict[str, int]]:
+    index = 0
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    indices: dict[str, int] = {}
+    low_links: dict[str, int] = {}
+    components: list[list[str]] = []
+    component_by_word: dict[str, int] = {}
+
+    def strong_connect(node: str) -> None:
+        nonlocal index
+        indices[node] = index
+        low_links[node] = index
+        index += 1
+        stack.append(node)
+        on_stack.add(node)
+
+        for neighbor in sorted(graph[node]):
+            if neighbor not in indices:
+                strong_connect(neighbor)
+                low_links[node] = min(low_links[node], low_links[neighbor])
+            elif neighbor in on_stack:
+                low_links[node] = min(low_links[node], indices[neighbor])
+
+        if low_links[node] == indices[node]:
+            component: list[str] = []
+            while stack:
+                member = stack.pop()
+                on_stack.remove(member)
+                component.append(member)
+                if member == node:
+                    break
+            component_id = len(components)
+            components.append(component)
+            for member in component:
+                component_by_word[member] = component_id
+
+    for node in node_order:
+        if node not in indices:
+            strong_connect(node)
+
+    return components, component_by_word

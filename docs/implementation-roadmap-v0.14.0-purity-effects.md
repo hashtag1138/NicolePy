@@ -302,6 +302,38 @@ Phase 1-3.
 
 high
 
+### Implementation notes
+
+Implemented:
+
+- internal effect analysis in checker
+
+- user-word call graph
+
+- qualified-name graph nodes
+
+- Tarjan SCC handling
+
+- host dirty source detection
+
+- transitive dirty inference
+
+- exact annotation validation:
+    - inferred dirty + missing annotation
+    - inferred pure + redundant dirty
+
+- pure caller -> dirty callee rejection
+
+- conservative if/case branch union
+
+- quotations ignored for Phase 4
+
+- metadata-only analysis state:
+    - no SymbolTable mutation
+    - no CheckedProgram mutation
+
+- no runtime effect checks
+
 ## Phase 5 — DirtyQuote and higher-order effect gating
 
 ### Goal
@@ -447,6 +479,7 @@ Status: completed
 
 M3
 effect checker working
+Status: completed
 
 M4
 DirtyQuote working
@@ -468,8 +501,8 @@ Status: implemented
 - [x] Phase 3
 Status: implemented
 
-- [ ] Phase 4
-Status: not started
+- [x] Phase 4
+Status: implemented
 
 - [ ] Phase 5
 Status: not started
