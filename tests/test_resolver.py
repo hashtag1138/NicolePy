@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.ast_nodes import IdentifierNode, IfNode, PatternKind, QuoteNode
-from nicole.host_abi import BindingAvailability, HostWord, host_contract_from_words
+from nicole.host_abi import BindingAvailability, HostEffect, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.resolver import ResolutionError, resolve
@@ -211,7 +211,7 @@ def test_resolve_host_reference_with_contract():
         ": log { msg:String -- }\n"
         "  msg host.log\n"
         ";",
-        [HostWord(name="host.log", signature=signature)],
+        [HostWord(name="host.log", signature=signature, effect=HostEffect.PURE)],
     )
 
     host_ref = program.words[0].body.items[1]
@@ -227,7 +227,7 @@ def test_resolve_required_host_reference_with_contract():
         ": log { msg:String -- }\n"
         "  msg host.log\n"
         ";",
-        [HostWord(name="host.log", signature=signature, availability=BindingAvailability.REQUIRED)],
+        [HostWord(name="host.log", signature=signature, availability=BindingAvailability.REQUIRED, effect=HostEffect.PURE)],
     )
 
     host_ref = program.words[0].body.items[1]
@@ -261,7 +261,7 @@ def test_resolve_optional_host_word_direct_call_rejected():
             ": log { msg:String -- }\n"
             "  msg host.log\n"
             ";",
-            [HostWord(name="host.log", signature=signature, availability=BindingAvailability.OPTIONAL)],
+            [HostWord(name="host.log", signature=signature, availability=BindingAvailability.OPTIONAL, effect=HostEffect.PURE)],
         )
 
 

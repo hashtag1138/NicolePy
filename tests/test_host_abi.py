@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from nicole.ast_nodes import ParameterNode, SignatureNode, TypeNode, Visibility
 from nicole.host_abi import (
     BindingAvailability,
+    HostEffect,
     ExportContract,
     ExportWord,
     HostABIError,
@@ -55,9 +56,60 @@ def test_host_word_uses_signature_node() -> None:
         ),
     )
 
-    word = HostWord(name="host.math.inc", signature=signature, availability=BindingAvailability.REQUIRED)
+    word = HostWord(name="host.math.inc", signature=signature, availability=BindingAvailability.REQUIRED, effect=HostEffect.PURE)
 
     assert word.signature is signature
+
+
+def test_host_word_requires_explicit_effect() -> None:
+    signature = SignatureNode(span=make_span(), inputs=(), outputs=())
+
+    with pytest.raises(TypeError):
+        HostWord(name="host.math.inc", signature=signature)
+
+
+def test_host_word_rejects_none_effect() -> None:
+    signature = SignatureNode(span=make_span(), inputs=(), outputs=())
+
+    with pytest.raises(HostABIError, match="effect"):
+        HostWord(name="host.math.inc", signature=signature, effect=None)  # type: ignore[arg-type]
+
+
+def test_host_word_rejects_invalid_effect() -> None:
+    signature = SignatureNode(span=make_span(), inputs=(), outputs=())
+
+    with pytest.raises(HostABIError, match="effect"):
+        HostWord(name="host.math.inc", signature=signature, effect="random")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("availability", "effect"),
+    [
+        (BindingAvailability.REQUIRED, HostEffect.PURE),
+        (BindingAvailability.REQUIRED, HostEffect.DIRTY),
+        (BindingAvailability.OPTIONAL, HostEffect.PURE),
+        (BindingAvailability.OPTIONAL, HostEffect.DIRTY),
+    ],
+)
+def test_host_contract_accepts_effect_availability_combinations(
+    availability: BindingAvailability,
+    effect: HostEffect,
+) -> None:
+    signature = SignatureNode(span=make_span(), inputs=(), outputs=())
+
+    contract = host_contract_from_words(
+        [
+            HostWord(
+                name="host.log",
+                signature=signature,
+                availability=availability,
+                effect=effect,
+            )
+        ]
+    )
+
+    assert contract.words["host.log"].availability is availability
+    assert contract.words["host.log"].effect is effect
 
 
 def test_export_word_uses_signature_node() -> None:
@@ -88,7 +140,9 @@ def test_host_contract_rejects_name_without_host_prefix() -> None:
     signature = SignatureNode(span=make_span(), inputs=(), outputs=())
 
     with pytest.raises(HostABIError, match="host word name must start with 'host.'"):
-        host_contract_from_words([HostWord(name="log", signature=signature)])
+        host_contract_from_words(
+            [HostWord(name="log", signature=signature, effect=HostEffect.PURE)]
+        )
 
 
 def test_host_contract_rejects_duplicate_host_names() -> None:
@@ -97,8 +151,8 @@ def test_host_contract_rejects_duplicate_host_names() -> None:
     with pytest.raises(HostABIError, match="duplicate host word"):
         host_contract_from_words(
             [
-                HostWord(name="host.log", signature=signature),
-                HostWord(name="host.log", signature=signature),
+                HostWord(name="host.log", signature=signature, effect=HostEffect.PURE),
+                HostWord(name="host.log", signature=signature, effect=HostEffect.PURE),
             ]
         )
 
@@ -193,7 +247,7 @@ def test_export_contract_integration_with_host_checked_program() -> None:
     ).parse()
     symbols = with_standard_symbols(collect_signatures(program))
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     resolved = resolve(program, symbols, host_contract=host_contract)
     check_program(resolved, symbols)
@@ -206,28 +260,28 @@ def test_export_contract_integration_with_host_checked_program() -> None:
 def test_host_contract_rejects_quote_input_type() -> None:
     signature = signature_from_source(": hostsig { q:Quote<{ | -- }> -- } ;")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        host_contract_from_words([HostWord(name="host.run", signature=signature)])
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
 
 
 def test_host_contract_rejects_quote_output_type() -> None:
     signature = signature_from_source(": hostsig { -- q:Quote<{ | -- }> } ;")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        host_contract_from_words([HostWord(name="host.make", signature=signature)])
+        host_contract_from_words([HostWord(name="host.make", signature=signature, effect=HostEffect.PURE)])
 
 
 def test_host_contract_rejects_quote_nested_in_list() -> None:
     signature = signature_from_source(": hostsig { xs:List<Quote<{ | -- }>> -- } ;")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        host_contract_from_words([HostWord(name="host.run", signature=signature)])
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
 
 
 def test_host_contract_rejects_quote_nested_in_result() -> None:
     signature = signature_from_source(": hostsig { -- r:Result<List<Quote<{ | -- }>>,MapError> } ;")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        host_contract_from_words([HostWord(name="host.run", signature=signature)])
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
 
 
 def test_host_contract_rejects_invalid_map_key_type() -> None:
     signature = signature_from_source(": hostsig { -- m:Map<List<Int>,String> } ;")
     with pytest.raises(HostABIError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
-        host_contract_from_words([HostWord(name="host.run", signature=signature)])
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])

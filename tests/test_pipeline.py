@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.checker import CheckerError
-from nicole.host_abi import BindingAvailability, HostABIError, HostWord, host_contract_from_words
+from nicole.host_abi import BindingAvailability, HostABIError, HostEffect, HostWord, host_contract_from_words
 from nicole.pipeline import CheckedProgram, analyze_program
 from nicole.resolver import ResolutionError
 from nicole.parser import ParseError, Parser
@@ -80,7 +80,7 @@ def test_pipeline_rejects_reserved_subword_names(nested_name: str) -> None:
 
 def test_pipeline_accepts_export_with_valid_host_contract() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     result = analyze_program(
         "export : send { msg:String -- }\n"
@@ -138,7 +138,7 @@ def test_pipeline_accepts_local_quote_usage() -> None:
 
 def test_pipeline_rejects_host_call_with_wrong_input_type() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     with pytest.raises(CheckerError):
         analyze_program(
@@ -152,7 +152,7 @@ def test_pipeline_rejects_host_call_with_wrong_input_type() -> None:
 def test_pipeline_rejects_direct_optional_host_word_call() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
     host_contract = host_contract_from_words(
-        [HostWord(name="host.log", signature=host_signature, availability=BindingAvailability.OPTIONAL)]
+        [HostWord(name="host.log", signature=host_signature, availability=BindingAvailability.OPTIONAL, effect=HostEffect.PURE)]
     )
 
     with pytest.raises(ResolutionError, match="optional host word cannot be called directly in v1"):
@@ -182,8 +182,8 @@ def test_pipeline_accepts_export_with_multiple_host_words() -> None:
     random_signature = signature_from_source(": hostrandom { -- n:Int } ;")
     host_contract = host_contract_from_words(
         [
-            HostWord(name="host.log", signature=log_signature),
-            HostWord(name="host.random-int", signature=random_signature),
+            HostWord(name="host.log", signature=log_signature, effect=HostEffect.PURE),
+            HostWord(name="host.random-int", signature=random_signature, effect=HostEffect.PURE),
         ]
     )
 

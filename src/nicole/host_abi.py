@@ -22,11 +22,21 @@ class BindingAvailability(Enum):
     OPTIONAL = auto()
 
 
+class HostEffect(Enum):
+    PURE = auto()
+    DIRTY = auto()
+
+
 @dataclass(slots=True)
 class HostWord:
     name: str
     signature: SignatureNode
+    effect: HostEffect
     availability: BindingAvailability = BindingAvailability.REQUIRED
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.effect, HostEffect):
+            raise HostABIError("host word effect must be HostEffect.PURE or HostEffect.DIRTY")
 
 
 @dataclass(slots=True)

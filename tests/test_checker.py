@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.checker import CheckerError, check_program
-from nicole.host_abi import HostWord, host_contract_from_words
+from nicole.host_abi import HostEffect, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.resolver import resolve
@@ -49,7 +49,7 @@ def test_checker_accepts_host_word_with_matching_signature():
         ": main { msg:String -- }\n"
         "  msg host.log\n"
         ";",
-        [HostWord(name="host.log", signature=host_signature)],
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)],
     )
 
 
@@ -60,7 +60,7 @@ def test_checker_rejects_host_word_with_wrong_input_type():
             ": main { n:Int -- }\n"
             "  n host.log\n"
             ";",
-            [HostWord(name="host.log", signature=host_signature)],
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)],
         )
 
 
@@ -70,7 +70,7 @@ def test_checker_accepts_host_word_with_output():
         ": main { -- n:Int }\n"
         "  host.random-int\n"
         ";",
-        [HostWord(name="host.random-int", signature=host_signature)],
+        [HostWord(name="host.random-int", signature=host_signature, effect=HostEffect.PURE)],
     )
 
 

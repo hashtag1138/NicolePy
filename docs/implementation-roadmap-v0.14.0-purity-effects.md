@@ -158,6 +158,36 @@ Phase 1.
 
 medium
 
+### Implementation notes
+
+Implemented:
+
+- HostEffect enum
+  - HostEffect.PURE
+  - HostEffect.DIRTY
+
+- HostWord.effect mandatory field
+
+- explicit validation in HostWord.__post_init__
+
+- missing effect rejected
+
+- invalid effect rejected
+
+- no implicit default effect
+
+- availability remains independent from effect
+
+- existing ABI restrictions preserved
+
+- all HostWord(...) fixtures updated
+
+- Phase 2 validation matrix added:
+  - required + PURE
+  - required + DIRTY
+  - optional + PURE
+  - optional + DIRTY
+
 ## Phase 3 — Symbols / Signature collection / Resolver metadata propagation
 
 ### Goal
@@ -384,6 +414,8 @@ Status: completed
 M2
 effect metadata propagated
 
+Status: in progress
+
 M3
 effect checker working
 
@@ -401,8 +433,8 @@ full conformance suite passing
 - [x] Phase 1
 Status: implemented
 
-- [ ] Phase 2
-Status: not started
+- [x] Phase 2
+Status: implemented
 
 - [ ] Phase 3
 Status: not started

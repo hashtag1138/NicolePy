@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.checker import CheckerError
-from nicole.host_abi import HostABIError, HostWord, host_contract_from_words
+from nicole.host_abi import HostABIError, HostEffect, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.pipeline import analyze_program
@@ -31,7 +31,7 @@ def signature_from_source(source: str):
 
 def test_runtime_valid_host_call() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     seen: list[str] = []
 
@@ -69,7 +69,7 @@ def test_runtime_swap_underflow() -> None:
 
 def test_runtime_missing_host_binding() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- }\n"
         '  "hello" host.log\n'
@@ -84,7 +84,7 @@ def test_runtime_missing_host_binding() -> None:
 
 def test_runtime_host_callable_exception_is_normalized() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- }\n"
         '  "hello" host.log\n'
@@ -123,7 +123,7 @@ def test_runtime_wrong_arity() -> None:
 
 def test_runtime_wrong_runtime_signature() -> None:
     host_signature = signature_from_source(": hostsig { -- n:Int } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.random-int", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.random-int", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- n:Int }\n"
         "  host.random-int\n"
@@ -171,7 +171,7 @@ def test_runtime_float_division_by_zero_is_normalized() -> None:
 
 def test_runtime_nicole_word_calling_host_word() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     seen: list[str] = []
     checked = analyze_program(
@@ -192,7 +192,7 @@ def test_runtime_nicole_word_calling_host_word() -> None:
 
 def test_runtime_nested_nicole_word_calls() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     seen: list[str] = []
     checked = analyze_program(
@@ -219,8 +219,8 @@ def test_runtime_multiple_host_words() -> None:
     random_signature = signature_from_source(": hostrandom { -- n:Int } ;")
     host_contract = host_contract_from_words(
         [
-            HostWord(name="host.log", signature=log_signature),
-            HostWord(name="host.random-int", signature=random_signature),
+            HostWord(name="host.log", signature=log_signature, effect=HostEffect.PURE),
+            HostWord(name="host.random-int", signature=random_signature, effect=HostEffect.PURE),
         ]
     )
 
@@ -247,7 +247,7 @@ def test_runtime_multiple_host_words() -> None:
 
 def test_runtime_scopes_with_same_nested_name_remain_distinct() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     seen: list[str] = []
     checked = analyze_program(
@@ -281,7 +281,7 @@ def test_runtime_scopes_with_same_nested_name_remain_distinct() -> None:
 
 def test_runtime_host_multi_output() -> None:
     host_signature = signature_from_source(": hostpair { -- a:Int b:Int } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.pair", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.pair", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.pair { -- a:Int b:Int }\n"
         "  host.pair\n"
@@ -297,7 +297,7 @@ def test_runtime_host_multi_output() -> None:
 
 def test_runtime_host_multi_output_wrong_tuple_size() -> None:
     host_signature = signature_from_source(": hostpair { -- a:Int b:Int } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.pair", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.pair", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.pair { -- a:Int b:Int }\n"
         "  host.pair\n"
@@ -312,7 +312,7 @@ def test_runtime_host_multi_output_wrong_tuple_size() -> None:
 
 def test_runtime_host_multi_output_wrong_element_type() -> None:
     host_signature = signature_from_source(": hostpair { -- a:Int b:Int } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.pair", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.pair", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.pair { -- a:Int b:Int }\n"
         "  host.pair\n"
@@ -336,7 +336,7 @@ def test_runtime_if_true_executes_then_branch() -> None:
         "  end\n"
         ";",
         host_contract=host_contract_from_words(
-            [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"))]
+            [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"), effect=HostEffect.PURE)]
         ),
     )
 
@@ -396,7 +396,7 @@ def test_runtime_case_produces_stack_output() -> None:
 
 def test_runtime_case_can_call_nicole_word() -> None:
     host_contract = host_contract_from_words(
-        [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"))]
+        [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"), effect=HostEffect.PURE)]
     )
     checked = analyze_program(
         ": log-yes { -- }\n"
@@ -497,7 +497,7 @@ def test_runtime_case_result_other_error_no_match() -> None:
 
 def test_runtime_case_branch_local_binding_does_not_escape_branch_scope() -> None:
     host_signature = signature_from_source(": hostfetch { -- r:Result<Int,MapError> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.fetch", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.fetch", signature=host_signature, effect=HostEffect.PURE)])
 
     with pytest.raises(ResolutionError):
         analyze_program(
@@ -518,8 +518,8 @@ def test_runtime_case_err_binding_returns_runtime_error_value() -> None:
     fallback_signature = signature_from_source(": hostfallback { -- e:MapError } ;")
     host_contract = host_contract_from_words(
         [
-            HostWord(name="host.fetch", signature=fetch_signature),
-            HostWord(name="host.fallback-error", signature=fallback_signature),
+            HostWord(name="host.fetch", signature=fetch_signature, effect=HostEffect.PURE),
+            HostWord(name="host.fallback-error", signature=fallback_signature, effect=HostEffect.PURE),
         ]
     )
     checked = analyze_program(
@@ -680,7 +680,7 @@ def test_runtime_call_can_call_nicole_word() -> None:
 
 def test_runtime_call_can_call_host_word() -> None:
     host_signature = signature_from_source(": hostsig { n:Int -- out:Int } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.inc", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.inc", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- n:Int }\n"
         "  5\n"
@@ -745,7 +745,7 @@ def test_runtime_list_literal_returns_tuple_in_source_order() -> None:
 
 def test_runtime_list_literal_elements_evaluate_left_to_right() -> None:
     host_signature = signature_from_source(": hostnext { -- n:Int } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.next", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.next", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- xs:List<Int> }\n"
         "  [host.next, host.next, host.next]\n"
@@ -783,7 +783,7 @@ def test_runtime_quotation_inside_list_is_preserved_not_executed() -> None:
 
 def test_runtime_host_result_can_be_packed_into_list_literal() -> None:
     host_signature = signature_from_source(": hostnum { -- n:Int } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.num", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.num", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- xs:List<Int> }\n"
         "  [host.num, 2]\n"
@@ -796,7 +796,7 @@ def test_runtime_host_result_can_be_packed_into_list_literal() -> None:
 
 def test_runtime_list_literal_error_in_element_aborts_construction() -> None:
     host_signature = signature_from_source(": hostfail { -- n:Int } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.fail", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.fail", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- xs:List<Int> }\n"
         "  [1, host.fail, 3]\n"
@@ -1000,7 +1000,7 @@ def test_runtime_list_set_runtime_quote_is_preserved() -> None:
 def test_runtime_list_set_preserves_stored_ok_value() -> None:
     stored_ok = Ok(123)
     host_signature = signature_from_source(": hostok { -- r:Result<Int,MapError> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.ok", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.ok", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<List<Result<Int,MapError>>,ListError> }\n"
         "  [host.ok]\n"
@@ -1020,7 +1020,7 @@ def test_runtime_list_set_preserves_stored_ok_value() -> None:
 def test_runtime_list_set_preserves_stored_err_value() -> None:
     stored_err = Err("x")
     host_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<List<Result<Int,MapError>>,ListError> }\n"
         "  [host.err]\n"
@@ -1248,7 +1248,7 @@ def test_runtime_list_get_malformed_list_is_controlled_error() -> None:
 def test_runtime_list_get_preserves_stored_ok_value() -> None:
     stored_ok = Ok(123)
     host_signature = signature_from_source(": hostok { -- r:Result<Int,MapError> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.ok", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.ok", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Result<Int,MapError>,ListError> }\n"
         "  [host.ok]\n"
@@ -1267,7 +1267,7 @@ def test_runtime_list_get_preserves_stored_ok_value() -> None:
 def test_runtime_list_get_preserves_stored_err_value() -> None:
     stored_err = Err("x")
     host_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Result<Int,MapError>,ListError> }\n"
         "  [host.err]\n"
@@ -1286,7 +1286,7 @@ def test_runtime_list_get_preserves_stored_err_value() -> None:
 def test_runtime_list_get_preserves_stored_tuple_identity() -> None:
     stored_tuple = (1, 2)
     host_signature = signature_from_source(": hosttuple { -- xs:List<Int> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.tuple", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.tuple", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<List<Int>,ListError> }\n"
         "  [host.tuple]\n"
@@ -1314,7 +1314,7 @@ def test_runtime_map_empty_returns_empty_dict() -> None:
 
 def test_runtime_map_get_int_key_returns_ok() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<String,MapError> }\n"
         "  host.map\n"
@@ -1330,7 +1330,7 @@ def test_runtime_map_get_int_key_returns_ok() -> None:
 
 def test_runtime_map_get_string_key_returns_ok() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<String,Int> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Int,MapError> }\n"
         "  host.map\n"
@@ -1346,7 +1346,7 @@ def test_runtime_map_get_string_key_returns_ok() -> None:
 
 def test_runtime_map_get_bool_key_returns_ok() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<Bool,Int> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Int,MapError> }\n"
         "  host.map\n"
@@ -1375,7 +1375,7 @@ def test_runtime_map_get_missing_key_returns_missing_key() -> None:
 def test_runtime_map_get_nested_tuple_is_preserved() -> None:
     stored_tuple = (1, 2)
     host_signature = signature_from_source(": hostmap { -- m:Map<String,List<Int>> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<List<Int>,MapError> }\n"
         "  host.map\n"
@@ -1394,14 +1394,14 @@ def test_runtime_map_get_nested_tuple_is_preserved() -> None:
 def test_runtime_map_get_runtime_quote_is_preserved() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<String,Quote<{ | -- n:Int }>> } ;")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+        host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
 
 
 def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
     stored_ok = Ok(123)
     stored_err = Err("x")
     host_signature = signature_from_source(": hostmap { -- m:Map<String,Result<Int,MapError>> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Result<Int,MapError>,MapError> }\n"
         "  host.map\n"
@@ -1443,7 +1443,7 @@ def test_runtime_map_get_unsupported_list_key_raises_runtime_error() -> None:
 
 def test_runtime_map_get_unsupported_result_key_raises_runtime_error() -> None:
     host_signature = signature_from_source(": hostkey { -- k:Result<Int,MapError> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.key", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.key", signature=host_signature, effect=HostEffect.PURE)])
     with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
         analyze_program(
             "export : app.run { -- r:Result<Int,MapError> }\n"
@@ -1457,7 +1457,7 @@ def test_runtime_map_get_unsupported_result_key_raises_runtime_error() -> None:
 
 def test_runtime_map_contains_existing_key_returns_true() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<String,Int> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- b:Bool }\n"
         "  host.map\n"
@@ -1485,7 +1485,7 @@ def test_runtime_map_contains_missing_key_returns_false() -> None:
 
 def test_runtime_map_contains_bool_key_returns_true() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<Bool,Int> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- b:Bool }\n"
         "  host.map\n"
@@ -1559,7 +1559,7 @@ def test_runtime_map_set_inserts_new_int_key() -> None:
 
 def test_runtime_map_set_updates_existing_int_key() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- m:Map<Int,String> }\n"
         "  host.map\n"
@@ -1602,7 +1602,7 @@ def test_runtime_map_set_bool_key() -> None:
 def test_runtime_map_set_returns_new_dict_and_preserves_original() -> None:
     host_map = {1: "one"}
     host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- m:Map<Int,String> }\n"
         "  host.map\n"
@@ -1639,7 +1639,7 @@ def test_runtime_map_set_preserves_nested_tuple_value() -> None:
 def test_runtime_map_set_preserves_runtime_quote_value() -> None:
     host_signature = signature_from_source(": hostquote { -- q:Quote<{ | -- n:Int }> } ;")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        host_contract_from_words([HostWord(name="host.quote", signature=host_signature)])
+        host_contract_from_words([HostWord(name="host.quote", signature=host_signature, effect=HostEffect.PURE)])
 
 
 def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
@@ -1649,8 +1649,8 @@ def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
     err_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
     host_contract = host_contract_from_words(
         [
-            HostWord(name="host.ok", signature=ok_signature),
-            HostWord(name="host.err", signature=err_signature),
+            HostWord(name="host.ok", signature=ok_signature, effect=HostEffect.PURE),
+            HostWord(name="host.err", signature=err_signature, effect=HostEffect.PURE),
         ]
     )
 
@@ -1726,7 +1726,7 @@ def test_runtime_map_set_unsupported_key_type_raises_runtime_error() -> None:
 
 def test_runtime_map_remove_existing_key_returns_ok_new_dict() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Map<Int,String>,MapError> }\n"
         "  host.map\n"
@@ -1754,7 +1754,7 @@ def test_runtime_map_remove_missing_key_returns_missing_key() -> None:
 def test_runtime_map_remove_returns_new_dict_and_preserves_original() -> None:
     host_map = {1: "one", 2: "two"}
     host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Map<Int,String>,MapError> }\n"
         "  host.map\n"
@@ -1773,7 +1773,7 @@ def test_runtime_map_remove_returns_new_dict_and_preserves_original() -> None:
 
 def test_runtime_map_remove_string_key() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<String,Int> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Map<String,Int>,MapError> }\n"
         "  host.map\n"
@@ -1788,7 +1788,7 @@ def test_runtime_map_remove_string_key() -> None:
 
 def test_runtime_map_remove_bool_key() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<Bool,Int> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Map<Bool,Int>,MapError> }\n"
         "  host.map\n"
@@ -1804,7 +1804,7 @@ def test_runtime_map_remove_bool_key() -> None:
 def test_runtime_map_remove_preserves_remaining_nested_values() -> None:
     stored_tuple = (1, 2)
     host_signature = signature_from_source(": hostmap { -- m:Map<String,List<Int>> } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
         "export : app.run { -- r:Result<Map<String,List<Int>>,MapError> }\n"
         "  host.map\n"
@@ -1827,7 +1827,7 @@ def test_runtime_map_remove_preserves_remaining_nested_values() -> None:
 def test_runtime_map_remove_preserves_remaining_quote_values() -> None:
     host_signature = signature_from_source(": hostmap { -- m:Map<String,Quote<{ | -- n:Int }>> } ;")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        host_contract_from_words([HostWord(name="host.map", signature=host_signature)])
+        host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
 
 
 def test_runtime_map_remove_malformed_runtime_map_is_controlled_error() -> None:
@@ -1898,7 +1898,7 @@ def test_runtime_if_false_executes_else_branch() -> None:
         "  end\n"
         ";",
         host_contract=host_contract_from_words(
-            [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"))]
+            [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"), effect=HostEffect.PURE)]
         ),
     )
 
@@ -1910,7 +1910,7 @@ def test_runtime_if_false_executes_else_branch() -> None:
 
 def test_runtime_if_can_call_nicole_word() -> None:
     host_contract = host_contract_from_words(
-        [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"))]
+        [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"), effect=HostEffect.PURE)]
     )
     checked = analyze_program(
         ": log-yes { -- }\n"
