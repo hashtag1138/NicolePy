@@ -102,6 +102,22 @@ None.
 
 medium
 
+### Implementation notes
+
+Implemented:
+
+- `TokenKind.DIRTY`
+- exact keyword recognition
+- parser support:
+  - `dirty :`
+  - `pub dirty :`
+  - `export dirty :`
+- invalid modifier ordering rejection
+- exact reserved identifier handling
+- explicit reserved diagnostics
+- `WordDefNode.is_dirty_annotation` metadata
+- parser/lexer/AST tests
+
 ## Phase 2 — Host ABI effect metadata
 
 ### Goal
@@ -363,6 +379,8 @@ medium
 M1
 syntax represented
 
+Status: completed
+
 M2
 effect metadata propagated
 
@@ -380,8 +398,8 @@ full conformance suite passing
 
 ## Phase status tracking
 
-- [ ] Phase 1
-Status: not started
+- [x] Phase 1
+Status: implemented
 
 - [ ] Phase 2
 Status: not started

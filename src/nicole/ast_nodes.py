@@ -93,6 +93,7 @@ class WordDefNode(ASTNode):
     signature: SignatureNode
     body: BlockNode
     visibility: Visibility = Visibility.PRIVATE
+    is_dirty_annotation: bool = False
     nested_words: tuple[WordDefNode, ...] = field(default_factory=tuple)
 
 

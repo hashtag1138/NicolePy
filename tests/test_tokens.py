@@ -24,6 +24,7 @@ def test_token_creation():
 def test_required_token_kinds_exist():
     assert TokenKind.QUOTE_START.name == "QUOTE_START"
     assert TokenKind.END.name == "END"
+    assert TokenKind.DIRTY.name == "DIRTY"
     assert TokenKind.STACK_ARROW.name == "STACK_ARROW"
     assert TokenKind.CASE_ARROW.name == "CASE_ARROW"
     assert TokenKind.EOF.name == "EOF"

@@ -27,6 +27,7 @@ class TokenKind(Enum):
 
     PUB = auto()
     EXPORT = auto()
+    DIRTY = auto()
     IF = auto()
     ELSE = auto()
     END = auto()

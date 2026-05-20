@@ -74,6 +74,21 @@ def test_word_def_node_minimal():
     )
     assert node.name == "add"
     assert node.visibility is Visibility.PRIVATE
+    assert node.is_dirty_annotation is False
+
+
+def test_word_def_node_can_store_dirty_annotation_metadata():
+    node = WordDefNode(
+        name="add",
+        visibility=Visibility.PRIVATE,
+        signature=SignatureNode(span=make_span(), inputs=(), outputs=()),
+        body=BlockNode(span=make_span(), items=()),
+        is_dirty_annotation=True,
+        nested_words=(),
+        span=make_span(),
+    )
+
+    assert node.is_dirty_annotation is True
 
 
 def test_if_node_has_no_condition_field():

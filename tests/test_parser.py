@@ -223,6 +223,43 @@ def test_parser_pub_and_export():
     assert program.words[1].visibility is Visibility.EXPORT
 
 
+def test_parser_accepts_dirty_word_definition():
+    program = parse_source("dirty : foo { -- } ;")
+
+    assert program.words[0].name == "foo"
+    assert program.words[0].visibility is Visibility.PRIVATE
+    assert program.words[0].is_dirty_annotation is True
+
+
+def test_parser_accepts_pub_dirty_word_definition():
+    program = parse_source("pub dirty : foo { -- } ;")
+
+    assert program.words[0].name == "foo"
+    assert program.words[0].visibility is Visibility.PUB
+    assert program.words[0].is_dirty_annotation is True
+
+
+def test_parser_accepts_export_dirty_word_definition():
+    program = parse_source("export dirty : foo { -- } ;")
+
+    assert program.words[0].name == "foo"
+    assert program.words[0].visibility is Visibility.EXPORT
+    assert program.words[0].is_dirty_annotation is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "dirty pub : foo { -- } ;",
+        "dirty export : foo { -- } ;",
+        ": dirty foo { -- } ;",
+    ],
+)
+def test_parser_rejects_invalid_dirty_modifier_ordering(source):
+    with pytest.raises(ParseError):
+        parse_source(source)
+
+
 def test_parser_rejects_export_inside_subword():
     with pytest.raises(ParseError, match="export is only allowed for top-level words"):
         parse_source(
@@ -429,6 +466,11 @@ def test_parser_rejects_reserved_top_level_word_names(name):
         parse_source(f": {name} {{ -- }} ;")
 
 
+def test_parser_rejects_reserved_top_level_word_name_dirty():
+    with pytest.raises(ParseError, match=r"dirty.*reserved|reserved.*dirty"):
+        parse_source(": dirty { -- } ;")
+
+
 @pytest.mark.parametrize(
     "name",
     [
@@ -447,6 +489,49 @@ def test_parser_rejects_reserved_subword_names(name):
             f"  : {name} {{ -- }} ;\n"
             ";"
         )
+
+
+def test_parser_rejects_reserved_subword_name_dirty():
+    with pytest.raises(ParseError, match=r"dirty.*reserved|reserved.*dirty"):
+        parse_source(
+            ": outer { -- }\n"
+            "  : dirty { -- } ;\n"
+            ";"
+        )
+
+
+def test_parser_rejects_reserved_local_name_dirty_in_signature_input():
+    with pytest.raises(ParseError, match=r"dirty.*reserved|reserved.*dirty"):
+        parse_source(": foo { dirty:Int -- x:Int } dirty ;")
+
+
+def test_parser_rejects_reserved_capture_name_dirty():
+    with pytest.raises(ParseError, match=r"dirty.*reserved|reserved.*dirty"):
+        parse_source(": foo { -- } :[ dirty:Int | x:Int -- y:Int | x ;] ;")
+
+
+def test_parser_rejects_reserved_output_label_dirty():
+    with pytest.raises(ParseError, match=r"dirty.*reserved|reserved.*dirty"):
+        parse_source(": foo { -- dirty:Int } 1 ;")
+
+
+def test_parser_accepts_dirty_prefixed_non_reserved_names():
+    program = parse_source(": dirty-int { mydirtyvalue:Int -- out:Int } mydirtyvalue ;")
+
+    assert program.words[0].name == "dirty-int"
+    assert program.words[0].signature.inputs[0].name == "mydirtyvalue"
+
+
+def test_parser_accepts_additional_non_exact_dirty_identifiers():
+    program = parse_source(
+        ": dirty_log { -- } ;\n"
+        ": is-dirty { -- } ;\n"
+        ": dirty.value { -- } ;"
+    )
+
+    assert program.words[0].name == "dirty_log"
+    assert program.words[1].name == "is-dirty"
+    assert program.words[2].name == "dirty.value"
 
 
 def test_parser_accepts_host_word_usage():

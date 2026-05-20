@@ -349,6 +349,7 @@ def _keyword_kind(lexeme: str) -> TokenKind | None:
     keywords = {
         "pub": TokenKind.PUB,
         "export": TokenKind.EXPORT,
+        "dirty": TokenKind.DIRTY,
         "if": TokenKind.IF,
         "else": TokenKind.ELSE,
         "end": TokenKind.END,

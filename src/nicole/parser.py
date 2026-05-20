@@ -52,6 +52,7 @@ _PRIMITIVE_OPERATOR_NAMES = {
 _ERR_VARIANT_PATTERN_NAMES = {"MissingKey", "OutOfBounds"}
 _RESERVED_WORD_NAMES = {
     "call",
+    "dirty",
     "MissingKey",
     "OutOfBounds",
 }
@@ -95,19 +96,27 @@ class Parser:
     def _parse_word_def(self, *, is_top_level: bool) -> WordDefNode:
         start = self._current().span
         visibility = Visibility.PRIVATE
+        is_dirty_annotation = False
 
         if self._match(TokenKind.PUB):
             visibility = Visibility.PUB
+            if self._match(TokenKind.DIRTY):
+                is_dirty_annotation = True
             self._expect(TokenKind.COLON, "expected ':' after pub")
         elif self._match(TokenKind.EXPORT):
             if not is_top_level:
                 self._raise_error("export is only allowed for top-level words")
             visibility = Visibility.EXPORT
+            if self._match(TokenKind.DIRTY):
+                is_dirty_annotation = True
             self._expect(TokenKind.COLON, "expected ':' after export")
+        elif self._match(TokenKind.DIRTY):
+            is_dirty_annotation = True
+            self._expect(TokenKind.COLON, "expected ':' after dirty")
         else:
             self._expect(TokenKind.COLON, "expected ':'")
 
-        name_token = self._expect(TokenKind.IDENTIFIER, "expected word name")
+        name_token = self._expect_definition_identifier("expected word name")
         self._validate_user_word_name(name_token)
         signature = self._parse_signature()
         nested_words: list[WordDefNode] = []
@@ -123,6 +132,7 @@ class Parser:
             signature=signature,
             body=body,
             visibility=visibility,
+            is_dirty_annotation=is_dirty_annotation,
             nested_words=tuple(nested_words),
         )
 
@@ -146,10 +156,20 @@ class Parser:
         return params
 
     def _parse_parameter(self) -> ParameterNode:
-        name_token = self._expect(TokenKind.IDENTIFIER, "expected parameter name")
+        name_token = self._expect_definition_identifier("expected parameter name")
         self._expect(TokenKind.COLON, "expected ':' in parameter")
         type_node = self._parse_type()
         return ParameterNode(span=name_token.span, name=name_token.lexeme, type_node=type_node)
+
+    def _expect_definition_identifier(self, message: str) -> Token:
+        token = self._current()
+        if token.kind is TokenKind.DIRTY:
+            raise ParseError(
+                message="cannot define reserved identifier: dirty",
+                line=token.span.line,
+                column=token.span.column,
+            )
+        return self._expect(TokenKind.IDENTIFIER, message)
 
     def _parse_type(self) -> TypeNode | QuoteTypeNode:
         name_token = self._expect(TokenKind.IDENTIFIER, "malformed type")
@@ -525,7 +545,7 @@ class Parser:
 
     def _is_word_def_start(self) -> bool:
         token = self._current()
-        if token.kind in {TokenKind.PUB, TokenKind.EXPORT}:
+        if token.kind in {TokenKind.PUB, TokenKind.EXPORT, TokenKind.DIRTY}:
             return True
         return token.kind is TokenKind.COLON
 

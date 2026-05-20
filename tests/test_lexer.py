@@ -49,6 +49,13 @@ def test_case_arrow_recognized():
     assert kinds[-1] is TokenKind.EOF
 
 
+def test_dirty_keyword_recognized():
+    tokens = lex("dirty : foo { -- } ;")
+
+    assert tokens[0].kind is TokenKind.DIRTY
+    assert tokens[0].lexeme == "dirty"
+
+
 def test_result_constructors_and_propagation_recognized():
     tokens = lex("1 Ok! MissingKey Err! ?")
 
@@ -95,6 +102,26 @@ def test_hyphenated_identifier_is_single_identifier():
         TokenKind.EOF,
     ]
     assert [token.lexeme for token in tokens[:-1]] == ["a-b"]
+
+
+def test_dirty_hyphenated_identifier_is_still_identifier():
+    tokens = lex("dirty-int")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.IDENTIFIER,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["dirty-int"]
+
+
+def test_dirty_prefixed_identifier_is_still_identifier():
+    tokens = lex("mydirtyvalue")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.IDENTIFIER,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["mydirtyvalue"]
 
 
 def test_a_b_minus_remains_expression_style():
