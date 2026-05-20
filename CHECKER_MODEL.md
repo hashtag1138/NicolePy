@@ -33,6 +33,7 @@ The checker verifies:
 - quotation compatibility with `call`
 - standard builtin signature application
 - host call stack-discipline consistency when a real `HostContract` is present
+- effect consistency for `dirty` annotations
 
 The checker does not perform:
 
@@ -116,6 +117,17 @@ The checker groups two related but distinct responsibilities.
 - verifies that `if` and `case` have compatible stack effects
 - rejects missing or extra values
 
+3. Effect checking
+
+- collect signatures for call-target effect analysis
+- build the call graph
+- infer effects over SCCs/fixed-point groups
+- validate `dirty` annotations exactly
+- reject pure -> dirty calls
+- reject redundant dirty annotations
+- validate `Quote` vs `DirtyQuote` usage
+- validate higher-order builtin effect gating
+
 ## 4. Identifier Validation
 
 The resolver has already transformed source names into unique symbol identities.
@@ -198,6 +210,11 @@ The checker must verify:
 - the quotation body matches the declared quotation signature
 - `call` is used with a compatible quotation type
 - local names inside one quotation frame must be unique across captures and inputs
+- `Quote<{ ... }>` is treated as pure and `DirtyQuote<{ ... }>` as dirty
+- pure frames cannot construct `DirtyQuote`
+- pure frames cannot call `DirtyQuote`
+- pure frames cannot pass `DirtyQuote` to `list.map`, `list.filter`, `list.fold`, or `list.reduce`
+- dirty frames may construct, call, and pass `DirtyQuote`
 
 Example:
 
@@ -222,7 +239,6 @@ Standard callable builtins include:
 - `list.filter`
 - `list.fold`
 - `list.reduce`
-- `map.empty`
 - `map.get`
 - `map.contains`
 - `map.set`
@@ -238,11 +254,19 @@ Deferred, not active v1:
 - `list.pop`
 - `list.contains`
 
+Typed empty construction note:
+
+- `map.empty:Map<K,V>` is a typed empty construction form
+- bare `map.empty` is invalid in v1 and is not an ordinary naked callable builtin
+
 For higher-order list builtins:
 
 - `list.map`, `list.filter`, `list.fold`, and `list.reduce` consume an already constructed quotation value
 - compatibility is checked on the callable part `inputs -- outputs`
+- accepted quotation kinds are `Quote<{ ... }>` and `DirtyQuote<{ ... }>`
 - these builtins do not require the quotation to have `captures == []`
+- builtins are structurally pure; call-site effect depends on quotation argument effect
+- no dirty-specific builtin family exists (`dirty-map`, `dirty-filter`, `dirty-fold`, `dirty-reduce`)
 
 Current `Result` rules tracked from the public specification:
 
@@ -252,6 +276,7 @@ Current `Result` rules tracked from the public specification:
 - `?` is active v1 syntax
 - `?` is only valid in a frame whose complete output is exactly one `Result<T,E>`
 - `result.is-ok`, `result.is-err`, and `result.unwrap-or` are active v1 builtins
+- `Result`, `Err`, and `?` are orthogonal to dirty effects
 
 Current numeric rules tracked from the public specification:
 
@@ -270,6 +295,14 @@ Important current v1 rules:
 - `map.empty:Map<K,V>` is valid
 - map keys are restricted in v1 to `Int`, `String`, and `Bool`
 - `map.remove` returns `Result<Map<K,V>,MapError>`
+- Nicole is pure by default
+- there is no `pure` keyword
+- inferred pure + annotated dirty => error
+- inferred dirty + missing dirty => error
+- inferred dirty + annotated dirty => valid
+- inferred pure + no annotation => valid
+- only `host.*` bindings introduce impurity directly
+- effect checking is static only; there are no runtime dirty violations
 
 The checker must therefore distinguish ordinary callable builtins from typed empty constructions.
 
@@ -299,7 +332,7 @@ Current repository status:
 - `ExportContract` collection happens after successful checking; export ABI collection is not itself a checker responsibility
 - this remains a minimal static ABI only, not a runtime integration model
 - ABI-compatible value families are `Int`, `Float`, `String`, `Bool`, `Unit`, `List<T>`, `Map<K,V>`, `Result<T,E>`, `ListError`, and `MapError`
-- `Quote<{ ... }>` is not ABI-compatible in v1
+- `Quote<{ ... }>` and `DirtyQuote<{ ... }>` are not ABI-compatible in v1
 
 It does not validate:
 

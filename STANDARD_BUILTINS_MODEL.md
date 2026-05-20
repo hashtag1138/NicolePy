@@ -26,7 +26,6 @@ Examples include:
 - `list.fold`
 - `list.reduce`
 - `list.concat`
-- `map.empty`
 - `map.get`
 - `map.set`
 - `map.contains`
@@ -148,15 +147,17 @@ Later checking stages handle compatibility and substitution.
 For higher-order builtins:
 
 ```text
-list.map    { xs:List<T> q:Quote<{ | x:T -- y:U }> -- ys:List<U> }
-list.filter { xs:List<T> q:Quote<{ | x:T -- keep:Bool }> -- ys:List<T> }
-list.fold   { xs:List<T> init:Acc q:Quote<{ | acc:Acc x:T -- out:Acc }> -- out:Acc }
-list.reduce { xs:List<T> q:Quote<{ | a:T b:T -- c:T }> -- out:T }
+list.map    { xs:List<T> q:(Quote<{ | x:T -- y:U }> | DirtyQuote<{ | x:T -- y:U }>) -- ys:List<U> }
+list.filter { xs:List<T> q:(Quote<{ | x:T -- keep:Bool }> | DirtyQuote<{ | x:T -- keep:Bool }>) -- ys:List<T> }
+list.fold   { xs:List<T> init:Acc q:(Quote<{ | acc:Acc x:T -- out:Acc }> | DirtyQuote<{ | acc:Acc x:T -- out:Acc }>) -- out:Acc }
+list.reduce { xs:List<T> q:(Quote<{ | a:T b:T -- c:T }> | DirtyQuote<{ | a:T b:T -- c:T }>) -- out:T }
 ```
 
 The empty capture zone in these signatures means the builtin itself does not provide extra captures at call time.
 It does not mean the quotation value must have been constructed without captures.
 An already constructed quotation with captures remains valid if its callable part matches.
+The builtins themselves are structurally pure; call-site effect depends on whether the quotation argument is `Quote` or `DirtyQuote`.
+No distinct dirty builtin names exist (`dirty-map`, `dirty-filter`, `dirty-fold`, `dirty-reduce`).
 
 Current result/error conventions tracked from the public specification:
 

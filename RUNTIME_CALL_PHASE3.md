@@ -51,7 +51,8 @@ This phase specifies only:
 
 ## Runtime quotation representation
 
-A runtime quotation is an opaque runtime value derived from an already checked `QuoteNode`.
+A runtime quotation is an opaque runtime value derived from an already checked quotation node.
+Its static type is either `Quote<{ captures | inputs -- outputs }>` or `DirtyQuote<{ captures | inputs -- outputs }>`.
 
 The runtime quotation may include:
 
@@ -103,6 +104,12 @@ Only minimal runtime shape checks already consistent with the current runtime bo
 8. Not invoke checker logic.
 9. Not parse source.
 10. Not build IR, VM instructions, or bytecode.
+
+Effect model:
+
+- `call` on `Quote<{ ... }>` is pure
+- `call` on `DirtyQuote<{ ... }>` is dirty
+- `call` is not always pure and not always dirty
 
 ## Stack behavior
 

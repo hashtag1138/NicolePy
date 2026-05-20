@@ -80,6 +80,7 @@ Represents the syntactic visibility of a word:
 - private
 - `pub`
 - `export`
+- optional `dirty` effect modifier following visibility (or directly before `:` when no visibility modifier exists)
 
 ### SignatureNode
 
@@ -96,7 +97,7 @@ Represents a syntactic type form.
 
 ### QuoteTypeNode
 
-Represents `Quote<{ captures | inputs -- outputs }>` in a type position.
+Represents `Quote<{ captures | inputs -- outputs }>` or `DirtyQuote<{ captures | inputs -- outputs }>` in a type position.
 It preserves captures, inputs, outputs, and ordering.
 The presence of captures in the type is semantically significant and must not be erased when checking higher-order builtins.
 

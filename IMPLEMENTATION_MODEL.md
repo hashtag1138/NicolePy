@@ -20,7 +20,8 @@ Implementation follows specification, never the inverse.
 
 Normative reference currently tracked:
 
-- `2dfe20f59baac94aa331b439087d07e8db4430f3`
+- tag: `v0.14.0-purity-effects`
+- commit: `b8ab130aba6fffad1803f4f948306e47e55d995b`
 
 ## Initial Pipeline
 
@@ -146,7 +147,7 @@ Status note:
 - `export` must still not be documented as a complete runtime ABI registry
 - `host_abi.py` should not be treated as the final runtime architecture
 - ABI-compatible value families in v1 are `Int`, `Float`, `String`, `Bool`, `Unit`, `List<T>`, `Map<K,V>`, `Result<T,E>`, `ListError`, and `MapError`
-- `Quote<{ ... }>` is forbidden across the ABI in v1
+- `Quote<{ ... }>` and `DirtyQuote<{ ... }>` are forbidden across the ABI in v1
 
 Track host contracts with explicit registries:
 

@@ -6,6 +6,7 @@ NicolePy now supports runtime quotations and `call` as a minimal direct-AST runt
 
 A quotation is a checked value that packages a block of Nicole code together with its declared captures, inputs, and outputs.
 It is a runtime value, not a special parser-only construct.
+Quotation types are `Quote<{ captures | inputs -- outputs }>` and `DirtyQuote<{ captures | inputs -- outputs }>` from static checking.
 
 Quotations are written with the existing Nicole syntax:
 
@@ -36,6 +37,11 @@ When a quotation literal is encountered at runtime, NicolePy pushes a quotation 
 The quotation body is not executed immediately.
 
 `call` explicitly executes the quotation value later.
+
+Effect note:
+
+- `call` on `Quote` is pure
+- `call` on `DirtyQuote` is dirty
 
 ## Basic syntax
 
@@ -140,6 +146,8 @@ export : app.run { -- q:Quote<{ | -- n:Int }> }
   call
 ;
 ```
+
+`Quote` and `DirtyQuote` are both non-ABI values; neither crosses the host boundary in v1.
 
 The result is a quotation value.
 It is only executed if `call` is used again.

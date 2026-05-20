@@ -168,6 +168,7 @@ Examples:
 - `Map<String, Int>`
 - `Result<V, E>`
 - `Quote<{ captures | inputs -- outputs }>`
+- `DirtyQuote<{ captures | inputs -- outputs }>`
 
 The lexer does not understand these as types.
 It only tokenizes their pieces.

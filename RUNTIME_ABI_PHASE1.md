@@ -7,6 +7,14 @@ It is a chantier spec, not an implementation plan for a VM or a general interpre
 
 Provide the smallest executable bridge between Nicole exports and Python host bindings.
 
+Language-level effect rules still apply:
+
+- `export` implies `pub`
+- `export` does not create dirty effect
+- `export` preserves inferred effect
+- a pure export cannot call dirty code
+- a dirty export is valid only when its body is inferred dirty
+
 The Nicole export syntax for Phase 1 is:
 
 ```nicole
@@ -82,6 +90,10 @@ The static type model remains the one from the compiler frontend:
 - `QuoteTypeNode`
 - `SignatureNode`
 
+ABI value boundary reminder:
+
+- `Quote<{ ... }>` and `DirtyQuote<{ ... }>` are not ABI-compatible v1 values and must not cross the host boundary.
+
 Within NicolePy runtime execution, `SignatureNode` is the single executable source of truth for ABI derivation.
 The normative language source remains the external Nicole specification.
 
@@ -126,6 +138,38 @@ Phase 1 does not include:
 - no second `Signature`
 - no runtime fallback for optional host words
 - no runtime guessing about missing ABI information
+
+Host contract metadata requirements for v1:
+
+- `signature` is mandatory
+- `availability` is mandatory
+- `effect` is mandatory and must be `pure` or `dirty`
+- there is no implicit default effect
+- `effect` is independent from `required`/`optional`
+- direct calls to optional host words remain invalid in v1
+- `dirty host.foo { ... }` is not Nicole source syntax
+
+Reference shape:
+
+```text
+host.log
+signature:
+{ msg:String -- }
+availability:
+required
+effect:
+dirty
+```
+
+```text
+host.timezone
+signature:
+{ -- tz:String }
+availability:
+required
+effect:
+pure
+```
 
 ## Required tests
 

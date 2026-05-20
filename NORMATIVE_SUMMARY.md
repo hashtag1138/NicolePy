@@ -22,7 +22,8 @@ If there is any conflict, the specification wins.
 
 Revision of reference:
 
-- `2dfe20f59baac94aa331b439087d07e8db4430f3`
+- tag: `v0.14.0-purity-effects`
+- commit: `b8ab130aba6fffad1803f4f948306e47e55d995b`
 
 ## 1. Core Principles
 
@@ -40,6 +41,21 @@ Revision of reference:
 - Input names create immutable local variables.
 - Output names are documentary only and do not create variables.
 
+Modifier forms in v0.14:
+
+- `: foo { -- } ;`
+- `dirty : foo { -- } ;`
+- `pub : foo { -- } ;`
+- `pub dirty : foo { -- } ;`
+- `export : foo { -- } ;`
+- `export dirty : foo { -- } ;`
+
+Invalid modifier order:
+
+- `dirty pub : foo`
+- `dirty export : foo`
+- `: dirty foo`
+
 Canonical example:
 
 ```sorte
@@ -54,6 +70,9 @@ Canonical example:
 - `pub` makes a word visible inside the program.
 - `export` makes a word visible to the host and implies `pub`.
 - `host.*` names words provided by the host.
+- `export` preserves inferred effect and does not create dirty effect.
+- a pure export cannot call dirty code.
+- a dirty export is valid only when its body is inferred dirty.
 
 Current v1 structure:
 
@@ -74,6 +93,8 @@ Normative constraints:
 - a required `host.*` word absent from the known host contract is a static integration error
 - a required `host.*` binding failure is a runtime integration error
 - optional host bindings do not justify direct source-level calls in v1
+- host effect metadata is mandatory: `effect: pure` or `effect: dirty`
+- there is no implicit host effect default
 
 Invalid forms include:
 
@@ -135,6 +156,7 @@ For Nicole-defined words, provable return violations must be rejected at compile
 - They exist only inside the current word.
 - They are not visible inside subwords.
 - Local names must be unique inside one frame.
+- exact `dirty` is reserved and invalid as a local name.
 
 Frame rules:
 
@@ -160,6 +182,46 @@ Important consequence:
 - There is no implicit lexical capture between parent and subword.
 - In one parent scope, a subword name must be unique.
 - A subword may reuse a local name that exists in the parent word because it executes in a different frame.
+- subwords may be declared dirty.
+- calling a dirty subword propagates dirty to the parent.
+- an unused dirty subword does not propagate dirty to the parent.
+
+## 6A. Reserved identifiers and namespaces
+
+- exact `dirty` is reserved and invalid as:
+- word name
+- subword name
+- local name
+- capture name
+- output label
+
+Invalid examples:
+
+```nicole
+: dirty { -- }
+  0 drop
+;
+
+: foo { dirty:Int -- x:Int }
+  dirty
+;
+
+:[ dirty:Int | x:Int -- y:Int | x ;]
+```
+
+Allowed examples:
+
+- `dirty-int`
+- `dirty_log`
+- `is-dirty`
+- `dirty.value`
+
+Reserved namespaces remain:
+
+- `result.*`
+- `list.*`
+- `map.*`
+- `host.*`
 
 ## 7. Static Resolution
 
@@ -223,6 +285,7 @@ Types explicitly listed in the public specification and examples:
 - `MapError`
 - `Result<V,E>`
 - `Quote<{ captures | inputs -- outputs }>`
+- `DirtyQuote<{ captures | inputs -- outputs }>`
 - `Unit`
 
 Important constraints:
@@ -311,9 +374,9 @@ v1 variants:
 - `map.set` returns a new map
 - `map.remove` returns `Result<Map<K,V>,MapError>`
 
-v1 operations:
+v1 map operations (with typed empty-map construction):
 
-- `map.empty`
+- `map.empty:Map<K,V>`
 - `map.get`
 - `map.contains`
 - `map.set`
@@ -369,8 +432,12 @@ Construction and helper rules:
 - `result.is-ok`, `result.is-err`, and `result.unwrap-or` are active v1 builtins
 - `?` is active v1 syntax
 - `?` is valid only when the frame declares exactly one output of type `Result<T,E>`
+- `Result`, `Err`, and `?` are orthogonal to dirty effects
+- `Err` does not imply impurity
+- `?` does not create dirty effect
+- a dirty host word returning `Result<T,E>` remains dirty
 
-## 12. Quotations and `call`
+## 14. Quotations and `call`
 
 Quotation form:
 
@@ -396,15 +463,49 @@ Example:
 :[ | x:Int -- y:Int | x 1 + ;]
 ```
 
+Quotation effect types:
+
+- `Quote<{ captures | inputs -- outputs }>` is pure
+- `DirtyQuote<{ captures | inputs -- outputs }>` is dirty
+
 `call` must respect the quotation type exactly.
+
+- `call` on `Quote` is pure
+- `call` on `DirtyQuote` is dirty
 
 Higher-order builtin consequence:
 
 - `list.map`, `list.filter`, `list.fold`, and `list.reduce` consume an already constructed quotation value
+- these builtins accept `Quote` or `DirtyQuote`
 - compatibility is checked on the callable part `inputs -- outputs`
 - the quotation value may already include captures; these builtins do not require `captures == []`
+- builtins are structurally pure; call-site effect depends on quotation argument effect
+- no dirty-specific builtin family exists (`dirty-map`, `dirty-filter`, `dirty-fold`, `dirty-reduce`)
+- a pure frame cannot pass `DirtyQuote` to these builtins
+- a dirty frame may pass `DirtyQuote`
 
-## 13. Host Boundary
+## 15. Purity and dirty effect system
+
+- Nicole is pure by default.
+- there is no `pure` keyword.
+- `dirty` is explicit and exact.
+
+Required annotation matching:
+
+- inferred pure + annotated dirty => error
+- inferred dirty + missing dirty => error
+- inferred dirty + annotated dirty => valid
+- inferred pure + no annotation => valid
+
+Propagation and inference:
+
+- only `host.*` bindings introduce impurity directly
+- dirty propagation is transitive through calls
+- recursive and mutually recursive call groups require SCC/fixed-point inference
+- effect checking is static only
+- there are no runtime dirty violations
+
+## 16. Host Boundary
 
 ### `export`
 
@@ -427,6 +528,32 @@ Higher-order builtin consequence:
 - cannot be defined by user code
 - explicit declared signature in the integration contract
 - same stack discipline as any other call from the program side
+- mandatory effect metadata in contract: `effect: pure` or `effect: dirty`
+- effect is independent from `required` or `optional` availability
+- directly called optional host words remain invalid in v1
+- `dirty host.foo { ... }` is not valid source syntax
+
+Example contract snippets:
+
+```text
+host.log
+signature:
+{ msg:String -- }
+availability:
+required
+effect:
+dirty
+```
+
+```text
+host.timezone
+signature:
+{ -- tz:String }
+availability:
+required
+effect:
+pure
+```
 
 ### ABI-compatible values
 
@@ -441,9 +568,9 @@ Higher-order builtin consequence:
 - `ListError`
 - `MapError`
 
-`Quote<{ ... }>` is not ABI-compatible in v1 and must not cross the host boundary.
+`Quote<{ ... }>` and `DirtyQuote<{ ... }>` are not ABI-compatible in v1 and must not cross the host boundary.
 
-## 14. Error Boundary
+## 17. Error Boundary
 
 Reject statically when provable:
 

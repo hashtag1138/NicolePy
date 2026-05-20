@@ -53,12 +53,12 @@ The parser must recognize the syntax of:
 
 - program structure
 - word definitions
-- `pub` and `export`
+- `dirty`, `pub`, and `export` modifiers in canonical order
 - signatures of the form `{ inputs -- outputs }`
 - parameters of the form `name:Type`
 - simple types
 - generic types
-- quotation types `Quote<{ captures | inputs -- outputs }>`
+- quotation types `Quote<{ captures | inputs -- outputs }>` and `DirtyQuote<{ captures | inputs -- outputs }>`
 - concatenative bodies
 - nested subwords
 - `if ... else ... end`
@@ -143,7 +143,7 @@ Represents a syntactic type form.
 
 ### QuoteTypeNode
 
-Represents the syntax of `Quote<{ captures | inputs -- outputs }>` inside a type position.
+Represents the syntax of `Quote<{ captures | inputs -- outputs }>` or `DirtyQuote<{ captures | inputs -- outputs }>` inside a type position.
 
 The parser preserves captures and inputs as distinct syntactic zones.
 The current parser also rejects duplicate local names inside the quotation frame represented by those zones.
@@ -258,6 +258,7 @@ It must recognize forms such as:
 - `Result<Int,MapError>`
 - `Quote<{ | x:Int -- y:Int }>`
 - `Quote<{ a:Int | x:Int -- y:Int }>`
+- `DirtyQuote<{ | x:Int -- y:Int }>`
 
 The parser uses `<`, `>`, `,`, `{`, `}`, `|`, and `--` as syntactic structure.
 It does not decide whether the resulting type is semantically valid.
