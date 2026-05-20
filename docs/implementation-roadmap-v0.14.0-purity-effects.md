@@ -302,6 +302,67 @@ Phase 1-3.
 
 high
 
+### Phase 5 design decisions
+
+- Unified Quote/DirtyQuote representation:
+  - keep one quotation AST shape (`QuoteNode`)
+  - represent quotation effect as an effect-kind dimension on quote types
+  - `Quote<{...}>` and `DirtyQuote<{...}>` share structure, differ by effect kind
+
+- Effect-kind model:
+  - `QuoteEffect.PURE`
+  - `QuoteEffect.DIRTY`
+  - `QuoteTypeNode` (or equivalent quote-type metadata) carries effect kind
+
+- Source of quotation effect:
+  - quotation literals are not annotated with a separate dirty literal syntax
+  - quotation effect comes from quotation-body effect inference
+  - inferred pure body => `Quote<{...}>`
+  - inferred dirty body => `DirtyQuote<{...}>`
+
+- Frame construction rules:
+  - pure frame can construct `Quote`
+  - pure frame cannot construct `DirtyQuote`
+  - dirty frame can construct both `Quote` and `DirtyQuote`
+
+- `call` behavior:
+  - `call(Quote)` remains pure
+  - `call(DirtyQuote)` is dirty
+  - pure caller cannot call `DirtyQuote`
+  - dirty caller may call both forms
+
+- Higher-order builtin gating:
+  - `list.map`, `list.filter`, `list.fold`, `list.reduce` accept Quote and DirtyQuote-compatible quotation shapes
+  - pure frame cannot pass `DirtyQuote` to those builtins
+  - dirty frame may pass both
+  - no `dirty-map`, `dirty-filter`, `dirty-fold`, `dirty-reduce`
+
+- Runtime policy:
+  - runtime remains effect-agnostic
+  - a unified runtime quotation representation remains preferred
+  - no runtime dirty checks
+
+- ABI restriction:
+  - `Quote<{...}>` and `DirtyQuote<{...}>` are both forbidden across ABI boundaries
+
+- Out of scope for Phase 5:
+  - runtime dirty validation
+  - new quotation literal syntax
+  - new HOF names
+  - new runtime effect model
+
+Additional frozen decisions:
+
+- QuoteEffect enum located in AST/type model
+- quotation bodies analyzed as mini-frames only
+- quotations excluded from call graph and SCC nodes
+- quotation classification feeds existing Phase 4 analysis
+- diagnostic precedence:
+  1. type shape
+  2. effect restrictions
+  3. annotation exactness
+  4. propagation consequences
+
 ### Implementation notes
 
 Implemented:
