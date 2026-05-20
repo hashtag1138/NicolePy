@@ -223,6 +223,16 @@ def test_parser_pub_and_export():
     assert program.words[1].visibility is Visibility.EXPORT
 
 
+def test_parser_rejects_export_inside_subword():
+    with pytest.raises(ParseError, match="export is only allowed for top-level words"):
+        parse_source(
+            ": outer { -- }\n"
+            "  export : inner { -- }\n"
+            "  ;\n"
+            ";"
+        )
+
+
 def test_parser_nested_subword():
     program = parse_source(
         ": invoice { price:Int qty:Int -- total:Int }\n"

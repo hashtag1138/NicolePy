@@ -77,11 +77,11 @@ class Parser:
         while not self._check(TokenKind.EOF):
             if not self._is_word_def_start():
                 self._raise_error("unexpected token")
-            words.append(self._parse_word_def())
+            words.append(self._parse_word_def(is_top_level=True))
 
         return ProgramNode(span=span, words=tuple(words))
 
-    def _parse_word_def(self) -> WordDefNode:
+    def _parse_word_def(self, *, is_top_level: bool) -> WordDefNode:
         start = self._current().span
         visibility = Visibility.PRIVATE
 
@@ -89,6 +89,8 @@ class Parser:
             visibility = Visibility.PUB
             self._expect(TokenKind.COLON, "expected ':' after pub")
         elif self._match(TokenKind.EXPORT):
+            if not is_top_level:
+                self._raise_error("export is only allowed for top-level words")
             visibility = Visibility.EXPORT
             self._expect(TokenKind.COLON, "expected ':' after export")
         else:
@@ -214,7 +216,7 @@ class Parser:
             if self._is_word_def_start():
                 if not allow_nested_defs:
                     self._raise_error("unexpected nested word definition")
-                nested_word = self._parse_word_def()
+                nested_word = self._parse_word_def(is_top_level=False)
                 if nested_words is not None:
                     nested_words.append(nested_word)
                 continue

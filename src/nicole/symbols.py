@@ -49,6 +49,14 @@ class SymbolTable:
                     line=symbol.span.line,
                     column=symbol.span.column,
                 )
+            # v1 has a single compilation unit visible-name space for words:
+            # top-level words and subwords may not share the same name.
+            if existing.owner is None or symbol.owner is None:
+                raise SymbolError(
+                    message=f"duplicate visible name: {symbol.name}",
+                    line=symbol.span.line,
+                    column=symbol.span.column,
+                )
         self.words.setdefault(symbol.name, []).append(symbol)
 
 

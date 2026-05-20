@@ -71,6 +71,26 @@ def test_resolve_rejects_duplicate_visible_names_before_resolution():
         )
 
 
+def test_resolve_rejects_top_level_and_subword_homonym():
+    with pytest.raises(SymbolError, match="duplicate visible name"):
+        resolve_source(
+            ": print { -- } ;\n"
+            ": outer { -- }\n"
+            "  : print { -- } ;\n"
+            ";"
+        )
+
+
+def test_resolve_rejects_subword_and_top_level_homonym():
+    with pytest.raises(SymbolError, match="duplicate visible name"):
+        resolve_source(
+            ": outer { -- }\n"
+            "  : helper { -- } ;\n"
+            ";\n"
+            ": helper { -- } ;"
+        )
+
+
 def test_resolve_nested_subword_visible_in_parent():
     program = resolve_source(
         ": invoice { -- }\n"

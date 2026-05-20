@@ -9,7 +9,7 @@ from nicole.checker import CheckerError
 from nicole.host_abi import BindingAvailability, HostWord, host_contract_from_words
 from nicole.pipeline import CheckedProgram, analyze_program
 from nicole.resolver import ResolutionError
-from nicole.parser import Parser
+from nicole.parser import ParseError, Parser
 from nicole.lexer import lex
 
 
@@ -37,6 +37,16 @@ def test_pipeline_collects_simple_export() -> None:
 
     assert "main" in result.export_contract.words
     assert result.export_contract.words["main"].signature is result.symbols.words["main"][0].signature
+
+
+def test_pipeline_rejects_export_inside_subword() -> None:
+    with pytest.raises(ParseError):
+        analyze_program(
+            ": outer { -- }\n"
+            "  export : inner { -- }\n"
+            "  ;\n"
+            ";"
+        )
 
 
 def test_pipeline_accepts_export_with_valid_host_contract() -> None:

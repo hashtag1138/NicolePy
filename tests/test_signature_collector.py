@@ -113,3 +113,40 @@ def test_collect_export_visibility_preserved():
 
     symbol = table.words["entry"][0]
     assert symbol.visibility is Visibility.EXPORT
+
+
+def test_collect_rejects_top_level_then_subword_same_name():
+    program = parse_source(
+        ": print { -- } ;\n"
+        ": outer { -- }\n"
+        "  : print { -- } ;\n"
+        ";"
+    )
+
+    with pytest.raises(SymbolError, match="duplicate visible name"):
+        collect_signatures(program)
+
+
+def test_collect_rejects_subword_then_top_level_same_name():
+    program = parse_source(
+        ": outer { -- }\n"
+        "  : helper { -- } ;\n"
+        ";\n"
+        ": helper { -- } ;"
+    )
+
+    with pytest.raises(SymbolError, match="duplicate visible name"):
+        collect_signatures(program)
+
+
+def test_collect_accepts_unique_private_subword_name():
+    program = parse_source(
+        ": helper { -- } ;\n"
+        ": outer { -- }\n"
+        "  : inner-helper { -- } ;\n"
+        ";"
+    )
+    table = collect_signatures(program)
+
+    assert "helper" in table.words
+    assert "inner-helper" in table.words
