@@ -1858,7 +1858,7 @@ def test_runtime_map_remove_unsupported_key_type_raises_runtime_error() -> None:
         )
 
 
-def test_runtime_unsupported_collection_builtin() -> None:
+def test_runtime_list_map_executes() -> None:
     checked = analyze_program(
         "export : app.run { -- ys:List<Int> }\n"
         "  [1, 2]\n"
@@ -1867,11 +1867,10 @@ def test_runtime_unsupported_collection_builtin() -> None:
         ";\n"
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (2, 3)
 
 
-def test_runtime_unsupported_collection_builtin_inside_quote_still_fails() -> None:
+def test_runtime_list_map_inside_quote_executes() -> None:
     checked = analyze_program(
         "export : app.run { -- ys:List<Int> }\n"
         "  :[ | -- ys:List<Int> |\n"
@@ -1883,8 +1882,135 @@ def test_runtime_unsupported_collection_builtin_inside_quote_still_fails() -> No
         ";\n"
     )
 
-    with pytest.raises(RuntimeError, match="runtime feature not supported"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (2, 3)
+
+
+def test_runtime_list_filter_executes() -> None:
+    checked = analyze_program(
+        "export : app.run { -- ys:List<Int> }\n"
+        "  [1, 2, 3, 4]\n"
+        "  :[ | x:Int -- keep:Bool | true ;]\n"
+        "  list.filter\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (1, 2, 3, 4)
+
+
+def test_runtime_list_fold_executes() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  [1, 2, 3]\n"
+        "  10\n"
+        "  :[ | acc:Int x:Int -- out:Int | acc x + ;]\n"
+        "  list.fold\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 16
+
+
+def test_runtime_list_reduce_executes() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  [2, 3, 4]\n"
+        "  :[ | a:Int b:Int -- c:Int | a b + ;]\n"
+        "  list.reduce\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 9
+
+
+def test_runtime_list_reduce_empty_from_host_is_runtime_error() -> None:
+    host_signature = signature_from_source(": hostlist { -- xs:List<Int> } ;")
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.list", signature=host_signature, effect=HostEffect.PURE)]
+    )
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  host.list\n"
+        "  :[ | a:Int b:Int -- c:Int | a b + ;]\n"
+        "  list.reduce\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    with pytest.raises(RuntimeError, match="list.reduce cannot be applied to empty list at runtime"):
+        run_export(checked, "app.run", RuntimeHostBindings({"host.list": lambda: ()}))
+
+
+def test_runtime_list_map_with_nested_quote_executes() -> None:
+    checked = analyze_program(
+        "export : app.run { -- ys:List<Int> }\n"
+        "  [1, 2]\n"
+        "  :[ | x:Int -- y:Int |\n"
+        "    x\n"
+        "    :[ | n:Int -- m:Int | n 10 + ;]\n"
+        "    call\n"
+        "  ;]\n"
+        "  list.map\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (11, 12)
+
+
+def test_runtime_result_is_ok_executes() -> None:
+    checked = analyze_program(
+        "export : app.run { -- b:Bool }\n"
+        "  7 Ok!\n"
+        "  result.is-ok\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) is True
+
+
+def test_runtime_result_is_err_executes() -> None:
+    checked = analyze_program(
+        "export : app.run { -- b:Bool }\n"
+        '  "x" Err!\n'
+        "  result.is-err\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) is True
+
+
+def test_runtime_result_unwrap_or_executes() -> None:
+    checked = analyze_program(
+        "export : app.ok { -- n:Int }\n"
+        "  [7]\n"
+        "  0\n"
+        "  list.get\n"
+        "  9\n"
+        "  result.unwrap-or\n"
+        ";\n"
+        "export : app.err { -- n:Int }\n"
+        "  []:List<Int>\n"
+        "  0\n"
+        "  list.get\n"
+        "  9\n"
+        "  result.unwrap-or\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.ok", RuntimeHostBindings({})) == 7
+    assert run_export(checked, "app.err", RuntimeHostBindings({})) == 9
+
+
+def test_runtime_map_len_executes() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "a" 1 map.set\n'
+        '  "b" 2 map.set\n'
+        "  map.len\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 2
 
 
 def test_runtime_if_false_executes_else_branch() -> None:

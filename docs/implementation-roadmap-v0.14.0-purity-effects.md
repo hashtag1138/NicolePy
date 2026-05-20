@@ -499,6 +499,22 @@ Phase 5.
 
 high
 
+### Implementation notes
+
+- runtime support for list.map
+- runtime support for list.filter
+- runtime support for list.fold
+- runtime support for list.reduce
+- runtime support for result.is-ok
+- runtime support for result.is-err
+- runtime support for result.unwrap-or
+- runtime support for map.len
+- runtime support for Ok!
+- runtime support for Err!
+- runtime remains effect-agnostic
+- no runtime dirty checks
+- RuntimeQuote reused for HOF execution
+
 ## Phase 7 — Conformance tests and cleanup
 
 ### Goal
@@ -568,6 +584,8 @@ Status: completed
 M5
 runtime aligned
 
+Status: completed
+
 M6
 full conformance suite passing
 
@@ -588,8 +606,8 @@ Status: implemented
 - [x] Phase 5
 Status: implemented
 
-- [ ] Phase 6
-Status: not started
+- [x] Phase 6
+Status: implemented
 
 - [ ] Phase 7
 Status: not started

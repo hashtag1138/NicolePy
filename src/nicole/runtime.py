@@ -16,6 +16,8 @@ from .ast_nodes import (
     PatternKind,
     PatternNode,
     QuoteNode,
+    ResultErrNode,
+    ResultOkNode,
     TypedEmptyListNode,
     TypedEmptyMapNode,
     WordDefNode,
@@ -177,6 +179,15 @@ def _execute_block(
         if isinstance(item, ListLiteralNode):
             _execute_list_literal(item, locals_env, stack, word_index, runtime_bindings)
             continue
+        if isinstance(item, ResultOkNode):
+            value = stack.pop()
+            stack.push(Ok(value))
+            continue
+        if isinstance(item, ResultErrNode):
+            error = stack.pop()
+            _ensure_matches_type(error, "String", context="Err! input")
+            stack.push(Err(error))
+            continue
         if isinstance(item, QuoteNode):
             stack.push(_create_runtime_quote(item, stack))
             continue
@@ -254,6 +265,30 @@ def _execute_identifier(
         else:
             stack.push(Err("MissingKey"))
         return
+    if node.name == "map.len":
+        map_value = stack.pop()
+        _ensure_matches_type(map_value, "Map", context="map.len map")
+        stack.push(len(map_value))
+        return
+    if node.name == "result.is-ok":
+        result_value = stack.pop()
+        _ensure_matches_type(result_value, "Result", context="result.is-ok input")
+        stack.push(isinstance(result_value, Ok))
+        return
+    if node.name == "result.is-err":
+        result_value = stack.pop()
+        _ensure_matches_type(result_value, "Result", context="result.is-err input")
+        stack.push(isinstance(result_value, Err))
+        return
+    if node.name == "result.unwrap-or":
+        fallback = stack.pop()
+        result_value = stack.pop()
+        _ensure_matches_type(result_value, "Result", context="result.unwrap-or input")
+        if isinstance(result_value, Ok):
+            stack.push(result_value.value)
+        else:
+            stack.push(fallback)
+        return
     if node.name == "list.len":
         value = stack.pop()
         _ensure_matches_type(value, "List", context="list.len input")
@@ -292,6 +327,95 @@ def _execute_identifier(
         _ensure_matches_type(left, "List", context="list.concat left input")
         _ensure_matches_type(right, "List", context="list.concat right input")
         stack.push(left + right)
+        return
+    if node.name == "list.map":
+        quote_value = stack.pop()
+        list_value = stack.pop()
+        _ensure_matches_type(list_value, "List", context="list.map list")
+        _ensure_matches_type(quote_value, "Quote", context="list.map quotation")
+        mapped: list[object] = []
+        for item in list_value:
+            outputs = _invoke_runtime_quote_value(
+                quote_value,
+                (item,),
+                word_index,
+                runtime_bindings,
+            )
+            if len(outputs) != 1:
+                raise RuntimeError(
+                    "wrong runtime signature for list.map quotation: "
+                    f"expected 1 output, got {len(outputs)}"
+                )
+            mapped.append(outputs[0])
+        stack.push(tuple(mapped))
+        return
+    if node.name == "list.filter":
+        quote_value = stack.pop()
+        list_value = stack.pop()
+        _ensure_matches_type(list_value, "List", context="list.filter list")
+        _ensure_matches_type(quote_value, "Quote", context="list.filter quotation")
+        filtered: list[object] = []
+        for item in list_value:
+            outputs = _invoke_runtime_quote_value(
+                quote_value,
+                (item,),
+                word_index,
+                runtime_bindings,
+            )
+            if len(outputs) != 1:
+                raise RuntimeError(
+                    "wrong runtime signature for list.filter quotation: "
+                    f"expected 1 output, got {len(outputs)}"
+                )
+            decision = outputs[0]
+            _ensure_matches_type(decision, "Bool", context="list.filter quotation output")
+            if decision:
+                filtered.append(item)
+        stack.push(tuple(filtered))
+        return
+    if node.name == "list.fold":
+        quote_value = stack.pop()
+        accumulator = stack.pop()
+        list_value = stack.pop()
+        _ensure_matches_type(list_value, "List", context="list.fold list")
+        _ensure_matches_type(quote_value, "Quote", context="list.fold quotation")
+        for item in list_value:
+            outputs = _invoke_runtime_quote_value(
+                quote_value,
+                (accumulator, item),
+                word_index,
+                runtime_bindings,
+            )
+            if len(outputs) != 1:
+                raise RuntimeError(
+                    "wrong runtime signature for list.fold quotation: "
+                    f"expected 1 output, got {len(outputs)}"
+                )
+            accumulator = outputs[0]
+        stack.push(accumulator)
+        return
+    if node.name == "list.reduce":
+        quote_value = stack.pop()
+        list_value = stack.pop()
+        _ensure_matches_type(list_value, "List", context="list.reduce list")
+        _ensure_matches_type(quote_value, "Quote", context="list.reduce quotation")
+        if len(list_value) == 0:
+            raise RuntimeError("list.reduce cannot be applied to empty list at runtime")
+        accumulator = list_value[0]
+        for item in list_value[1:]:
+            outputs = _invoke_runtime_quote_value(
+                quote_value,
+                (accumulator, item),
+                word_index,
+                runtime_bindings,
+            )
+            if len(outputs) != 1:
+                raise RuntimeError(
+                    "wrong runtime signature for list.reduce quotation: "
+                    f"expected 1 output, got {len(outputs)}"
+                )
+            accumulator = outputs[0]
+        stack.push(accumulator)
         return
 
     symbol = node.resolution.resolved_symbol
@@ -415,13 +539,33 @@ def _execute_call(
     if not isinstance(quote_value, RuntimeQuote):
         raise RuntimeError("call expects runtime quotation")
 
-    quote = quote_value.node
     input_values: list[object] = []
-    for parameter in reversed(quote.inputs):
-        value = stack.pop()
-        _ensure_matches_type(value, parameter.type_node.name, context=f"quotation input '{parameter.name}'")
-        input_values.append(value)
+    for _ in reversed(quote_value.node.inputs):
+        input_values.append(stack.pop())
     input_values.reverse()
+    result_values = _invoke_runtime_quote_value(
+        quote_value,
+        tuple(input_values),
+        word_index,
+        runtime_bindings,
+    )
+    for value in result_values:
+        stack.push(value)
+
+def _invoke_runtime_quote_value(
+    quote_value: RuntimeQuote,
+    input_values: tuple[object, ...],
+    word_index: dict[str, WordDefNode],
+    runtime_bindings: RuntimeHostBindings,
+) -> tuple[object, ...]:
+    quote = quote_value.node
+    if len(input_values) != len(quote.inputs):
+        raise RuntimeError(
+            "wrong runtime signature for quotation: "
+            f"expected {len(quote.inputs)} inputs, got {len(input_values)}"
+        )
+    for parameter, value in zip(quote.inputs, input_values):
+        _ensure_matches_type(value, parameter.type_node.name, context=f"quotation input '{parameter.name}'")
 
     quote_locals = dict(quote_value.captured_locals)
     for parameter, value in zip(quote.inputs, input_values):
@@ -438,7 +582,7 @@ def _execute_call(
         )
     for parameter, value in zip(quote.outputs, result_values):
         _ensure_matches_type(value, parameter.type_node.name, context=f"quotation output '{parameter.name}'")
-        stack.push(value)
+    return result_values
 
 
 def _execute_list_literal(
