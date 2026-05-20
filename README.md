@@ -24,7 +24,7 @@ This repository is an implementation workspace, not a source of truth for the la
 
 Normative reference currently tracked by this repository:
 
-- `dadb99e9261827d63e7638deb67a10bf3406a09d`
+- `2dfe20f59baac94aa331b439087d07e8db4430f3`
 
 ## Quick start
 
@@ -69,9 +69,17 @@ Current documentation constraints:
 
 Higher-order builtin note:
 
-- `list.map`, `list.fold`, and `list.reduce` consume an already constructed quotation value
+- `list.map`, `list.filter`, `list.fold`, and `list.reduce` consume an already constructed quotation value
 - compatibility is checked on the callable part `inputs -- outputs`
 - a quotation passed to these builtins may already carry captures; they are part of the quotation value and are not supplied by the builtin itself
+
+Result note:
+
+- `Ok!` and `Err!` are the active v1 constructors
+- `Ok(v)` and `Err(e)` are `case` patterns, not construction syntax
+- `result.is-ok`, `result.is-err`, and `result.unwrap-or` are active v1 builtins
+- `?` is active v1 syntax
+- `?` is only valid in a frame whose complete output is exactly one `Result<T,E>`
 
 Host ABI note:
 
@@ -92,7 +100,7 @@ Host ABI note:
   - `export_contract`
 - `HostContract` exists as a minimal static host contract
 - `ExportContract` exists as a minimal static export surface
-- the Python repository does not yet claim a finished runtime ABI implementation
+- the Python repository does not define the language-level ABI beyond the current minimal static contracts documented here
 - in v1, any directly called `host.*` word is required
 - a direct `host.*` call without a supplied contract fails statically
 - a required `host.*` word absent from the known host contract is a static integration error
@@ -102,7 +110,8 @@ Host ABI note:
 - export ABI names must be unique
 - a required `host.*` word whose binding fails dynamically is a runtime integration error
 - optional presence testing and fallback remain outside v1
-- runtime host binding, export linkage, binding generation, IR, and interpreter remain absent
+- ABI-compatible value families in v1 are `Int`, `Float`, `String`, `Bool`, `Unit`, `List<T>`, `Map<K,V>`, `Result<T,E>`, `ListError`, and `MapError`
+- `Quote<{ ... }>` is not ABI-compatible in v1 and must not cross the host boundary
 
 Runtime ABI Phase 1:
 
@@ -129,3 +138,22 @@ Lexical note:
 - `-` may appear inside an identifier, but bare `-` remains an operator
 - `.` is part of qualified names, not a standalone operator
 - strings use double quotes, disallow raw newlines, and support at least `\\\"`, `\\\\`, `\\n`, and `\\t`
+
+Compilation-unit note:
+
+- Nicole v1 is analyzed as one compilation unit
+- there is no import graph or module graph in v1
+- `export` is top-level only
+- a subword and a top-level word must not share one visible name
+
+Builtin inventory note:
+
+- active result builtins: `result.is-ok`, `result.is-err`, `result.unwrap-or`
+- active list builtins: `list.len`, `list.get`, `list.set`, `list.concat`, `list.map`, `list.filter`, `list.fold`, `list.reduce`
+- active map builtins/constructions: `map.empty:Map<K,V>`, `map.get`, `map.contains`, `map.set`, `map.remove`, `map.len`
+- deferred, not active v1: `map.keys`, `map.values`, `map.items`, `list.push`, `list.pop`, `list.contains`
+
+Map note:
+
+- v1 map key types are restricted by the language to `Int`, `String`, and `Bool`
+- `map.remove` returns `Result<Map<K,V>,MapError>`

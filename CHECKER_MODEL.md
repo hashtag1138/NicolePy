@@ -211,26 +211,47 @@ The quotation behaves like an anonymous word with its own isolated frame.
 
 Standard callable builtins include:
 
+- `result.is-ok`
+- `result.is-err`
+- `result.unwrap-or`
 - `list.len`
 - `list.get`
 - `list.set`
 - `list.concat`
 - `list.map`
+- `list.filter`
 - `list.fold`
 - `list.reduce`
+- `map.empty`
 - `map.get`
 - `map.contains`
 - `map.set`
 - `map.remove`
 - `map.len`
+
+Deferred, not active v1:
+
 - `map.keys`
 - `map.values`
+- `map.items`
+- `list.push`
+- `list.pop`
+- `list.contains`
 
 For higher-order list builtins:
 
-- `list.map`, `list.fold`, and `list.reduce` consume an already constructed quotation value
+- `list.map`, `list.filter`, `list.fold`, and `list.reduce` consume an already constructed quotation value
 - compatibility is checked on the callable part `inputs -- outputs`
 - these builtins do not require the quotation to have `captures == []`
+
+Current `Result` rules tracked from the public specification:
+
+- `Ok!` and `Err!` are constructors
+- `Ok(v)` and `Err(e)` are `case` patterns
+- `Ok(expr)` and `Err(expr)` are not v1 construction syntax
+- `?` is active v1 syntax
+- `?` is only valid in a frame whose complete output is exactly one `Result<T,E>`
+- `result.is-ok`, `result.is-err`, and `result.unwrap-or` are active v1 builtins
 
 Current numeric rules tracked from the public specification:
 
@@ -247,6 +268,8 @@ Important current v1 rules:
 - `[]:List<T>` is valid
 - bare `map.empty` is invalid
 - `map.empty:Map<K,V>` is valid
+- map keys are restricted in v1 to `Int`, `String`, and `Bool`
+- `map.remove` returns `Result<Map<K,V>,MapError>`
 
 The checker must therefore distinguish ordinary callable builtins from typed empty constructions.
 
@@ -275,13 +298,14 @@ Current repository status:
 - a host word used with incompatible argument types is rejected by the checker
 - `ExportContract` collection happens after successful checking; export ABI collection is not itself a checker responsibility
 - this remains a minimal static ABI only, not a runtime integration model
+- ABI-compatible value families are `Int`, `Float`, `String`, `Bool`, `Unit`, `List<T>`, `Map<K,V>`, `Result<T,E>`, `ListError`, and `MapError`
+- `Quote<{ ... }>` is not ABI-compatible in v1
 
 It does not validate:
 
 - runtime existence
 - actual side effects
 - host ABI execution behavior
-- runtime export linkage
 - binding generation
 
 The host never sees the internal local stack of a word or quotation.

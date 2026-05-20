@@ -22,7 +22,7 @@ If there is any conflict, the specification wins.
 
 Revision of reference:
 
-- `dadb99e9261827d63e7638deb67a10bf3406a09d`
+- `2dfe20f59baac94aa331b439087d07e8db4430f3`
 
 ## 1. Core Principles
 
@@ -50,10 +50,17 @@ Canonical example:
 
 ## 3. Visibility and Host Boundary
 
-- Without a modifier, a word is private to the current module.
+- Without a modifier, a word is private to the single compilation unit of the v1 program.
 - `pub` makes a word visible inside the program.
 - `export` makes a word visible to the host and implies `pub`.
 - `host.*` names words provided by the host.
+
+Current v1 structure:
+
+- one compilation unit
+- no import graph
+- no module graph
+- `export` is top-level only
 
 Normative constraints:
 
@@ -62,6 +69,7 @@ Normative constraints:
 - `pub` and `export` do not create distinct namespaces
 - exported names must be unique
 - two sibling subwords cannot share the same name
+- a subword and a top-level word must not share the same visible name
 - a directly called `host.*` word is required in v1
 - a required `host.*` word absent from the known host contract is a static integration error
 - a required `host.*` binding failure is a runtime integration error
@@ -93,7 +101,7 @@ Current repository status:
 - `HostContract` is a minimal static host ABI contract
 - `ExportContract` is a minimal static export ABI surface
 - `pub` alone does not create an ABI export entry
-- runtime host binding and runtime export linkage are still absent
+- implementation runtime status should be checked against code and tests, not inferred from this summary
 
 ## 4. Execution Model
 
@@ -283,6 +291,7 @@ Canonical v1 operations:
 - `list.set`
 - `list.concat`
 - `list.map`
+- `list.filter`
 - `list.fold`
 - `list.reduce`
 
@@ -295,20 +304,27 @@ v1 variants:
 ### Maps
 
 - `Map<K,V>` is immutable.
+- `Map<K,V>` accepts only `Int`, `String`, and `Bool` as key types in v1.
 - bare `map.empty` is invalid in v1
 - `map.empty:Map<K,V>` is the explicit empty-map form
 - `map.get` returns `Result<V,MapError>`
-- `map.set` and `map.remove` return a new map
+- `map.set` returns a new map
+- `map.remove` returns `Result<Map<K,V>,MapError>`
 
 v1 operations:
 
+- `map.empty`
 - `map.get`
 - `map.contains`
 - `map.set`
 - `map.remove`
 - `map.len`
+
+Deferred, not active v1:
+
 - `map.keys`
 - `map.values`
+- `map.items`
 
 ## 12. Lexical Minimum
 
@@ -345,6 +361,15 @@ v1 variants:
 
 `Result` does not model integration errors or runtime contract violations.
 
+Construction and helper rules:
+
+- `Ok!` constructs `Result<T,E>` from a success value
+- `Err!` constructs `Result<T,E>` from an error value
+- `Ok(v)` and `Err(e)` are `case` patterns, not expression constructors
+- `result.is-ok`, `result.is-err`, and `result.unwrap-or` are active v1 builtins
+- `?` is active v1 syntax
+- `?` is valid only when the frame declares exactly one output of type `Result<T,E>`
+
 ## 12. Quotations and `call`
 
 Quotation form:
@@ -375,7 +400,7 @@ Example:
 
 Higher-order builtin consequence:
 
-- `list.map`, `list.fold`, and `list.reduce` consume an already constructed quotation value
+- `list.map`, `list.filter`, `list.fold`, and `list.reduce` consume an already constructed quotation value
 - compatibility is checked on the callable part `inputs -- outputs`
 - the quotation value may already include captures; these builtins do not require `captures == []`
 
@@ -402,6 +427,21 @@ Higher-order builtin consequence:
 - cannot be defined by user code
 - explicit declared signature in the integration contract
 - same stack discipline as any other call from the program side
+
+### ABI-compatible values
+
+- `Int`
+- `Float`
+- `String`
+- `Bool`
+- `Unit`
+- `List<T>`
+- `Map<K,V>`
+- `Result<T,E>`
+- `ListError`
+- `MapError`
+
+`Quote<{ ... }>` is not ABI-compatible in v1 and must not cross the host boundary.
 
 ## 14. Error Boundary
 

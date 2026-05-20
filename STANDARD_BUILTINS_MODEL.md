@@ -15,20 +15,23 @@ Some callable words exist in Nicole even when they are not defined by the user p
 
 Examples include:
 
+- `result.is-ok`
+- `result.is-err`
+- `result.unwrap-or`
 - `list.get`
 - `list.set`
 - `list.len`
 - `list.map`
+- `list.filter`
 - `list.fold`
 - `list.reduce`
 - `list.concat`
+- `map.empty`
 - `map.get`
 - `map.set`
 - `map.contains`
 - `map.remove`
 - `map.len`
-- `map.keys`
-- `map.values`
 
 These words belong to the Nicole language.
 
@@ -51,6 +54,15 @@ Important current rules:
 - bare `map.empty` is invalid
 - `list.reduce` is only defined for non-empty lists
 - the public invalid examples now include `list.reduce` on a provably empty list
+
+Deferred, not active v1:
+
+- `map.keys`
+- `map.values`
+- `map.items`
+- `list.push`
+- `list.pop`
+- `list.contains`
 
 Therefore `map.empty:Map<K,V>` must not be documented as an ordinary naked callable builtin equivalent to `map.get` or `list.len`.
 It is a typed construction that must remain explicit in syntax and checking.
@@ -137,6 +149,7 @@ For higher-order builtins:
 
 ```text
 list.map    { xs:List<T> q:Quote<{ | x:T -- y:U }> -- ys:List<U> }
+list.filter { xs:List<T> q:Quote<{ | x:T -- keep:Bool }> -- ys:List<T> }
 list.fold   { xs:List<T> init:Acc q:Quote<{ | acc:Acc x:T -- out:Acc }> -- out:Acc }
 list.reduce { xs:List<T> q:Quote<{ | a:T b:T -- c:T }> -- out:T }
 ```
@@ -150,8 +163,14 @@ Current result/error conventions tracked from the public specification:
 - `list.get` returns `Result<T,ListError>`
 - `list.set` returns `Result<List<T>,ListError>`
 - `map.get` returns `Result<V,MapError>`
+- `map.remove` returns `Result<Map<K,V>,MapError>`
 - `OutOfBounds` belongs to `ListError`
 - `MissingKey` belongs to `MapError`
+- `Ok!` and `Err!` are constructors
+- `Ok(v)` and `Err(e)` are `case` patterns, not construction syntax
+- `result.is-ok`, `result.is-err`, and `result.unwrap-or` are active v1 builtins
+- `?` is active v1 syntax and is valid only in frames whose complete output is exactly one `Result<T,E>`
+- `Map<K,V>` key types are restricted in v1 to `Int`, `String`, and `Bool`
 
 ## 7. Visibility and Redefinition
 

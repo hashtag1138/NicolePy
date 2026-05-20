@@ -85,7 +85,7 @@ The resolver is responsible for:
 - resolving naked word calls
 - resolving subword access
 - resolving lexical parent scope
-- resolving module scope
+- resolving the enclosing compilation-unit scope
 - resolving visible `pub` words
 - distinguishing Nicole-defined words from `host.*` words
 - reporting resolution errors only
@@ -107,7 +107,7 @@ Expected order:
 1. local bindings introduced by the current word or branch
 2. nearest local subwords
 3. lexical parent words when allowed
-4. current module scope
+4. enclosing compilation-unit scope
 5. visible `pub` words
 6. visible `export` words as ordinary visible program words
 7. `host.*` names reserved to the host namespace
@@ -116,6 +116,9 @@ The effective precedence must remain stable.
 The current repository no longer accepts `host.*` purely by prefix.
 A `host.*` reference is accepted only when the resolver receives a `HostContract`
 containing that exact host word.
+
+Nicole v1 has no import graph or module graph.
+Resolution is over one compilation unit, not over multiple modules.
 
 ## 5. Collisions
 
@@ -128,6 +131,7 @@ Invalid collision examples include:
 - two words of the same name with different input types
 - two words of the same name with different arities
 - two sibling subwords of the same name
+- a subword and a top-level word with the same visible name
 - a `pub` word and an `export` word with the same visible name
 - two exports of the same name
 

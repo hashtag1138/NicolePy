@@ -20,7 +20,7 @@ Implementation follows specification, never the inverse.
 
 Normative reference currently tracked:
 
-- `dadb99e9261827d63e7638deb67a10bf3406a09d`
+- `2dfe20f59baac94aa331b439087d07e8db4430f3`
 
 ## Initial Pipeline
 
@@ -98,9 +98,13 @@ These are the structures that currently carry the parser, resolver, checker, and
 - quotation captures and quotation inputs belong to the same frame and must use distinct names
 - bare `[]` is invalid; `[]:List<T>` is valid
 - bare `map.empty` is invalid; `map.empty:Map<K,V>` is valid
+- map keys are restricted in v1 to `Int`, `String`, and `Bool`
 - `host.*` is reserved to the host
 - a directly called `host.*` word is required in v1
 - `pub` and `export` do not create separate namespaces
+- v1 uses one compilation unit with no import graph or module graph
+- `export` is top-level only
+- a subword and a top-level word must not share one visible name
 - `+`, `-`, `*`, `div`, and `mod` are `Int Int -> Int`
 - `+.`, `-.`, `*.`, and `/.` are `Float Float -> Float`
 - bare `/` is not a v1 arithmetic operator
@@ -122,6 +126,14 @@ Separate the following concerns:
 Do not model a missing `host.*` binding as a `Result`.
 Binding absence is an integration problem, not a domain result.
 
+Current `Result` rules to preserve:
+
+- `Ok!` and `Err!` are constructors
+- `Ok(v)` and `Err(e)` are `case` patterns
+- `Ok(expr)` and `Err(expr)` are not v1 construction syntax
+- `result.is-ok`, `result.is-err`, and `result.unwrap-or` are active v1 builtins
+- `?` is active v1 syntax and is valid only in frames whose complete output is exactly one `Result<T,E>`
+
 ## Host ABI Model
 
 Status note:
@@ -133,6 +145,8 @@ Status note:
 - exported words are collected into a static ABI surface after successful analysis
 - `export` must still not be documented as a complete runtime ABI registry
 - `host_abi.py` should not be treated as the final runtime architecture
+- ABI-compatible value families in v1 are `Int`, `Float`, `String`, `Bool`, `Unit`, `List<T>`, `Map<K,V>`, `Result<T,E>`, `ListError`, and `MapError`
+- `Quote<{ ... }>` is forbidden across the ABI in v1
 
 Track host contracts with explicit registries:
 
@@ -151,14 +165,14 @@ The current public specification also distinguishes:
 Both `host.*` calls and exported program words follow the same language-level stack discipline.
 The host must never observe the internal local stack of a word or quotation.
 
-Still absent:
+Implementation status that should not be overstated here:
 
-- runtime host binding
-- runtime export linkage
 - IR
 - interpreter
 - optional host fallback in direct source-level calls
 - binding generation
+
+Runtime support details should be checked against code and tests, not inferred from this architecture note alone.
 
 Current stubs:
 
