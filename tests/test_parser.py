@@ -397,8 +397,44 @@ def test_parser_rejects_result_constructor_call_syntax(source):
     ],
 )
 def test_parser_rejects_host_word_definitions(source):
-    with pytest.raises(ParseError, match=r"cannot define host\.\* word"):
+    with pytest.raises(ParseError, match=r"cannot define reserved namespace word"):
         parse_source(source)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "call",
+        "MissingKey",
+        "OutOfBounds",
+        "result.custom",
+        "list.custom",
+        "map.custom",
+    ],
+)
+def test_parser_rejects_reserved_top_level_word_names(name):
+    with pytest.raises(ParseError):
+        parse_source(f": {name} {{ -- }} ;")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "call",
+        "MissingKey",
+        "OutOfBounds",
+        "result.custom",
+        "list.custom",
+        "map.custom",
+    ],
+)
+def test_parser_rejects_reserved_subword_names(name):
+    with pytest.raises(ParseError):
+        parse_source(
+            ": outer { -- }\n"
+            f"  : {name} {{ -- }} ;\n"
+            ";"
+        )
 
 
 def test_parser_accepts_host_word_usage():

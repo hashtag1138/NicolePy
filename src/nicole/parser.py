@@ -50,6 +50,17 @@ _PRIMITIVE_OPERATOR_NAMES = {
 }
 
 _ERR_VARIANT_PATTERN_NAMES = {"MissingKey", "OutOfBounds"}
+_RESERVED_WORD_NAMES = {
+    "call",
+    "MissingKey",
+    "OutOfBounds",
+}
+_RESERVED_WORD_PREFIXES = (
+    "result.",
+    "list.",
+    "map.",
+    "host.",
+)
 
 
 @dataclass(slots=True)
@@ -97,12 +108,7 @@ class Parser:
             self._expect(TokenKind.COLON, "expected ':'")
 
         name_token = self._expect(TokenKind.IDENTIFIER, "expected word name")
-        if name_token.lexeme.startswith("host."):
-            raise ParseError(
-                message="cannot define host.* word",
-                line=name_token.span.line,
-                column=name_token.span.column,
-            )
+        self._validate_user_word_name(name_token)
         signature = self._parse_signature()
         nested_words: list[WordDefNode] = []
         body = self._parse_block(
@@ -566,3 +572,19 @@ class Parser:
     def _raise_error(self, message: str) -> None:
         token = self._current()
         raise ParseError(message=message, line=token.span.line, column=token.span.column)
+
+    def _validate_user_word_name(self, token: Token) -> None:
+        lexeme = token.lexeme
+        if lexeme in _RESERVED_WORD_NAMES:
+            raise ParseError(
+                message=f"cannot define reserved word: {lexeme}",
+                line=token.span.line,
+                column=token.span.column,
+            )
+        for prefix in _RESERVED_WORD_PREFIXES:
+            if lexeme.startswith(prefix):
+                raise ParseError(
+                    message=f"cannot define reserved namespace word: {lexeme}",
+                    line=token.span.line,
+                    column=token.span.column,
+                )

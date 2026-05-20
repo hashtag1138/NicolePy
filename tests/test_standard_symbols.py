@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.lexer import lex
-from nicole.parser import Parser
+from nicole.parser import ParseError, Parser
 from nicole.signature_collector import collect_signatures
 from nicole.standard_symbols import StandardSymbolError, load_standard_symbols, with_standard_symbols
 from nicole.symbols import SymbolSource, WordSymbol
@@ -161,8 +161,5 @@ def test_higher_order_builtins_are_marked_callable_only_for_quotes():
 
 
 def test_injection_rejects_user_redefinition_of_builtin():
-    program = parse_source(": list.get { -- } ;")
-    table = collect_signatures(program)
-
-    with pytest.raises(StandardSymbolError, match=r"cannot redefine standard builtin: list\.get"):
-        with_standard_symbols(table)
+    with pytest.raises(ParseError):
+        parse_source(": list.get { -- } ;")

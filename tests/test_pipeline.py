@@ -49,6 +49,35 @@ def test_pipeline_rejects_export_inside_subword() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        ": call { -- } ;",
+        ": MissingKey { -- } ;",
+        ": OutOfBounds { -- } ;",
+        ": result.custom { -- } ;",
+        ": list.custom { -- } ;",
+        ": map.custom { -- } ;",
+    ],
+)
+def test_pipeline_rejects_reserved_top_level_user_word_names(source: str) -> None:
+    with pytest.raises(ParseError):
+        analyze_program(source)
+
+
+@pytest.mark.parametrize(
+    "nested_name",
+    ["call", "result.custom", "list.custom", "map.custom"],
+)
+def test_pipeline_rejects_reserved_subword_names(nested_name: str) -> None:
+    with pytest.raises(ParseError):
+        analyze_program(
+            ": outer { -- }\n"
+            f"  : {nested_name} {{ -- }} ;\n"
+            ";"
+        )
+
+
 def test_pipeline_accepts_export_with_valid_host_contract() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
     host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature)])
