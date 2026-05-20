@@ -1,5 +1,10 @@
 # Runtime List Phase 2 — Immutable Update Operations
 
+Historical implementation note:
+
+The current Nicole specification may differ from this phase document.
+Normative language behavior is defined by the spec repository.
+
 Runtime List Phase 2 extends Runtime List Core (`v0.6.0-runtime-list-core`) with immutable update operations on tuple-backed runtime lists.
 
 The execution model is unchanged:
@@ -16,10 +21,10 @@ It does not re-parse, re-resolve, or re-check source at runtime.
 
 This specification documents only:
 
-- Phase 2A: `list.push`
+- Phase 2A: `list.push` as a historical implementation experiment, not active Nicole v1 language surface
 - Phase 2B: `list.set`
 
-`list.pop` is intentionally deferred from Phase 2 implementation scope.
+`list.pop` is intentionally deferred from Phase 2 implementation scope and is not active Nicole v1 language surface.
 No higher-order collection operations are included in this phase.
 
 ## Runtime Representation
@@ -81,7 +86,7 @@ Semantics:
 - validate index as runtime `Int`
 - validate list as runtime `List`
 - if `0 <= index < len(list)`, return `Ok(new_tuple_with_replacement)`
-- otherwise return `Err("OutOfBounds")`
+- otherwise return `Err(OutOfBounds)`
 
 Valid example:
 
@@ -100,7 +105,7 @@ index >= len(list)
 Invalid result:
 
 ```text
-Err("OutOfBounds")
+Err(OutOfBounds)
 ```
 
 Rules:
@@ -111,7 +116,7 @@ Rules:
 
 ## Deferred — `list.pop`
 
-`list.pop` is intentionally deferred from Runtime List Phase 2.
+`list.pop` is intentionally deferred from Runtime List Phase 2 and remains outside the active Nicole v1 language surface.
 
 Reason:
 
@@ -127,7 +132,7 @@ Future work should first define a product/record representation or another expli
 Controlled collection failures return:
 
 ```text
-Err("OutOfBounds")
+Err(OutOfBounds)
 ```
 
 Runtime integrity failures raise controlled `RuntimeError`.

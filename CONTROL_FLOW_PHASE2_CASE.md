@@ -1,5 +1,10 @@
 # Control Flow Phase 2: `case`
 
+Historical implementation note:
+
+The current Nicole specification may differ from this phase document.
+Normative language behavior is defined by the spec repository.
+
 ## 1. Goal
 
 Add minimal runtime support for `case` execution in NicolePy.
@@ -72,7 +77,7 @@ Notes from current parser/checker surface:
 ## 4. Runtime Result representation
 
 `case` on `Result` requires a concrete runtime representation.
-Phase 2 must use a minimal explicit representation:
+This phase document keeps a minimal explicit representation sketch:
 
 ```python
 @dataclass(frozen=True)
@@ -81,20 +86,21 @@ class Ok:
 
 @dataclass(frozen=True)
 class Err:
-    error: str
+    error: Any
 ```
 
 Examples:
 
 - `Ok(42)`
-- `Err("MissingKey")`
-- `Err("OutOfBounds")`
+- `Err(MissingKey)`
+- `Err(OutOfBounds)`
 
 Rules:
 
 - `Ok(value)` represents `Ok(T)`
-- `Err("MissingKey")` represents `MapError.MissingKey`
-- `Err("OutOfBounds")` represents `ListError.OutOfBounds`
+- `Err(MissingKey)` represents the closed language variant `MissingKey`
+- `Err(OutOfBounds)` represents the closed language variant `OutOfBounds`
+- `MissingKey` and `OutOfBounds` are closed language variants, not string payload conventions
 - no tuple representation such as `("Ok", value)`
 - no dict representation such as `{"tag": "Ok", "value": value}`
 - no generic ADT runtime engine
@@ -111,11 +117,11 @@ Minimal runtime matching rules:
   - match condition: `isinstance(scrutinee, Err)`
   - binding: `e = scrutinee.error`
 - `Err(MissingKey)` pattern:
-  - match condition: `isinstance(scrutinee, Err) and scrutinee.error == "MissingKey"`
+  - match condition: `isinstance(scrutinee, Err)` carrying the closed variant `MissingKey`
 - `Err(OutOfBounds)` pattern:
-  - match condition: `isinstance(scrutinee, Err) and scrutinee.error == "OutOfBounds"`
+  - match condition: `isinstance(scrutinee, Err)` carrying the closed variant `OutOfBounds`
 
-If runtime receives `Err("Other")`, matching must fail explicitly with:
+If runtime receives an `Err(...)` value carrying an error not matched by any branch, matching must fail explicitly with:
 
 `RuntimeError("runtime case match failure")`
 
@@ -161,9 +167,9 @@ Required runtime tests for this phase:
 - `case` branch calling Nicole words
 - `case` producing stack outputs
 - host returns `Ok(value)`, `case` matches `Ok(v)`
-- host returns `Err("MissingKey")`, `case` matches `Err(MissingKey)`
-- host returns `Err("OutOfBounds")`, `case` matches `Err(OutOfBounds)`
-- host returns `Err("Other")`, runtime fails with `runtime case match failure`
+- host returns `Err(MissingKey)`, `case` matches `Err(MissingKey)`
+- host returns `Err(OutOfBounds)`, `case` matches `Err(OutOfBounds)`
+- host returns an unmatched `Err(...)`, runtime fails with `runtime case match failure`
 - branch matching follows source/AST order (first matching branch wins)
 
 These tests must use parser-real syntax and run through:
@@ -182,7 +188,7 @@ Any of the following is a failure for this phase:
 - adding IR/VM/bytecode work inside this phase
 - representing `Result` as raw tuples
 - matching `Result` through undocumented string conventions instead of `Ok` / `Err` runtime classes
-- silently accepting unknown error variants such as `Err("Other")`
+- silently accepting unmatched closed-error cases
 - selecting an implicit default branch when no branch matches
 - suppressing no-match runtime errors
 
@@ -227,4 +233,4 @@ Current pre-implementation report baseline:
 - checker ambiguities to decide before runtime implementation:
   - non-exhaustive `case` on scrutinee types outside Bool and supported Result error domains can currently pass static exhaustiveness checks; runtime behavior must still follow checker output as authoritative
   - parser currently accepts both `Err(Variant)` and name variant patterns; runtime matching rules must choose one deterministic interpretation aligned with checker binding semantics
-  - concrete runtime source for `Ok(...)` / `Err(...)` host values must be defined in host binding tests before implementation
+  - concrete runtime source for `Ok(...)` / `Err(...)` host values must be defined in host binding tests before implementation without redefining closed variants as string payload conventions

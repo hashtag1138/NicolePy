@@ -1,5 +1,10 @@
 # Runtime Map Core Phase 1
 
+Historical implementation note:
+
+The current Nicole specification may differ from this phase document.
+Normative language behavior is defined by the spec repository.
+
 ## Overview
 
 This document specifies the first runtime map support for NicolePy.
@@ -31,11 +36,11 @@ Operations that modify a map return a new dict value.
 
 This phase does not introduce a persistent-map structure or mutable alias exposure.
 
-## Temporary NicolePy Implementation Restriction
+## Map key rule
 
-The official Nicole language specification does not yet define admissible key types for `Map<K,V>`.
+Nicole v1 defines admissible key types for `Map<K,V>`.
 
-Runtime Map Core Phase 1 therefore introduces a temporary NicolePy implementation restriction:
+Runtime Map Core Phase 1 therefore follows the Nicole language rule:
 
 Runtime Map Core Phase 1 accepts only runtime values of type:
 
@@ -45,13 +50,7 @@ Runtime Map Core Phase 1 accepts only runtime values of type:
 
 as map keys.
 
-This is an implementation choice only.
-
-It is not a Nicole language rule.
-
-Future language versions may introduce explicit `Keyable`, `Hashable`, or other key semantics.
-
-NicolePy implementation behavior may later evolve to match the official language specification.
+This is a Nicole language rule in v1, not merely a runtime implementation restriction.
 
 ## Runtime Map Core Phase 1A
 
@@ -79,7 +78,7 @@ Map<K,V> K -> Result<V,MapError>
 Semantics:
 
 - if the key exists, return `Ok(value)`
-- if the key is missing, return `Err("MissingKey")`
+- if the key is missing, return `Err(MissingKey)`
 - the returned `Result` is an ordinary runtime value
 - the stored value is returned as-is
 
@@ -125,7 +124,7 @@ Map<K,V> K -> Result<Map<K,V>,MapError>
 Semantics:
 
 - if the key exists, return `Ok(new_dict)`
-- if the key is missing, return `Err("MissingKey")`
+- if the key is missing, return `Err(MissingKey)`
 - the returned `Result` is an ordinary runtime value
 - do not mutate the original dict
 
@@ -134,7 +133,7 @@ Semantics:
 Controlled collection failure:
 
 ```text
-Err("MissingKey")
+Err(MissingKey)
 ```
 
 Runtime integrity failure:
@@ -145,11 +144,11 @@ RuntimeError
 
 Malformed runtime values and other boundary failures must raise controlled `RuntimeError`.
 
-They must not be converted into `Err("MissingKey")`.
+They must not be converted into `Err(MissingKey)`.
 
-For all map operations requiring a key, malformed runtime key values outside the temporary supported set raise controlled `RuntimeError`.
+For all map operations requiring a key, malformed runtime key values outside the v1 supported set raise controlled `RuntimeError`.
 
-They must not be converted into `Err("MissingKey")`.
+They must not be converted into `Err(MissingKey)`.
 
 ## Architecture Boundaries
 
@@ -179,7 +178,7 @@ Implementation, when it arrives, must remain direct and explicit.
 ### `map.get`
 
 - valid key returns `Ok(value)`
-- missing key returns `Err("MissingKey")`
+- missing key returns `Err(MissingKey)`
 - nested tuple value is preserved
 - `RuntimeQuote` value is preserved
 - stored `Ok(...)` value is preserved
@@ -208,7 +207,7 @@ Implementation, when it arrives, must remain direct and explicit.
 ### `map.remove`
 
 - existing key returns `Ok(new_dict)`
-- missing key returns `Err("MissingKey")`
+- missing key returns `Err(MissingKey)`
 - original dict remains unchanged
 - nested tuple values are preserved
 - `RuntimeQuote` values are preserved

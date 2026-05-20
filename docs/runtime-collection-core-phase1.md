@@ -1,5 +1,10 @@
 # Runtime Collection Core Phase 1
 
+Historical implementation note:
+
+The current Nicole specification may differ from this phase document.
+Normative language behavior is defined by the spec repository.
+
 Runtime Collection Core Phase 1 defines the smallest runtime collection bridge that fits the current direct-AST runtime. It keeps the existing execution model intact:
 
 ```python
@@ -151,6 +156,11 @@ Required list builtins in this phase:
 - `list.concat`
 - `list.get`
 
+Historical implementation note:
+
+`list.contains` is not active Nicole v1 language surface.
+If mentioned here, treat it only as a deferred or experimental implementation note.
+
 Optional compatibility builtin if already wired statically and kept trivial:
 
 - `list.contains`
@@ -207,13 +217,13 @@ Semantics:
   - `index = stack.pop()`
   - `list_value = stack.pop()`
 - stack after valid access: `Ok(value)`
-- stack after invalid index: `Err("OutOfBounds")`
+- stack after invalid index: `Err(OutOfBounds)`
 - pop index
 - pop list
 - validate index as runtime `Int`
 - validate list as runtime `List`
 - if the index is valid, push `Ok(list[index])`
-- otherwise push `Err("OutOfBounds")`
+- otherwise push `Err(OutOfBounds)`
 
 The `Result` produced by `list.get` is pushed as a normal runtime value.
 It is not automatically unwrapped or pattern-matched.
@@ -238,9 +248,9 @@ Out-of-bounds cases:
 Examples:
 
 ```text
-[10, 20, 30] -1 list.get -> Err("OutOfBounds")
-[10, 20, 30] 3 list.get  -> Err("OutOfBounds")
-[]:List<Int> 0 list.get  -> Err("OutOfBounds")
+[10, 20, 30] -1 list.get -> Err(OutOfBounds)
+[10, 20, 30] 3 list.get  -> Err(OutOfBounds)
+[]:List<Int> 0 list.get  -> Err(OutOfBounds)
 ```
 
 Python negative indexing must not leak into Nicole semantics.
@@ -258,7 +268,7 @@ Nested values are returned unchanged:
 
 Malformed runtime values are runtime integrity failures.
 They raise controlled `RuntimeError`.
-They must not be converted into `Err("OutOfBounds")`.
+They must not be converted into `Err(OutOfBounds)`.
 
 Examples:
 
@@ -271,7 +281,7 @@ This phase distinguishes between runtime collection errors and runtime boundary 
 
 Controlled runtime collection failures:
 
-- invalid index -> `Err("OutOfBounds")`
+- invalid index -> `Err(OutOfBounds)`
 - unsupported collection builtin -> `RuntimeError`
 - malformed runtime collection value -> `RuntimeError`
 - runtime boundary type mismatch -> `RuntimeError`
@@ -316,7 +326,7 @@ The runtime must not introduce speculative layers such as:
 Likely immutable update operations:
 
 - `list.set`
-- `list.push`
+- `list.push` as a historical implementation experiment, not active Nicole v1 language surface
 - `map.set`
 - `map.remove`
 
