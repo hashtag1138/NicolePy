@@ -14,7 +14,10 @@ from nicole.ast_nodes import (
     LiteralNode,
     OperatorNode,
     PatternKind,
+    PropagateNode,
     QuoteNode,
+    ResultErrNode,
+    ResultOkNode,
     TypedEmptyListNode,
     TypedEmptyMapNode,
     Visibility,
@@ -330,6 +333,47 @@ def test_parser_accepts_err_variant_pattern(variant_name):
     ],
 )
 def test_parser_rejects_invalid_constructor_patterns(source):
+    with pytest.raises(ParseError):
+        parse_source(source)
+
+
+def test_parser_accepts_ok_result_constructor():
+    program = parse_source(
+        ": ok-result { -- r:Result<Int,MapError> }\n"
+        "  1 Ok!\n"
+        ";"
+    )
+    assert isinstance(program.words[0].body.items[1], ResultOkNode)
+
+
+def test_parser_accepts_err_result_constructor():
+    program = parse_source(
+        ": err-result { -- r:Result<Int,MapError> }\n"
+        "  MissingKey Err!\n"
+        ";"
+    )
+    assert isinstance(program.words[0].body.items[1], ResultErrNode)
+
+
+def test_parser_accepts_propagation_operator():
+    program = parse_source(
+        ": use-propagation { cfg:Map<String,Int> -- r:Result<Int,MapError> }\n"
+        "  cfg \"timeout\" map.get ?\n"
+        "  Ok!\n"
+        ";"
+    )
+    assert isinstance(program.words[0].body.items[3], PropagateNode)
+    assert isinstance(program.words[0].body.items[4], ResultOkNode)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        ": bad { -- r:Result<Int,MapError> } Ok(1) ;",
+        ": bad { -- r:Result<String,MapError> } Err(MissingKey) ;",
+    ],
+)
+def test_parser_rejects_result_constructor_call_syntax(source):
     with pytest.raises(ParseError):
         parse_source(source)
 

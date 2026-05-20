@@ -29,8 +29,10 @@ def test_required_token_kinds_exist():
     assert TokenKind.EOF.name == "EOF"
     assert TokenKind.LT.name == "LT"
     assert TokenKind.GT.name == "GT"
+    assert TokenKind.RESULT_OK.name == "RESULT_OK"
+    assert TokenKind.RESULT_ERR.name == "RESULT_ERR"
+    assert TokenKind.PROPAGATE.name == "PROPAGATE"
 
 
 def test_then_is_not_a_token_kind():
     assert "THEN" not in TokenKind.__members__
-

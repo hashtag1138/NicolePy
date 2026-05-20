@@ -49,6 +49,19 @@ def test_case_arrow_recognized():
     assert kinds[-1] is TokenKind.EOF
 
 
+def test_result_constructors_and_propagation_recognized():
+    tokens = lex("1 Ok! MissingKey Err! ?")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.INT_LITERAL,
+        TokenKind.RESULT_OK,
+        TokenKind.IDENTIFIER,
+        TokenKind.RESULT_ERR,
+        TokenKind.PROPAGATE,
+        TokenKind.EOF,
+    ]
+
+
 def test_comments_ignored():
     tokens = lex("# comment\n: x { -- n:Int } 1 ;")
 

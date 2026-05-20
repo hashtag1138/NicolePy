@@ -20,6 +20,7 @@ __all__ = [
     "ParameterNode",
     "PatternKind",
     "PatternNode",
+    "PropagateNode",
     "ProgramNode",
     "QuoteNode",
     "QuoteTypeNode",
@@ -30,6 +31,8 @@ __all__ = [
     "TypeNode",
     "Visibility",
     "WordDefNode",
+    "ResultErrNode",
+    "ResultOkNode",
 ]
 
 
@@ -153,6 +156,21 @@ class TypedEmptyListNode(AtomNode):
 @dataclass(slots=True)
 class TypedEmptyMapNode(AtomNode):
     type_node: TypeNode
+
+
+@dataclass(slots=True)
+class ResultOkNode(AtomNode):
+    pass
+
+
+@dataclass(slots=True)
+class ResultErrNode(AtomNode):
+    pass
+
+
+@dataclass(slots=True)
+class PropagateNode(AtomNode):
+    pass
 
 
 @dataclass(slots=True)

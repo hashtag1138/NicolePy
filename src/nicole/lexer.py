@@ -67,12 +67,24 @@ class Lexer:
                 self._emit(TokenKind.CASE_ARROW, "=>", 2)
                 continue
 
+            if self._match("Ok!"):
+                self._emit(TokenKind.RESULT_OK, "Ok!", 3)
+                continue
+
+            if self._match("Err!"):
+                self._emit(TokenKind.RESULT_ERR, "Err!", 4)
+                continue
+
             if ch == '"':
                 self._lex_string()
                 continue
 
             if ch.isdigit():
                 self._lex_number()
+                continue
+
+            if ch == "?":
+                self._emit(TokenKind.PROPAGATE, "?", 1)
                 continue
 
             if _is_identifier_start(ch):

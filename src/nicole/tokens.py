@@ -32,6 +32,9 @@ class TokenKind(Enum):
     END = auto()
     CASE = auto()
     UNDERSCORE = auto()
+    RESULT_OK = auto()
+    RESULT_ERR = auto()
+    PROPAGATE = auto()
 
     INT_LITERAL = auto()
     FLOAT_LITERAL = auto()

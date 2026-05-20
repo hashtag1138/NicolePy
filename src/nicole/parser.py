@@ -18,8 +18,11 @@ from .ast_nodes import (
     ParameterNode,
     PatternKind,
     PatternNode,
+    PropagateNode,
     ProgramNode,
     QuoteNode,
+    ResultErrNode,
+    ResultOkNode,
     QuoteTypeNode,
     SignatureNode,
     TypedEmptyListNode,
@@ -278,6 +281,18 @@ class Parser:
                 value=value,
                 raw=token.lexeme,
             )
+
+        if token.kind is TokenKind.RESULT_OK:
+            self._advance()
+            return ResultOkNode(span=token.span)
+
+        if token.kind is TokenKind.RESULT_ERR:
+            self._advance()
+            return ResultErrNode(span=token.span)
+
+        if token.kind is TokenKind.PROPAGATE:
+            self._advance()
+            return PropagateNode(span=token.span)
 
         if token.kind is TokenKind.LBRACKET:
             return self._parse_list_literal(nested_words=nested_words)
