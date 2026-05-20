@@ -28,6 +28,7 @@ class WordSymbol:
     signature: SignatureNode
     visibility: Visibility
     span: SourceSpan
+    declared_dirty: bool = False
     owner: str | None = None
     source: SymbolSource = SymbolSource.USER
     quote_callable_only: bool = False

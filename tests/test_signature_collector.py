@@ -113,6 +113,38 @@ def test_collect_export_visibility_preserved():
 
     symbol = table.words["entry"][0]
     assert symbol.visibility is Visibility.EXPORT
+    assert symbol.declared_dirty is False
+
+
+def test_collect_preserves_declared_dirty_for_top_level_word():
+    program = parse_source("dirty : effectful { -- } ;")
+    table = collect_signatures(program)
+
+    symbol = table.words["effectful"][0]
+    assert symbol.declared_dirty is True
+
+
+def test_collect_preserves_declared_dirty_for_subword():
+    program = parse_source(
+        ": parent { -- }\n"
+        "  dirty : child { -- } ;\n"
+        ";"
+    )
+    table = collect_signatures(program)
+
+    symbol = table.words["child"][0]
+    assert symbol.owner == "parent"
+    assert symbol.qualified_name == "parent.child"
+    assert symbol.declared_dirty is True
+
+
+def test_collect_preserves_visibility_with_declared_dirty():
+    program = parse_source("export dirty : entry { -- } ;")
+    table = collect_signatures(program)
+
+    symbol = table.words["entry"][0]
+    assert symbol.visibility is Visibility.EXPORT
+    assert symbol.declared_dirty is True
 
 
 def test_collect_rejects_top_level_then_subword_same_name():

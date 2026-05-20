@@ -19,6 +19,7 @@ def _collect_word(word: WordDefNode, table: SymbolTable, owner: str | None) -> N
         signature=word.signature,
         visibility=word.visibility,
         span=word.span,
+        declared_dirty=word.is_dirty_annotation,
         owner=owner,
     )
     table.add(symbol)

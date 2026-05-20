@@ -64,6 +64,8 @@ class ResolutionInfo:
     qualified_name: str | None = None
     visibility: Visibility | None = None
     signature_reference: SignatureNode | None = None
+    declared_dirty: bool | None = None
+    host_effect: object | None = None
 
 
 @dataclass(slots=True)

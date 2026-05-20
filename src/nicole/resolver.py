@@ -181,6 +181,7 @@ class Resolver:
             qualified_name=symbol.qualified_name,
             visibility=symbol.visibility,
             signature_reference=symbol.signature,
+            declared_dirty=symbol.declared_dirty,
         )
 
     def _annotate_local(self, node: IdentifierNode, *, current_scope: str | None, name: str) -> None:
@@ -210,6 +211,7 @@ class Resolver:
             qualified_name=node.name,
             visibility=None,
             signature_reference=host_word.signature,
+            host_effect=host_word.effect,
         )
 
     def _raise_error(self, message: str, line: int, column: int) -> None:

@@ -45,6 +45,7 @@ def test_resolve_top_level_word():
     assert call.resolution.resolved_symbol is not None
     assert call.resolution.resolved_symbol.name == "helper"
     assert call.resolution.qualified_name == "helper"
+    assert call.resolution.declared_dirty is False
 
 
 def test_resolve_mutual_recursion():
@@ -60,6 +61,18 @@ def test_resolve_mutual_recursion():
     assert call_a.resolution.resolved_symbol.name == "b"
     assert call_b.resolution.resolved_symbol is not None
     assert call_b.resolution.resolved_symbol.name == "a"
+
+
+def test_resolve_preserves_declared_dirty_for_user_call():
+    program = resolve_source(
+        "dirty : helper { -- } ;\n"
+        ": main { -- } helper ;"
+    )
+
+    call = program.words[1].body.items[0]
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.name == "helper"
+    assert call.resolution.declared_dirty is True
 
 
 def test_resolve_rejects_duplicate_visible_names_before_resolution():
@@ -94,7 +107,7 @@ def test_resolve_rejects_subword_and_top_level_homonym():
 def test_resolve_nested_subword_visible_in_parent():
     program = resolve_source(
         ": invoice { -- }\n"
-        "  : subtotal { -- } ;\n"
+        "  dirty : subtotal { -- } ;\n"
         "  subtotal\n"
         ";"
     )
@@ -103,6 +116,7 @@ def test_resolve_nested_subword_visible_in_parent():
     assert call.resolution.resolved_symbol is not None
     assert call.resolution.resolved_symbol.name == "subtotal"
     assert call.resolution.qualified_name == "invoice.subtotal"
+    assert call.resolution.declared_dirty is True
 
 
 def test_resolve_nested_subword_invisible_outside_parent():
@@ -219,6 +233,22 @@ def test_resolve_host_reference_with_contract():
     assert host_ref.resolution.qualified_name == "host.log"
     assert host_ref.resolution.resolved_symbol is not None
     assert host_ref.resolution.signature_reference is signature
+    assert host_ref.resolution.host_effect is HostEffect.PURE
+
+
+def test_resolve_host_reference_with_dirty_effect_metadata():
+    signature = signature_from_source(": hostsig { msg:String -- } ;")
+    program = resolve_source_with_host_contract(
+        ": log { msg:String -- }\n"
+        "  msg host.log\n"
+        ";",
+        [HostWord(name="host.log", signature=signature, effect=HostEffect.DIRTY)],
+    )
+
+    host_ref = program.words[0].body.items[1]
+    assert host_ref.resolution.owner_scope == "host"
+    assert host_ref.resolution.qualified_name == "host.log"
+    assert host_ref.resolution.host_effect is HostEffect.DIRTY
 
 
 def test_resolve_required_host_reference_with_contract():

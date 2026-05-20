@@ -229,6 +229,35 @@ Phase 1 and Phase 2.
 
 medium
 
+### Implementation notes
+
+Implemented:
+
+- WordSymbol.declared_dirty metadata
+
+- propagation:
+    WordDefNode.is_dirty_annotation
+        ↓
+    WordSymbol.declared_dirty
+
+- ResolutionInfo metadata:
+    - declared_dirty
+    - host_effect
+
+- resolver exposes:
+    - user declared_dirty
+    - host HostEffect
+
+- top-level and subword metadata preserved
+
+- visibility/export/qualification preserved
+
+- metadata only:
+    - no inference
+    - no SCC
+    - no validation
+    - no effect graph
+
 ## Phase 4 — Checker effect graph and SCC inference
 
 ### Goal
@@ -414,7 +443,7 @@ Status: completed
 M2
 effect metadata propagated
 
-Status: in progress
+Status: completed
 
 M3
 effect checker working
@@ -436,8 +465,8 @@ Status: implemented
 - [x] Phase 2
 Status: implemented
 
-- [ ] Phase 3
-Status: not started
+- [x] Phase 3
+Status: implemented
 
 - [ ] Phase 4
 Status: not started
