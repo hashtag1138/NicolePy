@@ -112,9 +112,9 @@ def validate_type_v1(
         if isinstance(key_type, TypeNode) and key_type.name not in {"Int", "String", "Bool"}:
             raise HostABIError("Map<K,V> key type must be Int, String, or Bool in v1")
 
-    if type_node.name == "Quote":
+    if type_node.name in {"Quote", "DirtyQuote"}:
         if forbid_quote:
-            raise HostABIError("Quote is forbidden across ABI in v1")
+            raise HostABIError("Quote is forbidden across ABI in v1 (including DirtyQuote)")
         if len(type_node.args) != 1:
             return
         quote_signature = type_node.args[0]
@@ -134,7 +134,7 @@ def validate_type_v1(
             continue
         if isinstance(argument, QuoteTypeNode):
             if forbid_quote:
-                raise HostABIError("Quote is forbidden across ABI in v1")
+                raise HostABIError("Quote is forbidden across ABI in v1 (including DirtyQuote)")
             for parameter in argument.captures:
                 validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
             for parameter in argument.inputs:

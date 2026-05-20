@@ -20,6 +20,7 @@ from .ast_nodes import (
     PatternNode,
     PropagateNode,
     ProgramNode,
+    QuoteEffect,
     QuoteNode,
     ResultErrNode,
     ResultOkNode,
@@ -174,13 +175,18 @@ class Parser:
     def _parse_type(self) -> TypeNode | QuoteTypeNode:
         name_token = self._expect(TokenKind.IDENTIFIER, "malformed type")
 
-        if name_token.lexeme == "Quote" and self._match(TokenKind.LT):
+        if name_token.lexeme in {"Quote", "DirtyQuote"} and self._match(TokenKind.LT):
             if self._check(TokenKind.LBRACE):
                 quote_type = self._parse_quote_type()
                 self._expect(TokenKind.GT, "malformed type")
+                quote_type.effect_kind = (
+                    QuoteEffect.DIRTY
+                    if name_token.lexeme == "DirtyQuote"
+                    else QuoteEffect.PURE
+                )
                 return TypeNode(
                     span=name_token.span,
-                    name=name_token.lexeme,
+                    name="Quote",
                     args=(quote_type,),
                 )
 

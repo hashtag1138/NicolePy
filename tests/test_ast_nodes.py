@@ -21,6 +21,7 @@ from nicole.ast_nodes import (
     PatternNode,
     PatternKind,
     ProgramNode,
+    QuoteEffect,
     QuoteNode,
     QuoteTypeNode,
     SignatureNode,
@@ -200,3 +201,19 @@ def test_case_node_has_no_scrutinee_field():
 def test_important_nodes_carry_span(cls, kwargs):
     node = cls(**kwargs)
     assert isinstance(node.span, SourceSpan)
+
+
+def test_quote_type_node_defaults_to_pure_effect_kind():
+    node = QuoteTypeNode(span=make_span(), captures=(), inputs=(), outputs=())
+    assert node.effect_kind is QuoteEffect.PURE
+
+
+def test_quote_type_node_can_store_dirty_effect_kind():
+    node = QuoteTypeNode(
+        span=make_span(),
+        effect_kind=QuoteEffect.DIRTY,
+        captures=(),
+        inputs=(),
+        outputs=(),
+    )
+    assert node.effect_kind is QuoteEffect.DIRTY

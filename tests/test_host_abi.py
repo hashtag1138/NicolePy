@@ -281,6 +281,18 @@ def test_host_contract_rejects_quote_nested_in_result() -> None:
         host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
 
 
+def test_host_contract_rejects_dirtyquote_input_type() -> None:
+    signature = signature_from_source(": hostsig { q:DirtyQuote<{ | -- }> -- } ;")
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_rejects_dirtyquote_output_type() -> None:
+    signature = signature_from_source(": hostsig { -- q:DirtyQuote<{ | -- }> } ;")
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.make", signature=signature, effect=HostEffect.PURE)])
+
+
 def test_host_contract_rejects_invalid_map_key_type() -> None:
     signature = signature_from_source(": hostsig { -- m:Map<List<Int>,String> } ;")
     with pytest.raises(HostABIError, match="Map<K,V> key type must be Int, String, or Bool in v1"):

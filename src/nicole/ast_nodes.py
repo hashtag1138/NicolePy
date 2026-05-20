@@ -22,6 +22,7 @@ __all__ = [
     "PatternNode",
     "PropagateNode",
     "ProgramNode",
+    "QuoteEffect",
     "QuoteNode",
     "QuoteTypeNode",
     "ResolutionInfo",
@@ -57,6 +58,11 @@ class PatternKind(Enum):
     NAME = auto()
 
 
+class QuoteEffect(Enum):
+    PURE = auto()
+    DIRTY = auto()
+
+
 @dataclass(slots=True)
 class ResolutionInfo:
     resolved_symbol: object | None = None
@@ -66,6 +72,7 @@ class ResolutionInfo:
     signature_reference: SignatureNode | None = None
     declared_dirty: bool | None = None
     host_effect: object | None = None
+    quote_effect: QuoteEffect | None = None
 
 
 @dataclass(slots=True)
@@ -119,6 +126,7 @@ class TypeNode(ASTNode):
 
 @dataclass(slots=True)
 class QuoteTypeNode(ASTNode):
+    effect_kind: QuoteEffect = QuoteEffect.PURE
     captures: tuple[ParameterNode, ...] = field(default_factory=tuple)
     inputs: tuple[ParameterNode, ...] = field(default_factory=tuple)
     outputs: tuple[ParameterNode, ...] = field(default_factory=tuple)

@@ -442,6 +442,25 @@ Phase 4.
 
 high
 
+### Implementation notes
+
+- QuoteEffect.PURE / QuoteEffect.DIRTY
+- DirtyQuote<{...}> parser/type support
+- unified Quote/DirtyQuote representation
+- internal effect graph with word + quote-site nodes
+- quote-site SCC participation inside checker only
+- quotation body classification
+- call(Quote) pure
+- call(DirtyQuote) dirty
+- pure-frame DirtyQuote restrictions
+- HOF gating:
+  - list.map
+  - list.filter
+  - list.fold
+  - list.reduce
+- Quote and DirtyQuote ABI rejection
+- runtime remains effect-agnostic
+
 ## Phase 6 — Runtime alignment
 
 ### Goal
@@ -544,6 +563,7 @@ Status: completed
 
 M4
 DirtyQuote working
+Status: completed
 
 M5
 runtime aligned
@@ -565,8 +585,8 @@ Status: implemented
 - [x] Phase 4
 Status: implemented
 
-- [ ] Phase 5
-Status: not started
+- [x] Phase 5
+Status: implemented
 
 - [ ] Phase 6
 Status: not started

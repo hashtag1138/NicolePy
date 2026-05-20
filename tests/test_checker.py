@@ -1559,7 +1559,7 @@ def test_checker_phase4_scc_dirty_propagation_passes_with_annotations():
 
 def test_checker_phase4_rejects_pure_to_dirty_direct_call():
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    with pytest.raises(CheckerError, match=r"pure word 'a' cannot call dirty word 'b'"):
+    with pytest.raises(CheckerError, match=r"inferred dirty.*missing dirty annotation"):
         check_source_with_host_contract(
             ": a { msg:String -- }\n"
             "  msg b\n"
@@ -1583,7 +1583,7 @@ def test_checker_phase4_export_effect_preservation():
 
 def test_checker_phase4_subword_dirty_propagation_requires_dirty_parent():
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    with pytest.raises(CheckerError, match=r"pure word 'outer' cannot call dirty word 'outer\.inner'"):
+    with pytest.raises(CheckerError, match=r"inferred dirty.*missing dirty annotation"):
         check_source_with_host_contract(
             ": outer { msg:String -- }\n"
             "  dirty : inner { msg:String -- }\n"
@@ -1597,7 +1597,7 @@ def test_checker_phase4_subword_dirty_propagation_requires_dirty_parent():
 
 def test_checker_phase4_if_branch_union_is_conservative():
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    with pytest.raises(CheckerError, match=r"pure word 'main' cannot call dirty word 'dirty-worker'"):
+    with pytest.raises(CheckerError, match=r"inferred dirty.*missing dirty annotation"):
         check_source_with_host_contract(
             "dirty : dirty-worker { msg:String -- }\n"
             "  msg host.log\n"
@@ -1615,7 +1615,7 @@ def test_checker_phase4_if_branch_union_is_conservative():
 
 def test_checker_phase4_case_branch_union_is_conservative():
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    with pytest.raises(CheckerError, match=r"pure word 'main' cannot call dirty word 'dirty-worker'"):
+    with pytest.raises(CheckerError, match=r"inferred dirty.*missing dirty annotation"):
         check_source_with_host_contract(
             "dirty : dirty-worker { msg:String -- }\n"
             "  msg host.log\n"
@@ -1628,3 +1628,254 @@ def test_checker_phase4_case_branch_union_is_conservative():
             ";",
             [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
         )
+
+
+def test_checker_phase5_accepts_pure_quote_type_from_pure_quotation_body():
+    check_source(
+        ": make { -- q:Quote<{ | x:Int -- y:Int }> }\n"
+        "  :[ | x:Int -- y:Int | x 1 + ;]\n"
+        ";"
+    )
+
+
+def test_checker_phase5_accepts_dirtyquote_type_from_dirty_quotation_body():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    check_source_with_host_contract(
+        "dirty : make { msg:String -- q:DirtyQuote<{ captured:String | x:Int -- y:Int }> }\n"
+        "  msg\n"
+        "  :[ captured:String | x:Int -- y:Int |\n"
+        "    captured host.log\n"
+            "    x\n"
+        "  ;]\n"
+        ";",
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+    )
+
+
+def test_checker_phase5_rejects_pure_frame_constructing_dirtyquote():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match=r"pure frame cannot construct DirtyQuote"):
+        check_source_with_host_contract(
+            ": make { msg:String -- q:DirtyQuote<{ captured:String | x:Int -- y:Int }> }\n"
+            "  msg\n"
+            "  :[ captured:String | x:Int -- y:Int |\n"
+            "    captured host.log\n"
+            "    x\n"
+            "  ;]\n"
+            ";",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+
+
+def test_checker_phase5_accepts_dirty_frame_constructing_pure_quote():
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    check_source_with_host_contract(
+        "dirty : make { msg:String -- q:Quote<{ | x:Int -- y:Int }> }\n"
+        "  msg host.log\n"
+        "  :[ | x:Int -- y:Int | x 1 + ;]\n"
+        ";",
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+    )
+
+
+def test_checker_phase5_rejects_call_dirtyquote_in_pure_frame():
+    with pytest.raises(CheckerError, match=r"pure frame cannot call DirtyQuote"):
+        check_source(
+            ": run { x:Int q:DirtyQuote<{ | n:Int -- m:Int }> -- y:Int }\n"
+            "  x q call\n"
+            ";"
+        )
+
+
+def test_checker_phase5_accepts_call_dirtyquote_in_dirty_frame():
+    check_source(
+        "dirty : run { x:Int q:DirtyQuote<{ | n:Int -- m:Int }> -- y:Int }\n"
+        "  x q call\n"
+        ";"
+    )
+
+
+def test_checker_phase5_rejects_list_map_dirtyquote_in_pure_frame():
+    with pytest.raises(CheckerError, match=r"pure frame cannot pass DirtyQuote to list.map"):
+        check_source(
+            ": map-it { xs:List<Int> q:DirtyQuote<{ | x:Int -- y:Int }> -- ys:List<Int> }\n"
+            "  xs q list.map\n"
+            ";"
+        )
+
+
+def test_checker_phase5_accepts_list_map_dirtyquote_in_dirty_frame():
+    check_source(
+        "dirty : map-it { xs:List<Int> q:DirtyQuote<{ | x:Int -- y:Int }> -- ys:List<Int> }\n"
+        "  xs q list.map\n"
+        ";"
+    )
+
+
+@pytest.mark.parametrize("builtin_name", ["list.filter", "list.fold", "list.reduce"])
+def test_checker_phase5_rejects_dirtyquote_for_other_hofs_in_pure_frame(builtin_name: str):
+    if builtin_name == "list.filter":
+        source = (
+            ": use-filter { xs:List<Int> q:DirtyQuote<{ | x:Int -- keep:Bool }> -- ys:List<Int> }\n"
+            "  xs q list.filter\n"
+            ";"
+        )
+    elif builtin_name == "list.fold":
+        source = (
+            ": use-fold { xs:List<Int> init:Int q:DirtyQuote<{ | acc:Int x:Int -- out:Int }> -- out:Int }\n"
+            "  xs init q list.fold\n"
+            ";"
+        )
+    else:
+        source = (
+            ": use-reduce { xs:List<Int> q:DirtyQuote<{ | a:Int b:Int -- c:Int }> -- out:Int }\n"
+            "  xs q list.reduce\n"
+            ";"
+        )
+    with pytest.raises(CheckerError, match=rf"pure frame cannot pass DirtyQuote to {builtin_name}"):
+        check_source(source)
+
+
+@pytest.mark.parametrize("builtin_name", ["list.filter", "list.fold", "list.reduce"])
+def test_checker_phase5_accepts_dirtyquote_for_other_hofs_in_dirty_frame(builtin_name: str):
+    if builtin_name == "list.filter":
+        source = (
+            "dirty : use-filter { xs:List<Int> q:DirtyQuote<{ | x:Int -- keep:Bool }> -- ys:List<Int> }\n"
+            "  xs q list.filter\n"
+            ";"
+        )
+    elif builtin_name == "list.fold":
+        source = (
+            "dirty : use-fold { xs:List<Int> init:Int q:DirtyQuote<{ | acc:Int x:Int -- out:Int }> -- out:Int }\n"
+            "  xs init q list.fold\n"
+            ";"
+        )
+    else:
+        source = (
+            "dirty : use-reduce { xs:List<Int> q:DirtyQuote<{ | a:Int b:Int -- c:Int }> -- out:Int }\n"
+            "  xs q list.reduce\n"
+            ";"
+        )
+    check_source(source)
+
+
+@pytest.mark.parametrize(
+    ("source", "host_words"),
+    [
+        (
+            "dirty : leaf { msg:String -- }\n"
+            "  msg host.log\n"
+            ";\n"
+            "dirty : make { msg:String -- q:DirtyQuote<{ captured:String | x:Int -- y:Int }> }\n"
+            "  msg\n"
+            "  :[ captured:String | x:Int -- y:Int |\n"
+            "    captured leaf\n"
+            "    x\n"
+            "  ;]\n"
+            ";",
+            [("host.log", "{ msg:String -- }", HostEffect.DIRTY)],
+        ),
+        (
+            ": helper { x:Int -- y:Int }\n"
+            "  x 1 +\n"
+            ";\n"
+            ": make { -- q:Quote<{ | x:Int -- y:Int }> }\n"
+            "  :[ | x:Int -- y:Int | x helper ;]\n"
+            ";",
+            [],
+        ),
+    ],
+)
+def test_checker_phase5_quote_body_effect_from_called_words(source: str, host_words):
+    if not host_words:
+        check_source(source)
+        return
+    resolved_host_words = [
+        HostWord(
+            name=name,
+            signature=signature_from_source(f": hostsig {signature_src} ;"),
+            effect=effect,
+        )
+        for name, signature_src, effect in host_words
+    ]
+    check_source_with_host_contract(source, resolved_host_words)
+
+
+def test_checker_phase5_graph_case1_unannotated_dirty_callee_in_quote_marks_quote_dirty() -> None:
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match=r"word 'b' inferred dirty.*missing dirty annotation"):
+        check_source_with_host_contract(
+            ": b { -- }\n"
+            '  "x" host.log\n'
+            ";\n"
+            "dirty : a { -- }\n"
+            "  :[ | -- |\n"
+            "    b\n"
+            "  ;]\n"
+            "  call\n"
+            ";",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+
+
+def test_checker_phase5_graph_case2_annotated_dirty_callee_in_quote() -> None:
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    check_source_with_host_contract(
+        "dirty : b { -- }\n"
+        '  "x" host.log\n'
+        ";\n"
+        "dirty : a { -- }\n"
+        "  :[ | -- |\n"
+        "    b\n"
+        "  ;]\n"
+        "  call\n"
+        ";",
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+    )
+
+
+def test_checker_phase5_graph_case3_recursive_quote_cycle_without_dirty_source_stays_pure() -> None:
+    check_source(
+        ": a { -- }\n"
+        "  :[ | -- |\n"
+        "    a\n"
+        "  ;]\n"
+        "  drop\n"
+        ";"
+    )
+
+
+def test_checker_phase5_graph_case4_pure_words_with_dirty_quote_path_fail_missing_dirty() -> None:
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match=r"pure frame cannot construct DirtyQuote"):
+        check_source_with_host_contract(
+            ": a { -- }\n"
+            "  :[ | -- |\n"
+            "    b\n"
+            "  ;]\n"
+            "  call\n"
+            ";\n"
+            ": b { -- }\n"
+            '  "x" host.log\n'
+            ";",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+
+
+def test_checker_phase5_graph_case5_nested_quotes_propagate_dirty() -> None:
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    check_source_with_host_contract(
+        "dirty : b { -- }\n"
+        '  "x" host.log\n'
+        ";\n"
+        "dirty : a { -- }\n"
+        "  :[ | -- |\n"
+        "    :[ | -- |\n"
+        "      b\n"
+        "    ;]\n"
+        "    call\n"
+        "  ;]\n"
+        "  call\n"
+        ";",
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+    )

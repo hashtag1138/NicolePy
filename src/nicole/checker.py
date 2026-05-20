@@ -15,6 +15,7 @@ from .ast_nodes import (
     PatternKind,
     PropagateNode,
     ProgramNode,
+    QuoteEffect,
     QuoteNode,
     QuoteTypeNode,
     ResultErrNode,
@@ -78,8 +79,9 @@ class Checker:
         for word in program.words:
             self._check_word(word)
         effect_analysis = self._analyze_effects(program)
-        self._validate_pure_to_dirty_calls(effect_analysis)
+        self._validate_quote_effect_restrictions(program, effect_analysis)
         self._validate_effect_annotations(effect_analysis)
+        self._validate_pure_to_dirty_calls(effect_analysis)
         return program
 
     def _validate_program_types(self, program: ProgramNode) -> None:
@@ -354,13 +356,14 @@ class Checker:
             item_type = _extract_list_item_type(list_type)
             quote_signature = _extract_quote_signature(quote_type)
             if item_type is None or quote_signature is None:
-                self._raise_error("list.map expects List<T> Quote<{ | x:T -- y:U }>", node.span.line, node.span.column)
+                self._raise_error("list.map expects List<T> (Quote|DirtyQuote)<{ | x:T -- y:U }>", node.span.line, node.span.column)
             if len(quote_signature.inputs) != 1 or len(quote_signature.outputs) != 1:
                 self._raise_error("list.map quotation must have one input and one output", node.span.line, node.span.column)
             quote_input_type = quote_signature.inputs[0].type_node
             quote_output_type = quote_signature.outputs[0].type_node
             if not _same_type(quote_input_type, item_type):
                 self._raise_error("list.map quotation input type does not match list element type", node.span.line, node.span.column)
+            node.resolution.quote_effect = quote_signature.effect_kind
             stack.append(StackValue(TypeNode(span=node.span, name="List", args=(quote_output_type,))))
             return
 
@@ -370,7 +373,7 @@ class Checker:
             item_type = _extract_list_item_type(list_type)
             quote_signature = _extract_quote_signature(quote_type)
             if item_type is None or quote_signature is None:
-                self._raise_error("list.filter expects List<T> Quote<{ | x:T -- keep:Bool }>", node.span.line, node.span.column)
+                self._raise_error("list.filter expects List<T> (Quote|DirtyQuote)<{ | x:T -- keep:Bool }>", node.span.line, node.span.column)
             if len(quote_signature.inputs) != 1 or len(quote_signature.outputs) != 1:
                 self._raise_error("list.filter quotation must have one input and one output", node.span.line, node.span.column)
             quote_input_type = quote_signature.inputs[0].type_node
@@ -379,6 +382,7 @@ class Checker:
                 self._raise_error("list.filter quotation input type does not match list element type", node.span.line, node.span.column)
             if not _is_named_type(quote_output_type, "Bool"):
                 self._raise_error("list.filter quotation output type must be Bool", node.span.line, node.span.column)
+            node.resolution.quote_effect = quote_signature.effect_kind
             stack.append(StackValue(TypeNode(span=node.span, name="List", args=(item_type,))))
             return
 
@@ -411,7 +415,7 @@ class Checker:
             item_type = _extract_list_item_type(list_type)
             quote_signature = _extract_quote_signature(quote_type)
             if item_type is None or quote_signature is None:
-                self._raise_error("list.fold expects List<T> Acc Quote<{ | acc:Acc x:T -- out:Acc }>", node.span.line, node.span.column)
+                self._raise_error("list.fold expects List<T> Acc (Quote|DirtyQuote)<{ | acc:Acc x:T -- out:Acc }>", node.span.line, node.span.column)
             if len(quote_signature.inputs) != 2 or len(quote_signature.outputs) != 1:
                 self._raise_error("list.fold quotation must have two inputs and one output", node.span.line, node.span.column)
             if not _same_type(quote_signature.inputs[0].type_node, accumulator_type):
@@ -420,6 +424,7 @@ class Checker:
                 self._raise_error("list.fold quotation item type does not match list element type", node.span.line, node.span.column)
             if not _same_type(quote_signature.outputs[0].type_node, accumulator_type):
                 self._raise_error("list.fold quotation output type does not match accumulator type", node.span.line, node.span.column)
+            node.resolution.quote_effect = quote_signature.effect_kind
             stack.append(StackValue(accumulator_type))
             return
 
@@ -430,7 +435,7 @@ class Checker:
             item_type = _extract_list_item_type(list_type)
             quote_signature = _extract_quote_signature(quote_type)
             if item_type is None or quote_signature is None:
-                self._raise_error("list.reduce expects List<T> Quote<{ | a:T b:T -- c:T }>", node.span.line, node.span.column)
+                self._raise_error("list.reduce expects List<T> (Quote|DirtyQuote)<{ | a:T b:T -- c:T }>", node.span.line, node.span.column)
             if list_value.known_empty_list:
                 self._raise_error("list.reduce cannot be applied to a provably empty list", node.span.line, node.span.column)
             if len(quote_signature.inputs) != 2 or len(quote_signature.outputs) != 1:
@@ -441,6 +446,7 @@ class Checker:
                 self._raise_error("list.reduce second quotation input type does not match list element type", node.span.line, node.span.column)
             if not _same_type(quote_signature.outputs[0].type_node, item_type):
                 self._raise_error("list.reduce quotation output type does not match list element type", node.span.line, node.span.column)
+            node.resolution.quote_effect = quote_signature.effect_kind
             stack.append(StackValue(item_type))
             return
 
@@ -509,13 +515,14 @@ class Checker:
             quote_type = self._pop_type(stack, node.span.line, node.span.column)
             quote_signature = _extract_quote_signature(quote_type)
             if quote_signature is None:
-                self._raise_error("call expects Quote<{ ... }>", node.span.line, node.span.column)
+                self._raise_error("call expects Quote<{ ... }> or DirtyQuote<{ ... }>", node.span.line, node.span.column)
             for parameter in reversed(quote_signature.inputs):
                 actual = self._pop_type(stack, node.span.line, node.span.column)
                 if not _same_type(actual, parameter.type_node):
                     self._raise_error("call input types do not match quotation inputs", node.span.line, node.span.column)
             for parameter in quote_signature.outputs:
                 stack.append(StackValue(parameter.type_node))
+            node.resolution.quote_effect = quote_signature.effect_kind
             return
 
         if node.operator == "drop":
@@ -741,6 +748,8 @@ class Checker:
         expected_outputs = [parameter.type_node for parameter in node.outputs]
         if not _same_stack(quote_end_stack, expected_outputs):
             self._raise_error("quotation body does not match declared outputs", node.span.line, node.span.column)
+        quote_effect = self._infer_quote_effect_for_typecheck(node.body)
+        node.resolution.quote_effect = quote_effect
 
         quote_type = TypeNode(
             span=node.span,
@@ -748,6 +757,7 @@ class Checker:
             args=(
                 QuoteTypeNode(
                     span=node.span,
+                    effect_kind=quote_effect,
                     captures=node.captures,
                     inputs=node.inputs,
                     outputs=node.outputs,
@@ -803,44 +813,263 @@ class Checker:
     def _raise_error(self, message: str, line: int, column: int) -> None:
         raise CheckerError(message=message, line=line, column=column)
 
+    def _infer_quote_effect_for_typecheck(self, block: BlockNode) -> QuoteEffect:
+        for item in block.items:
+            if self._item_introduces_dirty_quote_effect_for_typecheck(item):
+                return QuoteEffect.DIRTY
+        return QuoteEffect.PURE
+
+    def _item_introduces_dirty_quote_effect_for_typecheck(self, item) -> bool:
+        if isinstance(item, IdentifierNode):
+            if item.resolution.owner_scope == "host":
+                return item.resolution.host_effect is HostEffect.DIRTY
+            if item.name in {"list.map", "list.filter", "list.fold", "list.reduce"}:
+                return item.resolution.quote_effect is QuoteEffect.DIRTY
+            symbol = item.resolution.resolved_symbol
+            if isinstance(symbol, WordSymbol) and symbol.source is SymbolSource.USER:
+                return bool(item.resolution.declared_dirty)
+            return False
+        if isinstance(item, OperatorNode):
+            return item.operator == "call" and item.resolution.quote_effect is QuoteEffect.DIRTY
+        if isinstance(item, QuoteNode):
+            return (
+                item.resolution.quote_effect is QuoteEffect.DIRTY
+                or self._infer_quote_effect_for_typecheck(item.body) is QuoteEffect.DIRTY
+            )
+        if isinstance(item, IfNode):
+            return (
+                self._infer_quote_effect_for_typecheck(item.then_block) is QuoteEffect.DIRTY
+                or self._infer_quote_effect_for_typecheck(item.else_block) is QuoteEffect.DIRTY
+            )
+        if isinstance(item, CaseNode):
+            for branch in item.branches:
+                if self._infer_quote_effect_for_typecheck(branch.body) is QuoteEffect.DIRTY:
+                    return True
+            return False
+        if isinstance(item, ListLiteralNode):
+            for element in item.elements:
+                if self._item_introduces_dirty_quote_effect_for_typecheck(element):
+                    return True
+            return False
+        return False
+
     def _analyze_effects(self, program: ProgramNode) -> EffectAnalysisResult:
         words = self._collect_words(program)
         word_order = [qualified_name for qualified_name, _ in words]
-        known_words = set(word_order)
         declared_dirty_by_word = {qualified_name: word.is_dirty_annotation for qualified_name, word in words}
         spans_by_word = {
             qualified_name: (word.span.line, word.span.column)
             for qualified_name, word in words
         }
-        graph: dict[str, set[str]] = {qualified_name: set() for qualified_name in word_order}
-        direct_dirty_source_by_word = {qualified_name: False for qualified_name in word_order}
+        known_words = set(word_order)
+        word_node_by_name = {qualified_name: f"word:{qualified_name}" for qualified_name in word_order}
+        node_order = [word_node_by_name[name] for name in word_order]
+        graph: dict[str, set[str]] = {node: set() for node in node_order}
+        direct_dirty_source_by_node: dict[str, bool] = {node: False for node in node_order}
+        quote_nodes: dict[str, QuoteNode] = {}
+        quote_site_counter = 0
         calls_by_word: dict[str, list[_CallEdge]] = {qualified_name: [] for qualified_name in word_order}
 
-        for qualified_name, word in words:
-            edges, has_direct_dirty_source = self._collect_effect_inputs_from_block(
-                word.body,
-                caller=qualified_name,
-                known_words=known_words,
-            )
-            for edge in edges:
-                graph[qualified_name].add(edge.callee)
-            calls_by_word[qualified_name].extend(edges)
-            direct_dirty_source_by_word[qualified_name] = has_direct_dirty_source
+        def ensure_node(node_id: str) -> None:
+            if node_id in graph:
+                return
+            graph[node_id] = set()
+            direct_dirty_source_by_node[node_id] = False
+            node_order.append(node_id)
 
-        components, component_for_word = _compute_sccs(graph, word_order)
-        component_edges: dict[int, set[int]] = {component_id: set() for component_id in range(len(components))}
+        def add_edge(source: str, target: str) -> None:
+            ensure_node(source)
+            ensure_node(target)
+            graph[source].add(target)
+
+        def mark_direct_dirty(node_id: str) -> None:
+            ensure_node(node_id)
+            direct_dirty_source_by_node[node_id] = True
+
+        def classify_identifier(
+            identifier: IdentifierNode,
+            *,
+            source_node: str,
+            owner_word_name: str,
+            is_owner_word_frame: bool,
+        ) -> None:
+            if identifier.resolution.owner_scope == "host":
+                if identifier.resolution.host_effect is HostEffect.DIRTY:
+                    mark_direct_dirty(source_node)
+                return
+            if (
+                identifier.name in {"list.map", "list.filter", "list.fold", "list.reduce"}
+                and identifier.resolution.quote_effect is QuoteEffect.DIRTY
+            ):
+                mark_direct_dirty(source_node)
+                return
+            symbol = identifier.resolution.resolved_symbol
+            if not isinstance(symbol, WordSymbol):
+                return
+            if symbol.source is not SymbolSource.USER:
+                return
+            callee_name = symbol.qualified_name
+            if callee_name not in known_words:
+                return
+            add_edge(source_node, word_node_by_name[callee_name])
+            if is_owner_word_frame:
+                calls_by_word[owner_word_name].append(
+                    _CallEdge(
+                        caller=owner_word_name,
+                        callee=callee_name,
+                        line=identifier.span.line,
+                        column=identifier.span.column,
+                    )
+                )
+
+        def walk_block(
+            block: BlockNode,
+            *,
+            source_node: str,
+            owner_word_name: str,
+            is_owner_word_frame: bool,
+        ) -> None:
+            nonlocal quote_site_counter
+            for item in block.items:
+                if isinstance(item, IdentifierNode):
+                    classify_identifier(
+                        item,
+                        source_node=source_node,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=is_owner_word_frame,
+                    )
+                    continue
+                if isinstance(item, OperatorNode):
+                    if item.operator == "call" and item.resolution.quote_effect is QuoteEffect.DIRTY:
+                        mark_direct_dirty(source_node)
+                    continue
+                if isinstance(item, IfNode):
+                    walk_block(
+                        item.then_block,
+                        source_node=source_node,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=is_owner_word_frame,
+                    )
+                    walk_block(
+                        item.else_block,
+                        source_node=source_node,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=is_owner_word_frame,
+                    )
+                    continue
+                if isinstance(item, CaseNode):
+                    for branch in item.branches:
+                        walk_block(
+                            branch.body,
+                            source_node=source_node,
+                            owner_word_name=owner_word_name,
+                            is_owner_word_frame=is_owner_word_frame,
+                        )
+                    continue
+                if isinstance(item, ListLiteralNode):
+                    walk_list_literal(
+                        item,
+                        source_node=source_node,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=is_owner_word_frame,
+                    )
+                    continue
+                if isinstance(item, QuoteNode):
+                    quote_site_counter += 1
+                    quote_node_id = f"quote:{owner_word_name}:{quote_site_counter}"
+                    quote_nodes[quote_node_id] = item
+                    add_edge(source_node, quote_node_id)
+                    walk_block(
+                        item.body,
+                        source_node=quote_node_id,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=False,
+                    )
+
+        def walk_list_literal(
+            list_literal: ListLiteralNode,
+            *,
+            source_node: str,
+            owner_word_name: str,
+            is_owner_word_frame: bool,
+        ) -> None:
+            nonlocal quote_site_counter
+            for element in list_literal.elements:
+                if isinstance(element, IdentifierNode):
+                    classify_identifier(
+                        element,
+                        source_node=source_node,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=is_owner_word_frame,
+                    )
+                    continue
+                if isinstance(element, OperatorNode):
+                    if element.operator == "call" and element.resolution.quote_effect is QuoteEffect.DIRTY:
+                        mark_direct_dirty(source_node)
+                    continue
+                if isinstance(element, IfNode):
+                    walk_block(
+                        element.then_block,
+                        source_node=source_node,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=is_owner_word_frame,
+                    )
+                    walk_block(
+                        element.else_block,
+                        source_node=source_node,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=is_owner_word_frame,
+                    )
+                    continue
+                if isinstance(element, CaseNode):
+                    for branch in element.branches:
+                        walk_block(
+                            branch.body,
+                            source_node=source_node,
+                            owner_word_name=owner_word_name,
+                            is_owner_word_frame=is_owner_word_frame,
+                        )
+                    continue
+                if isinstance(element, ListLiteralNode):
+                    walk_list_literal(
+                        element,
+                        source_node=source_node,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=is_owner_word_frame,
+                    )
+                    continue
+                if isinstance(element, QuoteNode):
+                    quote_site_counter += 1
+                    quote_node_id = f"quote:{owner_word_name}:{quote_site_counter}"
+                    quote_nodes[quote_node_id] = element
+                    add_edge(source_node, quote_node_id)
+                    walk_block(
+                        element.body,
+                        source_node=quote_node_id,
+                        owner_word_name=owner_word_name,
+                        is_owner_word_frame=False,
+                    )
+
+        for qualified_name, word in words:
+            walk_block(
+                word.body,
+                source_node=word_node_by_name[qualified_name],
+                owner_word_name=qualified_name,
+                is_owner_word_frame=True,
+            )
+
+        components, component_for_node = _compute_sccs(graph, node_order)
         reverse_component_edges: dict[int, set[int]] = {component_id: set() for component_id in range(len(components))}
         direct_dirty_components: set[int] = set()
 
-        for component_id, component_words in enumerate(components):
-            if any(direct_dirty_source_by_word[word_name] for word_name in component_words):
+        for component_id, component_nodes in enumerate(components):
+            if any(direct_dirty_source_by_node[node_id] for node_id in component_nodes):
                 direct_dirty_components.add(component_id)
 
-        for caller_name, callees in graph.items():
-            caller_component = component_for_word[caller_name]
-            for callee_name in callees:
-                callee_component = component_for_word[callee_name]
-                component_edges[caller_component].add(callee_component)
+        for caller_node, callees in graph.items():
+            caller_component = component_for_node[caller_node]
+            for callee_node in callees:
+                callee_component = component_for_node[callee_node]
                 reverse_component_edges[callee_component].add(caller_component)
 
         dirty_components = set(direct_dirty_components)
@@ -853,14 +1082,23 @@ class Checker:
                 dirty_components.add(caller_component)
                 queue.append(caller_component)
 
-        effects = {
-            word_name: WordEffectInfo(
-                declared_dirty=declared_dirty_by_word[word_name],
-                inferred_dirty=component_for_word[word_name] in dirty_components,
-                direct_dirty_source=direct_dirty_source_by_word[word_name],
-            )
-            for word_name in word_order
+        inferred_dirty_by_node = {
+            node_id: component_for_node[node_id] in dirty_components
+            for node_id in node_order
         }
+        for quote_node_id, quote_node in quote_nodes.items():
+            quote_node.resolution.quote_effect = (
+                QuoteEffect.DIRTY if inferred_dirty_by_node[quote_node_id] else QuoteEffect.PURE
+            )
+
+        effects = {}
+        for word_name in word_order:
+            node_id = word_node_by_name[word_name]
+            effects[word_name] = WordEffectInfo(
+                declared_dirty=declared_dirty_by_word[word_name],
+                inferred_dirty=inferred_dirty_by_node[node_id],
+                direct_dirty_source=direct_dirty_source_by_node[node_id],
+            )
         frozen_calls_by_word = {
             word_name: tuple(calls_by_word[word_name])
             for word_name in word_order
@@ -890,140 +1128,74 @@ class Checker:
         for nested_word in word.nested_words:
             self._collect_nested_words(nested_word, owner=qualified_name, out=out)
 
-    def _collect_effect_inputs_from_block(
-        self,
-        block: BlockNode,
-        *,
-        caller: str,
-        known_words: set[str],
-    ) -> tuple[list[_CallEdge], bool]:
-        edges: list[_CallEdge] = []
-        has_direct_dirty_source = False
+    def _validate_quote_effect_restrictions(self, program: ProgramNode, analysis: EffectAnalysisResult) -> None:
+        words = self._collect_words(program)
+        word_nodes_by_name = {qualified_name: word for qualified_name, word in words}
+
+        for word_name in analysis.word_order:
+            effect = analysis.effects[word_name]
+            if effect.declared_dirty:
+                continue
+            word_node = word_nodes_by_name.get(word_name)
+            if word_node is None:
+                continue
+            violation = self._find_dirty_quote_usage(word_node.body)
+            if violation is None:
+                continue
+            message, line, column = violation
+            self._raise_error(message, line, column)
+
+    def _find_dirty_quote_usage(self, block: BlockNode) -> tuple[str, int, int] | None:
         for item in block.items:
+            if isinstance(item, QuoteNode):
+                if item.resolution.quote_effect is QuoteEffect.DIRTY:
+                    return (
+                        "pure frame cannot construct DirtyQuote",
+                        item.span.line,
+                        item.span.column,
+                    )
+                nested = self._find_dirty_quote_usage(item.body)
+                if nested is not None:
+                    return nested
+                continue
+            if isinstance(item, OperatorNode):
+                if item.operator == "call" and item.resolution.quote_effect is QuoteEffect.DIRTY:
+                    return (
+                        "pure frame cannot call DirtyQuote",
+                        item.span.line,
+                        item.span.column,
+                    )
+                continue
             if isinstance(item, IdentifierNode):
-                edge, is_direct_dirty = self._classify_identifier_effect_input(
-                    item,
-                    caller=caller,
-                    known_words=known_words,
-                )
-                if edge is not None:
-                    edges.append(edge)
-                has_direct_dirty_source = has_direct_dirty_source or is_direct_dirty
+                if (
+                    item.name in {"list.map", "list.filter", "list.fold", "list.reduce"}
+                    and item.resolution.quote_effect is QuoteEffect.DIRTY
+                ):
+                    return (
+                        f"pure frame cannot pass DirtyQuote to {item.name}",
+                        item.span.line,
+                        item.span.column,
+                    )
                 continue
             if isinstance(item, IfNode):
-                then_edges, then_direct_dirty = self._collect_effect_inputs_from_block(
-                    item.then_block,
-                    caller=caller,
-                    known_words=known_words,
-                )
-                else_edges, else_direct_dirty = self._collect_effect_inputs_from_block(
-                    item.else_block,
-                    caller=caller,
-                    known_words=known_words,
-                )
-                edges.extend(then_edges)
-                edges.extend(else_edges)
-                has_direct_dirty_source = has_direct_dirty_source or then_direct_dirty or else_direct_dirty
+                nested = self._find_dirty_quote_usage(item.then_block)
+                if nested is not None:
+                    return nested
+                nested = self._find_dirty_quote_usage(item.else_block)
+                if nested is not None:
+                    return nested
                 continue
             if isinstance(item, CaseNode):
                 for branch in item.branches:
-                    branch_edges, branch_direct_dirty = self._collect_effect_inputs_from_block(
-                        branch.body,
-                        caller=caller,
-                        known_words=known_words,
-                    )
-                    edges.extend(branch_edges)
-                    has_direct_dirty_source = has_direct_dirty_source or branch_direct_dirty
+                    nested = self._find_dirty_quote_usage(branch.body)
+                    if nested is not None:
+                        return nested
                 continue
             if isinstance(item, ListLiteralNode):
-                list_edges, list_direct_dirty = self._collect_effect_inputs_from_list_literal(
-                    item,
-                    caller=caller,
-                    known_words=known_words,
-                )
-                edges.extend(list_edges)
-                has_direct_dirty_source = has_direct_dirty_source or list_direct_dirty
-                continue
-            # Quotations are intentionally ignored in Phase 4 effect inference.
-        return edges, has_direct_dirty_source
-
-    def _collect_effect_inputs_from_list_literal(
-        self,
-        list_literal: ListLiteralNode,
-        *,
-        caller: str,
-        known_words: set[str],
-    ) -> tuple[list[_CallEdge], bool]:
-        edges: list[_CallEdge] = []
-        has_direct_dirty_source = False
-        for element in list_literal.elements:
-            if isinstance(element, IdentifierNode):
-                edge, is_direct_dirty = self._classify_identifier_effect_input(
-                    element,
-                    caller=caller,
-                    known_words=known_words,
-                )
-                if edge is not None:
-                    edges.append(edge)
-                has_direct_dirty_source = has_direct_dirty_source or is_direct_dirty
-                continue
-            if isinstance(element, IfNode):
-                then_edges, then_direct_dirty = self._collect_effect_inputs_from_block(
-                    element.then_block,
-                    caller=caller,
-                    known_words=known_words,
-                )
-                else_edges, else_direct_dirty = self._collect_effect_inputs_from_block(
-                    element.else_block,
-                    caller=caller,
-                    known_words=known_words,
-                )
-                edges.extend(then_edges)
-                edges.extend(else_edges)
-                has_direct_dirty_source = has_direct_dirty_source or then_direct_dirty or else_direct_dirty
-                continue
-            if isinstance(element, CaseNode):
-                for branch in element.branches:
-                    branch_edges, branch_direct_dirty = self._collect_effect_inputs_from_block(
-                        branch.body,
-                        caller=caller,
-                        known_words=known_words,
-                    )
-                    edges.extend(branch_edges)
-                    has_direct_dirty_source = has_direct_dirty_source or branch_direct_dirty
-                continue
-            if isinstance(element, ListLiteralNode):
-                nested_edges, nested_direct_dirty = self._collect_effect_inputs_from_list_literal(
-                    element,
-                    caller=caller,
-                    known_words=known_words,
-                )
-                edges.extend(nested_edges)
-                has_direct_dirty_source = has_direct_dirty_source or nested_direct_dirty
-                continue
-            # Quotations are intentionally ignored in Phase 4 effect inference.
-        return edges, has_direct_dirty_source
-
-    def _classify_identifier_effect_input(
-        self,
-        identifier: IdentifierNode,
-        *,
-        caller: str,
-        known_words: set[str],
-    ) -> tuple[_CallEdge | None, bool]:
-        if identifier.resolution.owner_scope == "host":
-            return None, identifier.resolution.host_effect is HostEffect.DIRTY
-
-        symbol = identifier.resolution.resolved_symbol
-        if not isinstance(symbol, WordSymbol):
-            return None, False
-        if symbol.source is not SymbolSource.USER:
-            return None, False
-
-        callee = symbol.qualified_name
-        if callee not in known_words:
-            return None, False
-        return _CallEdge(caller=caller, callee=callee, line=identifier.span.line, column=identifier.span.column), False
+                nested = self._find_dirty_quote_usage(BlockNode(span=item.span, items=item.elements))
+                if nested is not None:
+                    return nested
+        return None
 
     def _validate_pure_to_dirty_calls(self, analysis: EffectAnalysisResult) -> None:
         for caller in analysis.word_order:
@@ -1113,7 +1285,7 @@ def _extract_map_types(type_node: TypeNode) -> tuple[TypeNode, TypeNode] | None:
 
 
 def _extract_quote_signature(type_node: TypeNode) -> QuoteTypeNode | None:
-    if type_node.name != "Quote" or len(type_node.args) != 1:
+    if type_node.name not in {"Quote", "DirtyQuote"} or len(type_node.args) != 1:
         return None
     signature = type_node.args[0]
     if not isinstance(signature, QuoteTypeNode):
@@ -1184,6 +1356,8 @@ def _same_type(left: TypeNode, right: TypeNode) -> bool:
 
 def _same_quote_type(left: QuoteTypeNode, right: QuoteTypeNode) -> bool:
     return (
+        left.effect_kind is right.effect_kind
+        and
         _same_parameter_types(left.captures, right.captures)
         and _same_parameter_types(left.inputs, right.inputs)
         and _same_parameter_types(left.outputs, right.outputs)

@@ -16,6 +16,7 @@ from nicole.ast_nodes import (
     PatternKind,
     PropagateNode,
     QuoteNode,
+    QuoteEffect,
     ResultErrNode,
     ResultOkNode,
     TypedEmptyListNode,
@@ -206,6 +207,32 @@ def test_parser_accepts_typed_empty_map_with_nested_quote_type():
     quote_type = map_node.type_node.args[1]
     assert quote_type.name == "Quote"
     assert len(quote_type.args) == 1
+    assert quote_type.args[0].effect_kind is QuoteEffect.PURE
+
+
+def test_parser_parses_dirtyquote_type_as_dirty_effect_kind():
+    program = parse_source(
+        ": make { -- q:DirtyQuote<{ | x:Int -- y:Int }> }\n"
+        "  :[ | x:Int -- y:Int | x ;]\n"
+        ";"
+    )
+    quote_type = program.words[0].signature.outputs[0].type_node
+
+    assert quote_type.name == "Quote"
+    assert len(quote_type.args) == 1
+    assert quote_type.args[0].effect_kind is QuoteEffect.DIRTY
+
+
+def test_parser_accepts_dirtyquote_nested_in_generic_type():
+    program = parse_source(
+        ": typed { -- m:Map<String,DirtyQuote<{ | x:Int -- y:Int }>> }\n"
+        "  map.empty:Map<String,DirtyQuote<{ | x:Int -- y:Int }>>\n"
+        ";"
+    )
+    inner_type = program.words[0].signature.outputs[0].type_node.args[1]
+
+    assert inner_type.name == "Quote"
+    assert inner_type.args[0].effect_kind is QuoteEffect.DIRTY
 
 
 def test_parser_rejects_bare_empty_map():
