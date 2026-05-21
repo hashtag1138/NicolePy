@@ -636,6 +636,15 @@ def test_checker_accepts_err_constructor_in_result_frame() -> None:
     )
 
 
+def test_checker_accepts_err_constructor_with_non_string_error_type() -> None:
+    check_source(
+        ": err { e:Int -- r:Result<Bool,Int> }\n"
+        "  e\n"
+        "  Err!\n"
+        ";"
+    )
+
+
 def test_checker_accepts_propagate_with_matching_result_error_type() -> None:
     check_source(
         ": ok { -- r:Result<Int,MapError> }\n"

@@ -2188,6 +2188,34 @@ def test_runtime_result_is_err_executes() -> None:
     assert run_export(checked, "app.run", RuntimeHostBindings({})) is True
 
 
+def test_runtime_err_constructor_preserves_generic_error_values() -> None:
+    checked = analyze_program(
+        "export : app.err-string { -- r:Result<Int,String> }\n"
+        '  "abc" Err!\n'
+        ";\n"
+        "export : app.err-int { -- r:Result<Int,Int> }\n"
+        "  123 Err!\n"
+        ";\n"
+        "export : app.err-bool { -- r:Result<Int,Bool> }\n"
+        "  true Err!\n"
+        ";\n"
+        "export : app.err-list { -- r:Result<Int,List<String>> }\n"
+        "  [\"x\", \"y\"] Err!\n"
+        ";\n"
+        "export : app.err-map { -- r:Result<Int,Map<String,Int>> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "k" 7 map.set\n'
+        "  Err!\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.err-string", RuntimeHostBindings({})) == Err("abc")
+    assert run_export(checked, "app.err-int", RuntimeHostBindings({})) == Err(123)
+    assert run_export(checked, "app.err-bool", RuntimeHostBindings({})) == Err(True)
+    assert run_export(checked, "app.err-list", RuntimeHostBindings({})) == Err(("x", "y"))
+    assert run_export(checked, "app.err-map", RuntimeHostBindings({})) == Err({"k": 7})
+
+
 def test_runtime_result_unwrap_or_executes() -> None:
     checked = analyze_program(
         "export : app.ok { -- n:Int }\n"

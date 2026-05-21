@@ -193,7 +193,6 @@ def _execute_block(
             continue
         if isinstance(item, ResultErrNode):
             error = stack.pop()
-            _ensure_matches_type(error, "String", context="Err! input")
             stack.push(Err(error))
             continue
         if isinstance(item, QuoteNode):
