@@ -126,6 +126,35 @@ def test_pipeline_rejects_export_quote_nested_output() -> None:
         )
 
 
+def test_pipeline_rejects_export_custom_type() -> None:
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        analyze_program(
+            "export : bad { x:Custom -- }\n"
+            "  x drop\n"
+            ";\n"
+        )
+
+
+def test_pipeline_rejects_export_with_nested_invalid_type() -> None:
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        analyze_program(
+            "export : bad { x:Result<List<Custom>,String> -- }\n"
+            "  x drop\n"
+            ";\n"
+        )
+
+
+def test_pipeline_accepts_export_with_nested_valid_abi_types() -> None:
+    result = analyze_program(
+        "export : ok { xs:List<Result<Int,String>> r:Result<List<Int>,MapError> -- }\n"
+        "  xs drop\n"
+        "  r drop\n"
+        ";\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
 def test_pipeline_accepts_local_quote_usage() -> None:
     result = analyze_program(
         ": local-ok { -- q:Quote<{ | -- }> }\n"

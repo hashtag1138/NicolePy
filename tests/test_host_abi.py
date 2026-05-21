@@ -297,3 +297,60 @@ def test_host_contract_rejects_invalid_map_key_type() -> None:
     signature = signature_from_source(": hostsig { -- m:Map<List<Int>,String> } ;")
     with pytest.raises(HostABIError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
         host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_rejects_custom_type() -> None:
+    signature = signature_from_source(": hostsig { x:Custom -- } ;")
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_rejects_list_of_custom_type() -> None:
+    signature = signature_from_source(": hostsig { xs:List<Custom> -- } ;")
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_rejects_map_with_custom_value_type() -> None:
+    signature = signature_from_source(": hostsig { m:Map<String,Custom> -- } ;")
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_rejects_map_with_custom_key_type() -> None:
+    signature = signature_from_source(": hostsig { m:Map<Custom,Int> -- } ;")
+    with pytest.raises(HostABIError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_rejects_result_with_custom_ok_type() -> None:
+    signature = signature_from_source(": hostsig { r:Result<Custom,String> -- } ;")
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_rejects_result_with_custom_err_type() -> None:
+    signature = signature_from_source(": hostsig { r:Result<Int,Custom> -- } ;")
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_rejects_nested_custom_type() -> None:
+    signature = signature_from_source(": hostsig { r:Result<List<Custom>,String> -- } ;")
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_rejects_list_of_result_with_nested_custom_type() -> None:
+    signature = signature_from_source(": hostsig { xs:List<Result<Custom,String>> -- } ;")
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_contract_accepts_nested_valid_abi_types() -> None:
+    signature = signature_from_source(
+        ": hostsig { xs:List<Result<Int,String>> r:Result<List<Int>,MapError> -- } ;"
+    )
+    contract = host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
+
+    assert "host.run" in contract.words

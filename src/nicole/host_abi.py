@@ -8,6 +8,16 @@ from types import MappingProxyType
 from .ast_nodes import QuoteTypeNode, SignatureNode, TypeNode, Visibility
 from .symbols import SymbolTable
 
+_ABI_SCALAR_TYPES_V1 = {
+    "Int",
+    "Float",
+    "String",
+    "Bool",
+    "Unit",
+    "ListError",
+    "MapError",
+}
+
 
 @dataclass(slots=True)
 class HostABIError(Exception):
@@ -107,11 +117,6 @@ def validate_type_v1(
     *,
     forbid_quote: bool,
 ) -> None:
-    if type_node.name == "Map" and len(type_node.args) == 2:
-        key_type = type_node.args[0]
-        if isinstance(key_type, TypeNode) and key_type.name not in {"Int", "String", "Bool"}:
-            raise HostABIError("Map<K,V> key type must be Int, String, or Bool in v1")
-
     if type_node.name in {"Quote", "DirtyQuote"}:
         if forbid_quote:
             raise HostABIError("Quote is forbidden across ABI in v1 (including DirtyQuote)")
@@ -127,6 +132,49 @@ def validate_type_v1(
         for parameter in quote_signature.outputs:
             validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
         return
+
+    if forbid_quote:
+        if type_node.name in _ABI_SCALAR_TYPES_V1:
+            if type_node.args:
+                raise HostABIError(f"type is not ABI-compatible in v1: {type_node.name}")
+            return
+
+        if type_node.name == "List":
+            if len(type_node.args) != 1 or not isinstance(type_node.args[0], TypeNode):
+                raise HostABIError("type is not ABI-compatible in v1: List")
+            validate_type_v1(type_node.args[0], forbid_quote=True)
+            return
+
+        if type_node.name == "Map":
+            if len(type_node.args) != 2:
+                raise HostABIError("type is not ABI-compatible in v1: Map")
+            key_type = type_node.args[0]
+            value_type = type_node.args[1]
+            if not isinstance(key_type, TypeNode) or not isinstance(value_type, TypeNode):
+                raise HostABIError("type is not ABI-compatible in v1: Map")
+            if key_type.name not in {"Int", "String", "Bool"}:
+                raise HostABIError("Map<K,V> key type must be Int, String, or Bool in v1")
+            validate_type_v1(key_type, forbid_quote=True)
+            validate_type_v1(value_type, forbid_quote=True)
+            return
+
+        if type_node.name == "Result":
+            if len(type_node.args) != 2:
+                raise HostABIError("type is not ABI-compatible in v1: Result")
+            value_type = type_node.args[0]
+            error_type = type_node.args[1]
+            if not isinstance(value_type, TypeNode) or not isinstance(error_type, TypeNode):
+                raise HostABIError("type is not ABI-compatible in v1: Result")
+            validate_type_v1(value_type, forbid_quote=True)
+            validate_type_v1(error_type, forbid_quote=True)
+            return
+
+        raise HostABIError(f"type is not ABI-compatible in v1: {type_node.name}")
+
+    if type_node.name == "Map" and len(type_node.args) == 2:
+        key_type = type_node.args[0]
+        if isinstance(key_type, TypeNode) and key_type.name not in {"Int", "String", "Bool"}:
+            raise HostABIError("Map<K,V> key type must be Int, String, or Bool in v1")
 
     for argument in type_node.args:
         if isinstance(argument, TypeNode):
