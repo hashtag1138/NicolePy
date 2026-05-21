@@ -43,6 +43,40 @@ def test_checker_accepts_simple_add():
     )
 
 
+def test_checker_accepts_v1_primitive_signature_types() -> None:
+    check_source(
+        ": id { i:Int f:Float b:Bool s:String u:Unit -- i2:Int f2:Float b2:Bool s2:String u2:Unit }\n"
+        "  i f b s u\n"
+        ";"
+    )
+
+
+def test_checker_accepts_v1_nested_container_types() -> None:
+    check_source(
+        ": pass { xs:List<Result<Int,Bool>> m:Map<String,List<Result<Int,Bool>>> -- ys:List<Result<Int,Bool>> out:Map<String,List<Result<Int,Bool>>> }\n"
+        "  xs m\n"
+        ";"
+    )
+
+
+def test_checker_rejects_unknown_nominal_type_in_signature() -> None:
+    with pytest.raises(CheckerError, match="type is not supported in v1: Foo"):
+        check_source(
+            ": id { x:Foo -- y:Foo }\n"
+            "  x\n"
+            ";"
+        )
+
+
+def test_checker_rejects_nested_unknown_nominal_type() -> None:
+    with pytest.raises(CheckerError, match="type is not supported in v1: CustomError"):
+        check_source(
+            ": bad { x:Result<Int,CustomError> -- }\n"
+            "  x drop\n"
+            ";"
+        )
+
+
 def test_checker_accepts_host_word_with_matching_signature():
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
     check_source_with_host_contract(

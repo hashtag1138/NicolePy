@@ -30,6 +30,16 @@ from .symbols import SymbolSource, SymbolTable, WordSymbol
 
 __all__ = ["Checker", "CheckerError", "check", "check_program"]
 
+_LANGUAGE_SCALAR_TYPES_V1 = {
+    "Int",
+    "Float",
+    "String",
+    "Bool",
+    "Unit",
+    "ListError",
+    "MapError",
+}
+
 
 @dataclass(slots=True)
 class CheckerError(Exception):
@@ -142,6 +152,7 @@ class Checker:
 
     def _validate_type_node(self, type_node: TypeNode) -> None:
         try:
+            _validate_language_type_v1(type_node)
             validate_type_v1(type_node, forbid_quote=False)
         except HostABIError as error:
             self._raise_error(error.message, type_node.span.line, type_node.span.column)
@@ -1322,6 +1333,57 @@ def _builtin_type(name: str) -> TypeNode:
     from .tokens import SourceSpan
 
     return TypeNode(span=SourceSpan(line=0, column=0, offset=0), name=name)
+
+
+def _validate_language_type_v1(type_node: TypeNode) -> None:
+    if type_node.name in _LANGUAGE_SCALAR_TYPES_V1:
+        if type_node.args:
+            raise HostABIError(f"type is not supported in v1: {type_node.name}")
+        return
+
+    if type_node.name == "List":
+        if len(type_node.args) != 1 or not isinstance(type_node.args[0], TypeNode):
+            raise HostABIError("type is not supported in v1: List")
+        _validate_language_type_v1(type_node.args[0])
+        return
+
+    if type_node.name == "Map":
+        if len(type_node.args) != 2:
+            raise HostABIError("type is not supported in v1: Map")
+        key_type = type_node.args[0]
+        value_type = type_node.args[1]
+        if not isinstance(key_type, TypeNode) or not isinstance(value_type, TypeNode):
+            raise HostABIError("type is not supported in v1: Map")
+        if key_type.name not in {"Int", "String", "Bool"}:
+            raise HostABIError("Map<K,V> key type must be Int, String, or Bool in v1")
+        _validate_language_type_v1(key_type)
+        _validate_language_type_v1(value_type)
+        return
+
+    if type_node.name == "Result":
+        if len(type_node.args) != 2:
+            raise HostABIError("type is not supported in v1: Result")
+        value_type = type_node.args[0]
+        error_type = type_node.args[1]
+        if not isinstance(value_type, TypeNode) or not isinstance(error_type, TypeNode):
+            raise HostABIError("type is not supported in v1: Result")
+        _validate_language_type_v1(value_type)
+        _validate_language_type_v1(error_type)
+        return
+
+    if type_node.name in {"Quote", "DirtyQuote"}:
+        if len(type_node.args) != 1 or not isinstance(type_node.args[0], QuoteTypeNode):
+            raise HostABIError(f"type is not supported in v1: {type_node.name}")
+        quote_signature = type_node.args[0]
+        for parameter in quote_signature.captures:
+            _validate_language_type_v1(parameter.type_node)
+        for parameter in quote_signature.inputs:
+            _validate_language_type_v1(parameter.type_node)
+        for parameter in quote_signature.outputs:
+            _validate_language_type_v1(parameter.type_node)
+        return
+
+    raise HostABIError(f"type is not supported in v1: {type_node.name}")
 
 
 def _result_type(span, value_type: TypeNode, error_type: TypeNode) -> TypeNode:

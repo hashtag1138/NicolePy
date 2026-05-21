@@ -127,7 +127,7 @@ def test_pipeline_rejects_export_quote_nested_output() -> None:
 
 
 def test_pipeline_rejects_export_custom_type() -> None:
-    with pytest.raises(HostABIError, match="ABI-compatible"):
+    with pytest.raises(CheckerError, match="type is not supported in v1: Custom"):
         analyze_program(
             "export : bad { x:Custom -- }\n"
             "  x drop\n"
@@ -136,7 +136,7 @@ def test_pipeline_rejects_export_custom_type() -> None:
 
 
 def test_pipeline_rejects_export_with_nested_invalid_type() -> None:
-    with pytest.raises(HostABIError, match="ABI-compatible"):
+    with pytest.raises(CheckerError, match="type is not supported in v1: Custom"):
         analyze_program(
             "export : bad { x:Result<List<Custom>,String> -- }\n"
             "  x drop\n"
@@ -159,6 +159,26 @@ def test_pipeline_accepts_local_quote_usage() -> None:
     result = analyze_program(
         ": local-ok { -- q:Quote<{ | -- }> }\n"
         "  :[ | -- | ;]\n"
+        ";"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_rejects_local_unknown_nominal_type() -> None:
+    with pytest.raises(CheckerError, match="type is not supported in v1: Custom"):
+        analyze_program(
+            ": bad { x:Custom -- }\n"
+            "  x drop\n"
+            ";"
+        )
+
+
+def test_pipeline_accepts_local_nested_v1_types() -> None:
+    result = analyze_program(
+        ": ok { xs:List<Result<Int,Bool>> m:Map<String,List<Result<Int,Bool>>> -- }\n"
+        "  xs drop\n"
+        "  m drop\n"
         ";"
     )
 
