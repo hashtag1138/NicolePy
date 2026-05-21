@@ -303,6 +303,127 @@ def test_runtime_nested_nicole_word_calls() -> None:
     assert seen == ["hello"]
 
 
+def test_runtime_self_tail_call_countdown_beyond_python_recursion_depth() -> None:
+    checked = analyze_program(
+        ": countdown { n:Int -- out:Int }\n"
+        "  n 0 = if\n"
+        "    0\n"
+        "  else\n"
+        "    n 1 - countdown\n"
+        "  end\n"
+        ";\n"
+        "export : app.run { n:Int -- out:Int }\n"
+        "  n countdown\n"
+        ";\n"
+    )
+
+    depth = sys.getrecursionlimit() + 1000
+    assert run_export(checked, "app.run", RuntimeHostBindings({}), depth) == 0
+
+
+def test_runtime_self_tail_call_accumulator_style_beyond_python_recursion_depth() -> None:
+    checked = analyze_program(
+        ": sum-down-acc { n:Int acc:Int -- result:Int }\n"
+        "  n 0 = if\n"
+        "    acc\n"
+        "  else\n"
+        "    n 1 - acc n + sum-down-acc\n"
+        "  end\n"
+        ";\n"
+        "export : app.run { n:Int -- result:Int }\n"
+        "  n 0 sum-down-acc\n"
+        ";\n"
+    )
+
+    depth = sys.getrecursionlimit() + 1000
+    assert run_export(checked, "app.run", RuntimeHostBindings({}), depth) == depth * (depth + 1) // 2
+
+
+def test_runtime_non_tail_recursion_remains_unoptimized() -> None:
+    checked = analyze_program(
+        ": non-tail { n:Int -- out:Int }\n"
+        "  n 0 = if\n"
+        "    0\n"
+        "  else\n"
+        "    n 1 - non-tail 1 +\n"
+        "  end\n"
+        ";\n"
+        "export : app.run { n:Int -- out:Int }\n"
+        "  n non-tail\n"
+        ";\n"
+    )
+
+    depth = sys.getrecursionlimit() + 200
+    with pytest.raises(RecursionError):
+        run_export(checked, "app.run", RuntimeHostBindings({}), depth)
+
+
+def test_runtime_mutual_recursion_remains_unoptimized() -> None:
+    checked = analyze_program(
+        ": even { n:Int -- out:Int }\n"
+        "  n 0 = if\n"
+        "    0\n"
+        "  else\n"
+        "    n 1 - odd\n"
+        "  end\n"
+        ";\n"
+        ": odd { n:Int -- out:Int }\n"
+        "  n 0 = if\n"
+        "    1\n"
+        "  else\n"
+        "    n 1 - even\n"
+        "  end\n"
+        ";\n"
+        "export : app.run { n:Int -- out:Int }\n"
+        "  n even\n"
+        ";\n"
+    )
+
+    depth = sys.getrecursionlimit() + 200
+    with pytest.raises(RecursionError):
+        run_export(checked, "app.run", RuntimeHostBindings({}), depth)
+
+
+def test_runtime_quote_mediated_recursion_remains_unoptimized() -> None:
+    checked = analyze_program(
+        ": loop-via-quote { n:Int -- out:Int }\n"
+        "  n 0 = if\n"
+        "    0\n"
+        "  else\n"
+        "    n 1 -\n"
+        "    :[ | x:Int -- y:Int | x loop-via-quote ;]\n"
+        "    call\n"
+        "  end\n"
+        ";\n"
+        "export : app.run { n:Int -- out:Int }\n"
+        "  n loop-via-quote\n"
+        ";\n"
+    )
+
+    depth = sys.getrecursionlimit() + 200
+    with pytest.raises(RecursionError):
+        run_export(checked, "app.run", RuntimeHostBindings({}), depth)
+
+
+def test_runtime_self_call_followed_by_propagate_remains_unoptimized() -> None:
+    checked = analyze_program(
+        ": loop-result { n:Int -- r:Result<Int,MapError> }\n"
+        "  n 0 = if\n"
+        "    0 Ok!\n"
+        "  else\n"
+        "    n 1 - loop-result ? Ok!\n"
+        "  end\n"
+        ";\n"
+        "export : app.run { n:Int -- r:Result<Int,MapError> }\n"
+        "  n loop-result\n"
+        ";\n"
+    )
+
+    depth = sys.getrecursionlimit() + 200
+    with pytest.raises(RecursionError):
+        run_export(checked, "app.run", RuntimeHostBindings({}), depth)
+
+
 def test_runtime_multiple_host_words() -> None:
     log_signature = signature_from_source(": hostlog { msg:String -- } ;")
     random_signature = signature_from_source(": hostrandom { -- n:Int } ;")

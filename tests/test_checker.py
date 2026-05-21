@@ -5,6 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from nicole.ast_nodes import CaseNode, IdentifierNode, IfNode, QuoteNode
 from nicole.checker import CheckerError, check_program
 from nicole.host_abi import HostEffect, HostWord, host_contract_from_words
 from nicole.lexer import lex
@@ -33,6 +34,25 @@ def check_source_with_host_contract(source: str, host_words):
     contract = host_contract_from_words(host_words)
     resolved = resolve(program, symbols, host_contract=contract)
     return check_program(resolved, symbols)
+
+
+def _marked_calls(block) -> list[IdentifierNode]:
+    marked: list[IdentifierNode] = []
+    for item in block.items:
+        if isinstance(item, IdentifierNode) and item.resolution.is_self_tail_call:
+            marked.append(item)
+            continue
+        if isinstance(item, IfNode):
+            marked.extend(_marked_calls(item.then_block))
+            marked.extend(_marked_calls(item.else_block))
+            continue
+        if isinstance(item, CaseNode):
+            for branch in item.branches:
+                marked.extend(_marked_calls(branch.body))
+            continue
+        if isinstance(item, QuoteNode):
+            marked.extend(_marked_calls(item.body))
+    return marked
 
 
 def test_checker_accepts_simple_add():
@@ -1626,6 +1646,170 @@ def test_checker_phase4_allows_pure_mutual_recursion_without_dirty_source():
         "  end\n"
         ";"
     )
+
+
+def test_checker_marks_direct_self_call_in_final_position() -> None:
+    program = check_source(
+        ": loop { n:Int -- n2:Int }\n"
+        "  n 1 - loop\n"
+        ";"
+    )
+
+    call = program.words[0].body.items[3]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "loop"
+    assert call.resolution.is_self_tail_call is True
+    assert _marked_calls(program.words[0].body) == [call]
+
+
+def test_checker_does_not_mark_self_call_followed_by_other_operation() -> None:
+    program = check_source(
+        ": loop { n:Int -- n2:Int }\n"
+        "  n 1 - loop 1 +\n"
+        ";"
+    )
+
+    call = program.words[0].body.items[3]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "loop"
+    assert call.resolution.is_self_tail_call is False
+    assert _marked_calls(program.words[0].body) == []
+
+
+def test_checker_does_not_mark_self_call_followed_by_propagate() -> None:
+    program = check_source(
+        ": loop { n:Int -- r:Result<Int,MapError> }\n"
+        "  n 1 - loop ? Ok!\n"
+        ";"
+    )
+
+    call = program.words[0].body.items[3]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "loop"
+    assert call.resolution.is_self_tail_call is False
+    assert _marked_calls(program.words[0].body) == []
+
+
+def test_checker_marks_self_call_only_in_tail_branch_of_if() -> None:
+    program = check_source(
+        ": loop { n:Int -- n2:Int }\n"
+        "  n 0 = if\n"
+        "    n\n"
+        "  else\n"
+        "    n 1 - loop\n"
+        "  end\n"
+        ";"
+    )
+
+    if_node = program.words[0].body.items[3]
+    assert isinstance(if_node, IfNode)
+    call = if_node.else_block.items[3]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "loop"
+    assert call.resolution.is_self_tail_call is True
+    assert _marked_calls(program.words[0].body) == [call]
+
+
+def test_checker_does_not_mark_self_call_in_non_tail_branch_of_if() -> None:
+    program = check_source(
+        ": loop { n:Int -- n2:Int }\n"
+        "  n 0 = if\n"
+        "    n 1 - loop 1 +\n"
+        "  else\n"
+        "    n\n"
+        "  end\n"
+        ";"
+    )
+
+    if_node = program.words[0].body.items[3]
+    assert isinstance(if_node, IfNode)
+    call = if_node.then_block.items[3]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "loop"
+    assert call.resolution.is_self_tail_call is False
+    assert _marked_calls(program.words[0].body) == []
+
+
+def test_checker_does_not_mark_mutual_recursion_as_self_tail_call() -> None:
+    program = check_source(
+        ": a { n:Int -- n2:Int }\n"
+        "  n 1 - b\n"
+        ";\n"
+        ": b { n:Int -- n2:Int }\n"
+        "  n 1 - a\n"
+        ";"
+    )
+
+    call_a = program.words[0].body.items[3]
+    call_b = program.words[1].body.items[3]
+    assert isinstance(call_a, IdentifierNode)
+    assert isinstance(call_b, IdentifierNode)
+    assert call_a.resolution.is_self_tail_call is False
+    assert call_b.resolution.is_self_tail_call is False
+    assert _marked_calls(program.words[0].body) == []
+    assert _marked_calls(program.words[1].body) == []
+
+
+def test_checker_does_not_mark_indirect_recursion_as_self_tail_call() -> None:
+    program = check_source(
+        ": a { n:Int -- n2:Int }\n"
+        "  n 0 = if\n"
+        "    n\n"
+        "  else\n"
+        "    n 1 - b\n"
+        "  end\n"
+        ";\n"
+        ": b { n:Int -- n2:Int }\n"
+        "  n 1 - a\n"
+        ";"
+    )
+
+    if_node = program.words[0].body.items[3]
+    assert isinstance(if_node, IfNode)
+    call_to_b = if_node.else_block.items[3]
+    call_to_a = program.words[1].body.items[3]
+    assert isinstance(call_to_b, IdentifierNode)
+    assert isinstance(call_to_a, IdentifierNode)
+    assert call_to_b.resolution.is_self_tail_call is False
+    assert call_to_a.resolution.is_self_tail_call is False
+    assert _marked_calls(program.words[0].body) == []
+    assert _marked_calls(program.words[1].body) == []
+
+
+def test_checker_does_not_mark_self_call_inside_quotation() -> None:
+    program = check_source(
+        ": loop { -- n:Int }\n"
+        "  :[ | -- n:Int | loop ;] drop\n"
+        "  0\n"
+        ";"
+    )
+
+    quote = program.words[0].body.items[0]
+    assert isinstance(quote, QuoteNode)
+    call = quote.body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "loop"
+    assert call.resolution.is_self_tail_call is False
+    assert _marked_calls(program.words[0].body) == []
+
+
+def test_checker_marks_self_call_in_tail_case_branch() -> None:
+    program = check_source(
+        ": loop { n:Int -- n2:Int }\n"
+        "  n case\n"
+        "    0 => 0\n"
+        "    _ => n 1 - loop\n"
+        "  end\n"
+        ";"
+    )
+
+    case_node = program.words[0].body.items[1]
+    assert isinstance(case_node, CaseNode)
+    call = case_node.branches[1].body.items[3]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "loop"
+    assert call.resolution.is_self_tail_call is True
+    assert _marked_calls(program.words[0].body) == [call]
 
 
 def test_checker_phase4_scc_dirty_propagation_passes_with_annotations():

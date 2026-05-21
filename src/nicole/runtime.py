@@ -77,6 +77,11 @@ class _FramePropagationSignal(Exception):
     error: str
 
 
+@dataclass(frozen=True, slots=True)
+class _SelfTailCallSignal(Exception):
+    args: tuple[object, ...]
+
+
 class RuntimeStack:
     def __init__(self) -> None:
         self._values: list[object] = []
@@ -128,7 +133,13 @@ def run_export(
     if export_def is None:
         raise RuntimeError(f"missing export definition: {export_word.internal_name}")
 
-    return _invoke_word(export_def, word_index, runtime_bindings, args)
+    return _invoke_word(
+        export_def,
+        word_index,
+        runtime_bindings,
+        args,
+        current_word_name=export_word.internal_name,
+    )
 
 
 def _index_words(words: tuple[WordDefNode, ...], owner: str | None = None) -> dict[str, WordDefNode]:
@@ -145,38 +156,54 @@ def _invoke_word(
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
     args: tuple[object, ...],
+    *,
+    current_word_name: str | None = None,
 ) -> object:
     expected_inputs = word.signature.inputs
-    if len(args) != len(expected_inputs):
-        raise RuntimeError(
-            f"wrong arity for {word.name}: expected {len(expected_inputs)}, got {len(args)}"
-        )
-
-    locals_env: dict[str, object] = {}
-    for parameter, value in zip(expected_inputs, args):
-        _ensure_matches_type(value, parameter.type_node, context=f"input '{parameter.name}'")
-        locals_env[parameter.name] = value
-
     outputs = word.signature.outputs
-    stack = RuntimeStack()
-    try:
-        _execute_block(word.body, locals_env, stack, word_index, runtime_bindings)
-        result_values = stack.values()
-    except _FramePropagationSignal as signal:
-        result_values = (Err(signal.error),)
+    frame_word_name = current_word_name if current_word_name is not None else word.name
+    current_args = args
 
-    if len(result_values) != len(outputs):
-        raise RuntimeError(
-            f"wrong runtime signature for {word.name}: expected {len(outputs)} outputs, got {len(result_values)}"
-        )
-    for parameter, value in zip(outputs, result_values):
-        _ensure_matches_type(value, parameter.type_node, context=f"output '{parameter.name}'")
+    while True:
+        if len(current_args) != len(expected_inputs):
+            raise RuntimeError(
+                f"wrong arity for {word.name}: expected {len(expected_inputs)}, got {len(current_args)}"
+            )
 
-    if len(result_values) == 0:
-        return None
-    if len(result_values) == 1:
-        return result_values[0]
-    return result_values
+        locals_env: dict[str, object] = {}
+        for parameter, value in zip(expected_inputs, current_args):
+            _ensure_matches_type(value, parameter.type_node, context=f"input '{parameter.name}'")
+            locals_env[parameter.name] = value
+
+        stack = RuntimeStack()
+        try:
+            _execute_block(
+                word.body,
+                locals_env,
+                stack,
+                word_index,
+                runtime_bindings,
+                current_word_name=frame_word_name,
+            )
+            result_values = stack.values()
+        except _SelfTailCallSignal as signal:
+            current_args = signal.args
+            continue
+        except _FramePropagationSignal as signal:
+            result_values = (Err(signal.error),)
+
+        if len(result_values) != len(outputs):
+            raise RuntimeError(
+                f"wrong runtime signature for {word.name}: expected {len(outputs)} outputs, got {len(result_values)}"
+            )
+        for parameter, value in zip(outputs, result_values):
+            _ensure_matches_type(value, parameter.type_node, context=f"output '{parameter.name}'")
+
+        if len(result_values) == 0:
+            return None
+        if len(result_values) == 1:
+            return result_values[0]
+        return result_values
 
 
 def _execute_block(
@@ -185,6 +212,7 @@ def _execute_block(
     stack: RuntimeStack,
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
+    current_word_name: str | None = None,
 ) -> None:
     for item in block.items:
         if isinstance(item, LiteralNode):
@@ -197,7 +225,14 @@ def _execute_block(
             stack.push({})
             continue
         if isinstance(item, ListLiteralNode):
-            _execute_list_literal(item, locals_env, stack, word_index, runtime_bindings)
+            _execute_list_literal(
+                item,
+                locals_env,
+                stack,
+                word_index,
+                runtime_bindings,
+                current_word_name=current_word_name,
+            )
             continue
         if isinstance(item, ResultOkNode):
             value = stack.pop()
@@ -212,7 +247,13 @@ def _execute_block(
             continue
         if isinstance(item, OperatorNode):
             if item.operator == "call":
-                _execute_call(locals_env, stack, word_index, runtime_bindings)
+                _execute_call(
+                    locals_env,
+                    stack,
+                    word_index,
+                    runtime_bindings,
+                    current_word_name=current_word_name,
+                )
                 continue
             if item.operator == "?":
                 result_value = stack.pop()
@@ -231,13 +272,34 @@ def _execute_block(
                 continue
             raise _FramePropagationSignal(result_value.error)
         if isinstance(item, IdentifierNode):
-            _execute_identifier(item, locals_env, stack, word_index, runtime_bindings)
+            _execute_identifier(
+                item,
+                locals_env,
+                stack,
+                word_index,
+                runtime_bindings,
+                current_word_name=current_word_name,
+            )
             continue
         if isinstance(item, IfNode):
-            _execute_if(item, locals_env, stack, word_index, runtime_bindings)
+            _execute_if(
+                item,
+                locals_env,
+                stack,
+                word_index,
+                runtime_bindings,
+                current_word_name=current_word_name,
+            )
             continue
         if isinstance(item, CaseNode):
-            _execute_case(item, locals_env, stack, word_index, runtime_bindings)
+            _execute_case(
+                item,
+                locals_env,
+                stack,
+                word_index,
+                runtime_bindings,
+                current_word_name=current_word_name,
+            )
             continue
         raise RuntimeError(f"runtime feature not supported: {type(item).__name__}")
 
@@ -248,6 +310,7 @@ def _execute_identifier(
     stack: RuntimeStack,
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
+    current_word_name: str | None = None,
 ) -> None:
     qualified_name = node.resolution.qualified_name
     if qualified_name is not None and qualified_name.startswith("local:"):
@@ -506,7 +569,21 @@ def _execute_identifier(
     for _ in word.signature.inputs:
         input_values.append(stack.pop())
     input_values.reverse()
-    result = _invoke_word(word, word_index, runtime_bindings, tuple(input_values))
+    next_args = tuple(input_values)
+    if (
+        node.resolution.is_self_tail_call
+        and current_word_name is not None
+        and symbol.qualified_name == current_word_name
+    ):
+        raise _SelfTailCallSignal(next_args)
+
+    result = _invoke_word(
+        word,
+        word_index,
+        runtime_bindings,
+        next_args,
+        current_word_name=symbol.qualified_name,
+    )
 
     if len(word.signature.outputs) == 0:
         return
@@ -565,13 +642,28 @@ def _execute_if(
     stack: RuntimeStack,
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
+    current_word_name: str | None = None,
 ) -> None:
     condition = stack.pop()
     _ensure_matches_type(condition, "Bool", context="if condition")
     if condition:
-        _execute_block(node.then_block, locals_env, stack, word_index, runtime_bindings)
+        _execute_block(
+            node.then_block,
+            locals_env,
+            stack,
+            word_index,
+            runtime_bindings,
+            current_word_name=current_word_name,
+        )
         return
-    _execute_block(node.else_block, locals_env, stack, word_index, runtime_bindings)
+    _execute_block(
+        node.else_block,
+        locals_env,
+        stack,
+        word_index,
+        runtime_bindings,
+        current_word_name=current_word_name,
+    )
 
 
 def _execute_case(
@@ -580,6 +672,7 @@ def _execute_case(
     stack: RuntimeStack,
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
+    current_word_name: str | None = None,
 ) -> None:
     scrutinee = stack.pop()
     for branch in node.branches:
@@ -589,7 +682,14 @@ def _execute_case(
         branch_locals = dict(locals_env)
         if bound_name is not None:
             branch_locals[bound_name] = bound_value
-        _execute_block(branch.body, branch_locals, stack, word_index, runtime_bindings)
+        _execute_block(
+            branch.body,
+            branch_locals,
+            stack,
+            word_index,
+            runtime_bindings,
+            current_word_name=current_word_name,
+        )
         return
     raise RuntimeError("runtime case match failure")
 
@@ -608,6 +708,7 @@ def _execute_call(
     stack: RuntimeStack,
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
+    current_word_name: str | None = None,
 ) -> None:
     quote_value = stack.pop()
     if not isinstance(quote_value, RuntimeQuote):
@@ -667,6 +768,7 @@ def _execute_list_literal(
     stack: RuntimeStack,
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
+    current_word_name: str | None = None,
 ) -> None:
     values: list[object] = []
     for element in node.elements:
@@ -677,6 +779,7 @@ def _execute_list_literal(
             element_stack,
             word_index,
             runtime_bindings,
+            current_word_name=current_word_name,
         )
         element_values = element_stack.values()
         if len(element_values) != 1:

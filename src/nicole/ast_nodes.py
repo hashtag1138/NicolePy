@@ -73,6 +73,7 @@ class ResolutionInfo:
     declared_dirty: bool | None = None
     host_effect: object | None = None
     quote_effect: QuoteEffect | None = None
+    is_self_tail_call: bool = False
 
 
 @dataclass(slots=True)

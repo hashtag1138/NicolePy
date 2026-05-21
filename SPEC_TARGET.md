@@ -2,8 +2,8 @@
 
 Current target specification:
 
-- tag: v0.15.0-collection-core-spec
-- commit: 67084a65a69d95540f635309b1a77fda4414eee4
+- tag: v0.16.0-self-tail-call
+- commit: f2c6dfc5de817423c41f1f8060bdd1656b7b63a5
 
 Implementation baseline:
 
@@ -12,21 +12,20 @@ Implementation baseline:
 
 Conformance status:
 
-NicolePy is currently being updated toward the target specification.
+NicolePy implements the v0.16.0 direct self-tail-call guarantee.
 
 Current state:
 
-- target specification identified
-- implementation migration in progress
-- implementation is not yet fully conformant
+- direct self-recursive tail calls are marked statically
+- runtime optimization applies to marked direct self-tail-calls
+- Nicole call-stack behavior is constant for these calls
+- no syntax change introduced for self-tail-call support
 
 Known implementation gaps include:
 
-- v0.15 collection builtins
-- runtime `?` propagation
-- generic Err!
-- runtime ABI validation improvements
-- Unit runtime support
-- pending decision around internal nominal type extension
+- no optimization guarantee for mutual recursion
+- no optimization guarantee for indirect recursion
+- no optimization guarantee for recursion through quotations
+- native/Python stack behavior remains outside the Nicole spec contract
 
 Nicole specification remains the only language source of truth.

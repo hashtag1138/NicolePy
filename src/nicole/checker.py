@@ -88,6 +88,7 @@ class Checker:
         self._validate_program_types(program)
         for word in program.words:
             self._check_word(word)
+        self._mark_direct_self_tail_calls(program)
         effect_analysis = self._analyze_effects(program)
         self._validate_quote_effect_restrictions(program, effect_analysis)
         self._validate_effect_annotations(effect_analysis)
@@ -1205,6 +1206,100 @@ class Checker:
         out.append((qualified_name, word))
         for nested_word in word.nested_words:
             self._collect_nested_words(nested_word, owner=qualified_name, out=out)
+
+    def _mark_direct_self_tail_calls(self, program: ProgramNode) -> None:
+        for qualified_name, word in self._collect_words(program):
+            self._clear_tail_self_call_marks(word.body)
+            self._mark_tail_self_calls_in_block(
+                word.body,
+                current_word_name=qualified_name,
+                tail_position=True,
+            )
+
+    def _clear_tail_self_call_marks(self, block: BlockNode) -> None:
+        for item in block.items:
+            if isinstance(item, IdentifierNode):
+                item.resolution.is_self_tail_call = False
+                continue
+            if isinstance(item, IfNode):
+                self._clear_tail_self_call_marks(item.then_block)
+                self._clear_tail_self_call_marks(item.else_block)
+                continue
+            if isinstance(item, CaseNode):
+                for branch in item.branches:
+                    self._clear_tail_self_call_marks(branch.body)
+                continue
+            if isinstance(item, QuoteNode):
+                self._clear_tail_self_call_marks(item.body)
+                continue
+            if isinstance(item, ListLiteralNode):
+                self._clear_tail_self_call_marks(
+                    BlockNode(span=item.span, items=item.elements)
+                )
+
+    def _mark_tail_self_calls_in_block(
+        self,
+        block: BlockNode,
+        *,
+        current_word_name: str,
+        tail_position: bool,
+    ) -> None:
+        if not block.items:
+            return
+
+        for item in block.items[:-1]:
+            self._mark_tail_self_calls_in_item(
+                item,
+                current_word_name=current_word_name,
+                tail_position=False,
+            )
+        self._mark_tail_self_calls_in_item(
+            block.items[-1],
+            current_word_name=current_word_name,
+            tail_position=tail_position,
+        )
+
+    def _mark_tail_self_calls_in_item(
+        self,
+        item,
+        *,
+        current_word_name: str,
+        tail_position: bool,
+    ) -> None:
+        if isinstance(item, IdentifierNode):
+            item.resolution.is_self_tail_call = (
+                tail_position and self._is_direct_self_call(item, current_word_name)
+            )
+            return
+
+        if isinstance(item, IfNode):
+            self._mark_tail_self_calls_in_block(
+                item.then_block,
+                current_word_name=current_word_name,
+                tail_position=tail_position,
+            )
+            self._mark_tail_self_calls_in_block(
+                item.else_block,
+                current_word_name=current_word_name,
+                tail_position=tail_position,
+            )
+            return
+
+        if isinstance(item, CaseNode):
+            for branch in item.branches:
+                self._mark_tail_self_calls_in_block(
+                    branch.body,
+                    current_word_name=current_word_name,
+                    tail_position=tail_position,
+                )
+
+    def _is_direct_self_call(self, node: IdentifierNode, current_word_name: str) -> bool:
+        symbol = node.resolution.resolved_symbol
+        return (
+            isinstance(symbol, WordSymbol)
+            and symbol.source is SymbolSource.USER
+            and symbol.qualified_name == current_word_name
+        )
 
     def _validate_quote_effect_restrictions(self, program: ProgramNode, analysis: EffectAnalysisResult) -> None:
         words = self._collect_words(program)

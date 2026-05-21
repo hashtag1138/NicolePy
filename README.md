@@ -22,12 +22,20 @@ Implementation follows specification, never the inverse.
 
 This repository is an implementation workspace, not a source of truth for the language.
 
-NicolePy currently targets migration toward `v0.15.0-collection-core-spec`.
+NicolePy currently targets `v0.16.0-self-tail-call`.
 
 Current target reference:
 
-- tag: `v0.15.0-collection-core-spec`
-- commit: `67084a65a69d95540f635309b1a77fda4414eee4`
+- tag: `v0.16.0-self-tail-call`
+- commit: `f2c6dfc5de817423c41f1f8060bdd1656b7b63a5`
+
+Self-tail-call scope (v0.16):
+
+- direct self-recursive calls in tail position are identified statically and optimized at runtime
+- Nicole call-stack usage is constant for these marked direct self-tail-calls
+- there is no syntax change for this feature
+- no guarantee is provided for mutual recursion, indirect recursion, or recursion through quotations
+- native/Python stack behavior remains outside the Nicole specification contract
 
 ## Quick start
 
