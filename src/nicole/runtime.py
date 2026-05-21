@@ -294,12 +294,6 @@ def _execute_identifier(
         _ensure_matches_type(value, "List", context="list.len input")
         stack.push(len(value))
         return
-    if node.name == "list.push":
-        value = stack.pop()
-        list_value = stack.pop()
-        _ensure_matches_type(list_value, "List", context="list.push list")
-        stack.push(list_value + (value,))
-        return
     if node.name == "list.set":
         value = stack.pop()
         index = stack.pop()

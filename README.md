@@ -41,6 +41,16 @@ python -m pytest -q
 `from nicole.pipeline import analyze_program` is the canonical static entrypoint.
 It performs parse -> signature collection -> standard builtin injection -> resolution -> checking -> export collection.
 
+Active execution architecture in v0.14:
+
+- source
+- lexer
+- parser
+- signature collection + standard builtin injection
+- resolver
+- checker
+- runtime AST execution (`run_export`)
+
 ```python
 from nicole.pipeline import analyze_program
 

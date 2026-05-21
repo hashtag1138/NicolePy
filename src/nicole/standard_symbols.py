@@ -8,7 +8,6 @@ from .tokens import SourceSpan
 
 __all__ = [
     "StandardSymbolError",
-    "inject_standard_symbols",
     "load_standard_symbols",
     "with_standard_symbols",
 ]
@@ -166,10 +165,6 @@ def with_standard_symbols(table: SymbolTable) -> SymbolTable:
             continue
         enriched.add(builtin)
     return enriched
-
-
-def inject_standard_symbols(table: SymbolTable) -> SymbolTable:
-    return with_standard_symbols(table)
 
 
 def _builtin(

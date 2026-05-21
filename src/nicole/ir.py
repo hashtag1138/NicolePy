@@ -1,3 +1,10 @@
+"""
+Placeholder module.
+
+Nicole v0.14 uses direct AST execution through `nicole.runtime`.
+This module is reserved for future work and is not part of the active execution pipeline.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -24,4 +31,3 @@ class Instruction:
 @dataclass(slots=True)
 class Block:
     instructions: list[Instruction] = field(default_factory=list)
-

@@ -17,19 +17,19 @@ NicolePy documentation is not authoritative.
 
 ## Current status
 
-Lexer: partial
-Parser: partial
-AST: partial
-Signature collection: partial
-Resolver: partial
-Checker: partial
-Runtime: partial
-Host ABI: partial
-Higher-order builtins: partial
-Result/? : implemented
-Purity/effects: missing
-DirtyQuote: missing
-Purity/effect tests: missing
+Lexer: v0.14 complete
+Parser: v0.14 complete
+AST: v0.14 complete
+Signature collection: v0.14 complete
+Resolver: v0.14 complete
+Checker: v0.14 complete
+Runtime: v0.14 complete
+Host ABI: v0.14 complete
+Higher-order builtins: v0.14 complete
+Result/? : v0.14 complete
+Purity/effects: v0.14 complete
+DirtyQuote: v0.14 complete
+Purity/effect tests: v0.14 complete
 
 ## Feature dependency graph
 
@@ -632,7 +632,6 @@ Status: implemented
 
 Status values:
 - not started
-- in progress
 - implemented
 - audited
 - committed
