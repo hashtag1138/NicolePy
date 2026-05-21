@@ -90,6 +90,7 @@ class Checker:
             self._check_word(word)
         self._mark_direct_self_tail_calls(program)
         effect_analysis = self._analyze_effects(program)
+        self._validate_case_guard_purity(program, effect_analysis)
         self._validate_quote_effect_restrictions(program, effect_analysis)
         self._validate_effect_annotations(effect_analysis)
         self._validate_pure_to_dirty_calls(effect_analysis)
@@ -149,6 +150,8 @@ class Checker:
                 continue
             if isinstance(item, CaseNode):
                 for branch in item.branches:
+                    if branch.guard is not None:
+                        self._validate_block_types(branch.guard)
                     self._validate_block_types(branch.body)
 
     def _validate_type_node(self, type_node: TypeNode) -> None:
@@ -735,6 +738,12 @@ class Checker:
         for branch in node.branches:
             branch_locals = dict(local_types)
             self._bind_case_pattern(branch.pattern, scrutinee_type, branch_locals)
+            if branch.guard is not None:
+                self._check_case_guard(
+                    branch.guard,
+                    branch_locals,
+                    propagate_result_type=propagate_result_type,
+                )
             branch_stack = self._check_block(
                 branch.body,
                 list(base_stack),
@@ -757,6 +766,73 @@ class Checker:
         if not _is_case_exhaustive(node, scrutinee_type):
             self._raise_error("case is not exhaustive", node.span.line, node.span.column)
         return expected_stack
+
+    def _check_case_guard(
+        self,
+        guard: BlockNode,
+        local_types: dict[str, TypeNode],
+        *,
+        propagate_result_type: TypeNode | None,
+    ) -> None:
+        if self._contains_propagate(guard):
+            self._raise_error(
+                "case guard cannot contain ?",
+                guard.span.line,
+                guard.span.column,
+            )
+
+        try:
+            guard_stack = self._check_block(
+                guard,
+                [],
+                local_types,
+                propagate_result_type=propagate_result_type,
+            )
+        except CheckerError as error:
+            if error.message == "insufficient stack":
+                self._raise_error(
+                    "case guard must not consume preexisting stack values",
+                    error.line,
+                    error.column,
+                )
+            raise
+
+        if len(guard_stack) != 1:
+            self._raise_error(
+                "case guard must produce exactly one Bool",
+                guard.span.line,
+                guard.span.column,
+            )
+        if not _is_named_type(_stack_item_type(guard_stack[0]), "Bool"):
+            self._raise_error(
+                "case guard must produce Bool",
+                guard.span.line,
+                guard.span.column,
+            )
+
+    def _contains_propagate(self, block: BlockNode) -> bool:
+        for item in block.items:
+            if isinstance(item, PropagateNode):
+                return True
+            if isinstance(item, IfNode):
+                if self._contains_propagate(item.then_block) or self._contains_propagate(item.else_block):
+                    return True
+                continue
+            if isinstance(item, CaseNode):
+                for branch in item.branches:
+                    if branch.guard is not None and self._contains_propagate(branch.guard):
+                        return True
+                    if self._contains_propagate(branch.body):
+                        return True
+                continue
+            if isinstance(item, QuoteNode):
+                if self._contains_propagate(item.body):
+                    return True
+                continue
+            if isinstance(item, ListLiteralNode):
+                if self._contains_propagate(BlockNode(span=item.span, items=item.elements)):
+                    return True
+        return False
 
     def _bind_case_pattern(
         self,
@@ -922,6 +998,8 @@ class Checker:
             )
         if isinstance(item, CaseNode):
             for branch in item.branches:
+                if branch.guard is not None and self._infer_quote_effect_for_typecheck(branch.guard) is QuoteEffect.DIRTY:
+                    return True
                 if self._infer_quote_effect_for_typecheck(branch.body) is QuoteEffect.DIRTY:
                     return True
             return False
@@ -1038,6 +1116,13 @@ class Checker:
                     continue
                 if isinstance(item, CaseNode):
                     for branch in item.branches:
+                        if branch.guard is not None:
+                            walk_block(
+                                branch.guard,
+                                source_node=source_node,
+                                owner_word_name=owner_word_name,
+                                is_owner_word_frame=is_owner_word_frame,
+                            )
                         walk_block(
                             branch.body,
                             source_node=source_node,
@@ -1102,6 +1187,13 @@ class Checker:
                     continue
                 if isinstance(element, CaseNode):
                     for branch in element.branches:
+                        if branch.guard is not None:
+                            walk_block(
+                                branch.guard,
+                                source_node=source_node,
+                                owner_word_name=owner_word_name,
+                                is_owner_word_frame=is_owner_word_frame,
+                            )
                         walk_block(
                             branch.body,
                             source_node=source_node,
@@ -1227,6 +1319,8 @@ class Checker:
                 continue
             if isinstance(item, CaseNode):
                 for branch in item.branches:
+                    if branch.guard is not None:
+                        self._clear_tail_self_call_marks(branch.guard)
                     self._clear_tail_self_call_marks(branch.body)
                 continue
             if isinstance(item, QuoteNode):
@@ -1287,6 +1381,12 @@ class Checker:
 
         if isinstance(item, CaseNode):
             for branch in item.branches:
+                if branch.guard is not None:
+                    self._mark_tail_self_calls_in_block(
+                        branch.guard,
+                        current_word_name=current_word_name,
+                        tail_position=False,
+                    )
                 self._mark_tail_self_calls_in_block(
                     branch.body,
                     current_word_name=current_word_name,
@@ -1317,6 +1417,111 @@ class Checker:
                 continue
             message, line, column = violation
             self._raise_error(message, line, column)
+
+    def _validate_case_guard_purity(self, program: ProgramNode, analysis: EffectAnalysisResult) -> None:
+        for _, word in self._collect_words(program):
+            violation = self._find_dirty_case_guard(word.body, analysis)
+            if violation is None:
+                continue
+            message, line, column = violation
+            self._raise_error(message, line, column)
+
+    def _find_dirty_case_guard(
+        self,
+        block: BlockNode,
+        analysis: EffectAnalysisResult,
+    ) -> tuple[str, int, int] | None:
+        for item in block.items:
+            if isinstance(item, CaseNode):
+                for branch in item.branches:
+                    if branch.guard is not None:
+                        violation = self._find_dirty_call_in_guard(branch.guard, analysis)
+                        if violation is not None:
+                            return violation
+                        nested = self._find_dirty_case_guard(branch.guard, analysis)
+                        if nested is not None:
+                            return nested
+                    nested = self._find_dirty_case_guard(branch.body, analysis)
+                    if nested is not None:
+                        return nested
+                continue
+            if isinstance(item, IfNode):
+                nested = self._find_dirty_case_guard(item.then_block, analysis)
+                if nested is not None:
+                    return nested
+                nested = self._find_dirty_case_guard(item.else_block, analysis)
+                if nested is not None:
+                    return nested
+                continue
+            if isinstance(item, QuoteNode):
+                nested = self._find_dirty_case_guard(item.body, analysis)
+                if nested is not None:
+                    return nested
+                continue
+            if isinstance(item, ListLiteralNode):
+                nested = self._find_dirty_case_guard(
+                    BlockNode(span=item.span, items=item.elements),
+                    analysis,
+                )
+                if nested is not None:
+                    return nested
+        return None
+
+    def _find_dirty_call_in_guard(
+        self,
+        block: BlockNode,
+        analysis: EffectAnalysisResult,
+    ) -> tuple[str, int, int] | None:
+        for item in block.items:
+            if isinstance(item, IdentifierNode):
+                if item.resolution.owner_scope == "host" and item.resolution.host_effect is HostEffect.DIRTY:
+                    return ("case guard cannot call dirty code", item.span.line, item.span.column)
+                if (
+                    item.name in {"list.map", "list.filter", "list.fold", "list.reduce"}
+                    and item.resolution.quote_effect is QuoteEffect.DIRTY
+                ):
+                    return ("case guard cannot call dirty code", item.span.line, item.span.column)
+                symbol = item.resolution.resolved_symbol
+                if isinstance(symbol, WordSymbol) and symbol.source is SymbolSource.USER:
+                    callee_effect = analysis.effects.get(symbol.qualified_name)
+                    if callee_effect is not None and callee_effect.inferred_dirty:
+                        return ("case guard cannot call dirty code", item.span.line, item.span.column)
+                continue
+            if isinstance(item, OperatorNode):
+                if item.operator == "call" and item.resolution.quote_effect is QuoteEffect.DIRTY:
+                    return ("case guard cannot call dirty code", item.span.line, item.span.column)
+                continue
+            if isinstance(item, IfNode):
+                nested = self._find_dirty_call_in_guard(item.then_block, analysis)
+                if nested is not None:
+                    return nested
+                nested = self._find_dirty_call_in_guard(item.else_block, analysis)
+                if nested is not None:
+                    return nested
+                continue
+            if isinstance(item, CaseNode):
+                for branch in item.branches:
+                    if branch.guard is not None:
+                        nested = self._find_dirty_call_in_guard(branch.guard, analysis)
+                        if nested is not None:
+                            return nested
+                    nested = self._find_dirty_call_in_guard(branch.body, analysis)
+                    if nested is not None:
+                        return nested
+                continue
+            if isinstance(item, QuoteNode):
+                nested = self._find_dirty_call_in_guard(item.body, analysis)
+                if nested is not None:
+                    return nested
+                continue
+            if isinstance(item, ListLiteralNode):
+                nested = self._find_dirty_call_in_guard(
+                    BlockNode(span=item.span, items=item.elements),
+                    analysis,
+                )
+                if nested is not None:
+                    return nested
+        return None
 
     def _find_dirty_quote_usage(self, block: BlockNode) -> tuple[str, int, int] | None:
         for item in block.items:
@@ -1360,6 +1565,10 @@ class Checker:
                 continue
             if isinstance(item, CaseNode):
                 for branch in item.branches:
+                    if branch.guard is not None:
+                        nested = self._find_dirty_quote_usage(branch.guard)
+                        if nested is not None:
+                            return nested
                     nested = self._find_dirty_quote_usage(branch.body)
                     if nested is not None:
                         return nested
@@ -1595,9 +1804,13 @@ def _same_parameter_types(left, right) -> bool:
 
 
 def _is_case_exhaustive(node: CaseNode, scrutinee_type: TypeNode) -> bool:
-    patterns = [branch.pattern for branch in node.branches]
-    if any(pattern.kind is PatternKind.WILDCARD for pattern in patterns):
+    if any(
+        branch.pattern.kind is PatternKind.WILDCARD and branch.guard is None
+        for branch in node.branches
+    ):
         return True
+
+    patterns = [branch.pattern for branch in node.branches if branch.guard is None]
 
     if _is_named_type(scrutinee_type, "Bool"):
         seen = {pattern.value for pattern in patterns if pattern.kind is PatternKind.LITERAL and isinstance(pattern.value, bool)}

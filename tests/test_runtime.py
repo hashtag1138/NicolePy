@@ -1037,6 +1037,154 @@ def test_runtime_case_first_matching_branch_wins() -> None:
     assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 10
 
 
+def test_runtime_case_guard_true_selects_branch() -> None:
+    checked = analyze_program(
+        "export : app.choose { n:Int -- out:Int }\n"
+        "  n\n"
+        "  case\n"
+        "    _ when true => 1\n"
+        "    _ => 2\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 42) == 1
+
+
+def test_runtime_case_guard_false_falls_through() -> None:
+    checked = analyze_program(
+        "export : app.choose { n:Int -- out:Int }\n"
+        "  n\n"
+        "  case\n"
+        "    _ when false => 1\n"
+        "    _ => 2\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 42) == 2
+
+
+def test_runtime_case_pattern_mismatch_does_not_evaluate_guard() -> None:
+    checked = analyze_program(
+        "export : app.choose { b:Bool -- out:Int }\n"
+        "  b\n"
+        "  case\n"
+        "    true when true => 1\n"
+        "    true => 3\n"
+        "    false => 2\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 2
+
+
+def test_runtime_case_guard_can_use_pattern_binding() -> None:
+    checked = analyze_program(
+        "export : app.choose { r:Result<Int,MapError> -- out:Int }\n"
+        "  r\n"
+        "  case\n"
+        "    Ok(v) when v 0 > => 1\n"
+        "    Ok(v) => 0\n"
+        "    Err(MissingKey) => 99\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), Ok(4)) == 1
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), Ok(-4)) == 0
+
+
+def test_runtime_case_first_eligible_guarded_branch_wins() -> None:
+    checked = analyze_program(
+        "export : app.choose { n:Int -- out:Int }\n"
+        "  n\n"
+        "  case\n"
+        "    _ when true => 10\n"
+        "    _ when true => 20\n"
+        "    _ => 30\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 7) == 10
+
+
+def test_runtime_case_unguarded_branch_still_works_with_guarded_branch_present() -> None:
+    checked = analyze_program(
+        "export : app.choose { b:Bool -- out:Int }\n"
+        "  b\n"
+        "  case\n"
+        "    true when false => 1\n"
+        "    true => 2\n"
+        "    false => 3\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 2
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 3
+
+
+def test_runtime_case_wildcard_guard_is_conditional() -> None:
+    checked = analyze_program(
+        "export : app.choose { n:Int -- out:Int }\n"
+        "  n\n"
+        "  case\n"
+        "    _ when n 0 > => 1\n"
+        "    _ => 2\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 9) == 1
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), -9) == 2
+
+
+def test_runtime_case_wildcard_guard_false_falls_through_to_unguarded_wildcard() -> None:
+    checked = analyze_program(
+        "export : app.choose { n:Int -- out:Int }\n"
+        "  n\n"
+        "  case\n"
+        "    _ when false => 1\n"
+        "    _ => 2\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 0) == 2
+
+
+def test_runtime_case_no_branch_match_behavior_unchanged() -> None:
+    checked = analyze_program(
+        "export : app.choose { n:Int -- out:Int }\n"
+        "  n\n"
+        "  case\n"
+        "    0 when true => 1\n"
+        "  end\n"
+        ";"
+    )
+
+    with pytest.raises(RuntimeError, match="runtime case match failure"):
+        run_export(checked, "app.choose", RuntimeHostBindings({}), 1)
+
+
+def test_runtime_case_guard_does_not_leak_stack_values() -> None:
+    checked = analyze_program(
+        "export : app.choose { n:Int -- out:Int }\n"
+        "  n\n"
+        "  case\n"
+        "    _ when n 0 > => 100\n"
+        "    _ => 200\n"
+        "  end\n"
+        ";"
+    )
+
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 1) == 100
+    assert run_export(checked, "app.choose", RuntimeHostBindings({}), -1) == 200
+
+
 def test_runtime_quote_literal_returns_runtime_quote_value() -> None:
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
         analyze_program(

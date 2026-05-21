@@ -682,6 +682,27 @@ def _execute_case(
         branch_locals = dict(locals_env)
         if bound_name is not None:
             branch_locals[bound_name] = bound_value
+        if branch.guard is not None:
+            guard_stack = RuntimeStack()
+            try:
+                _execute_block(
+                    branch.guard,
+                    branch_locals,
+                    guard_stack,
+                    word_index,
+                    runtime_bindings,
+                    current_word_name=current_word_name,
+                )
+            except _FramePropagationSignal as signal:
+                raise RuntimeError("runtime case guard cannot propagate with ?") from signal
+            guard_values = guard_stack.values()
+            if len(guard_values) != 1:
+                raise RuntimeError("runtime case guard must produce exactly one Bool")
+            guard_value = guard_values[0]
+            if not isinstance(guard_value, bool):
+                raise RuntimeError("runtime case guard must produce Bool")
+            if not guard_value:
+                continue
         _execute_block(
             branch.body,
             branch_locals,

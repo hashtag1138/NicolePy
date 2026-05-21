@@ -22,12 +22,12 @@ Implementation follows specification, never the inverse.
 
 This repository is an implementation workspace, not a source of truth for the language.
 
-NicolePy currently targets `v0.16.0-self-tail-call`.
+NicolePy currently targets `v0.17.0-case-guards-spec`.
 
 Current target reference:
 
-- tag: `v0.16.0-self-tail-call`
-- commit: `f2c6dfc5de817423c41f1f8060bdd1656b7b63a5`
+- tag: `v0.17.0-case-guards-spec`
+- commit: `94240eceff7a6b8d925011f37e80c708c24c72c9`
 
 Self-tail-call scope (v0.16):
 
@@ -36,6 +36,17 @@ Self-tail-call scope (v0.16):
 - there is no syntax change for this feature
 - no guarantee is provided for mutual recursion, indirect recursion, or recursion through quotations
 - native/Python stack behavior remains outside the Nicole specification contract
+
+Case guards scope (v0.17):
+
+- guarded case branch syntax is supported: `pattern when guard => body`
+- guard is evaluated only after the branch pattern matches
+- pattern bindings are visible inside the guard
+- guard must produce exactly `Bool`
+- guards must be pure
+- `?` is forbidden inside guards
+- guarded branches are conditional and do not count as unconditional exhaustiveness coverage
+- `_ when guard` is allowed and remains non-exhaustive
 
 ## Quick start
 

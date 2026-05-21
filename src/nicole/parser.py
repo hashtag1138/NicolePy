@@ -445,6 +445,14 @@ class Parser:
 
     def _parse_case_branch(self, *, nested_words: list[WordDefNode] | None) -> CaseBranchNode:
         pattern = self._parse_pattern()
+        guard: BlockNode | None = None
+        if self._match(TokenKind.WHEN):
+            guard = self._parse_block(
+                stop_kinds={TokenKind.CASE_ARROW},
+                nested_words=None,
+                allow_nested_defs=False,
+                stop_predicate=lambda: self._check(TokenKind.CASE_ARROW),
+            )
         self._expect(TokenKind.CASE_ARROW, "missing '=>'")
 
         body = self._parse_block(
@@ -454,7 +462,7 @@ class Parser:
             stop_predicate=lambda: self._check(TokenKind.END)
             or self._looks_like_case_branch_start_at_current(),
         )
-        return CaseBranchNode(span=pattern.span, pattern=pattern, body=body)
+        return CaseBranchNode(span=pattern.span, pattern=pattern, body=body, guard=guard)
 
     def _parse_pattern(self) -> PatternNode:
         pattern, next_index = self._parse_pattern_at(self._index)
@@ -538,7 +546,11 @@ class Parser:
             _, next_index = self._parse_pattern_at(self._index)
         except ParseError:
             return False
-        return self._tokens[next_index].kind is TokenKind.CASE_ARROW
+        if self._tokens[next_index].kind is TokenKind.CASE_ARROW:
+            return True
+        if self._tokens[next_index].kind is TokenKind.WHEN:
+            return True
+        return False
 
     def _literal_value(self, token: Token) -> object:
         if token.kind is TokenKind.INT_LITERAL:

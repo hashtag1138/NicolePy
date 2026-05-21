@@ -195,6 +195,7 @@ class IfNode(AtomNode):
 class CaseBranchNode(ASTNode):
     pattern: PatternNode
     body: BlockNode
+    guard: BlockNode | None = None
 
 
 @dataclass(slots=True)

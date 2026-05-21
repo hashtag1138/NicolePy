@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from .ast_nodes import (
     BlockNode,
+    CaseBranchNode,
     CaseNode,
     IdentifierNode,
     IfNode,
@@ -88,6 +89,8 @@ class Resolver:
         branch_locals = set(local_names)
         if branch.pattern.binding is not None:
             branch_locals.add(branch.pattern.binding)
+        if branch.guard is not None:
+            self._resolve_block(branch.guard, current_scope=current_scope, local_names=branch_locals)
         self._resolve_block(branch.body, current_scope=current_scope, local_names=branch_locals)
 
     def _resolve_quote(

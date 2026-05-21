@@ -32,6 +32,7 @@ class TokenKind(Enum):
     ELSE = auto()
     END = auto()
     CASE = auto()
+    WHEN = auto()
     UNDERSCORE = auto()
     RESULT_OK = auto()
     RESULT_ERR = auto()

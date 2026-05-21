@@ -174,6 +174,35 @@ def test_resolve_case_pattern_bindings():
     assert ok_branch.body.items[0].resolution.qualified_name == "local:v"
 
 
+def test_resolve_case_pattern_binding_visible_in_guard_and_body():
+    program = resolve_source(
+        ": f { r:Result<Int,MapError> -- n:Int }\n"
+        "  r case\n"
+        "    Ok(v) when v 0 > => v\n"
+        "    Err(e) => 0\n"
+        "  end\n"
+        ";"
+    )
+
+    case_node = program.words[0].body.items[1]
+    ok_branch = case_node.branches[0]
+    assert ok_branch.guard is not None
+    assert ok_branch.guard.items[0].resolution.qualified_name == "local:v"
+    assert ok_branch.body.items[0].resolution.qualified_name == "local:v"
+
+
+def test_resolve_unknown_name_in_case_guard_is_rejected():
+    with pytest.raises(ResolutionError):
+        resolve_source(
+            ": f { r:Result<Int,MapError> -- n:Int }\n"
+            "  r case\n"
+            "    Ok(v) when missing 0 > => v\n"
+            "    Err(e) => 0\n"
+            "  end\n"
+            ";"
+        )
+
+
 @pytest.mark.parametrize("variant_name", ["OutOfBounds", "MissingKey"])
 def test_resolve_err_variant_pattern_does_not_create_local(variant_name):
     program = resolve_source(

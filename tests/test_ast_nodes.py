@@ -102,6 +102,18 @@ def test_case_node_has_no_scrutinee_field():
     assert "scrutinee" not in field_names
 
 
+def test_case_branch_node_has_optional_guard_field():
+    field_names = {field.name for field in CaseBranchNode.__dataclass_fields__.values()}
+    assert "guard" in field_names
+
+    branch = CaseBranchNode(
+        pattern=PatternNode(kind=PatternKind.WILDCARD, value=None, binding=None, span=make_span()),
+        body=BlockNode(span=make_span(), items=()),
+        span=make_span(),
+    )
+    assert branch.guard is None
+
+
 @pytest.mark.parametrize(
     "cls, kwargs",
     [

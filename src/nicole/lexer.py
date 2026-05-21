@@ -354,5 +354,6 @@ def _keyword_kind(lexeme: str) -> TokenKind | None:
         "else": TokenKind.ELSE,
         "end": TokenKind.END,
         "case": TokenKind.CASE,
+        "when": TokenKind.WHEN,
     }
     return keywords.get(lexeme)

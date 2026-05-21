@@ -49,6 +49,16 @@ def test_case_arrow_recognized():
     assert kinds[-1] is TokenKind.EOF
 
 
+def test_when_keyword_recognized():
+    tokens = lex("value case\n  Ok(v) when v 0 > => v\nend")
+    kinds = [token.kind for token in tokens]
+
+    assert TokenKind.CASE in kinds
+    assert TokenKind.WHEN in kinds
+    assert TokenKind.CASE_ARROW in kinds
+    assert kinds[-1] is TokenKind.EOF
+
+
 def test_dirty_keyword_recognized():
     tokens = lex("dirty : foo { -- } ;")
 

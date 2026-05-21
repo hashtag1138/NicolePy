@@ -48,6 +48,8 @@ def _marked_calls(block) -> list[IdentifierNode]:
             continue
         if isinstance(item, CaseNode):
             for branch in item.branches:
+                if branch.guard is not None:
+                    marked.extend(_marked_calls(branch.guard))
                 marked.extend(_marked_calls(branch.body))
             continue
         if isinstance(item, QuoteNode):
@@ -299,6 +301,101 @@ def test_checker_accepts_bool_case_with_wildcard():
         ": ok { b:Bool -- n:Int }\n"
         "  b case\n"
         "    true => 1\n"
+        "    _ => 0\n"
+        "  end\n"
+        ";"
+    )
+
+
+def test_checker_accepts_case_guard_with_bool_result() -> None:
+    check_source(
+        ": classify { r:Result<Int,MapError> -- n:Int }\n"
+        "  r case\n"
+        "    Ok(v) when v 0 > => v\n"
+        "    _ => 0\n"
+        "  end\n"
+        ";"
+    )
+
+
+def test_checker_rejects_case_guard_that_is_not_bool() -> None:
+    with pytest.raises(CheckerError, match="case guard must produce Bool"):
+        check_source(
+            ": bad { r:Result<Int,MapError> -- n:Int }\n"
+            "  r case\n"
+            "    Ok(v) when v => v\n"
+            "    _ => 0\n"
+            "  end\n"
+            ";"
+        )
+
+
+def test_checker_rejects_case_guard_with_extra_stack_values() -> None:
+    with pytest.raises(CheckerError, match="case guard must produce exactly one Bool"):
+        check_source(
+            ": bad { r:Result<Int,MapError> -- n:Int }\n"
+            "  r case\n"
+            "    Ok(v) when true true => v\n"
+            "    _ => 0\n"
+            "  end\n"
+            ";"
+        )
+
+
+def test_checker_rejects_case_guard_consuming_preexisting_stack() -> None:
+    with pytest.raises(CheckerError, match="case guard must not consume preexisting stack values"):
+        check_source(
+            ": bad { r:Result<Int,MapError> -- n:Int }\n"
+            "  r case\n"
+            "    Ok(v) when dup true => v\n"
+            "    _ => 0\n"
+            "  end\n"
+            ";"
+        )
+
+
+def test_checker_rejects_dirty_call_in_case_guard() -> None:
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match="case guard cannot call dirty code"):
+        check_source_with_host_contract(
+            "dirty : use-guard { r:Result<Int,MapError> -- n:Int }\n"
+            "  r case\n"
+            "    Ok(v) when \"x\" host.log true => v\n"
+            "    _ => 0\n"
+            "  end\n"
+            ";",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+
+
+def test_checker_rejects_propagate_in_case_guard() -> None:
+    with pytest.raises(CheckerError, match=r"case guard cannot contain \?"):
+        check_source(
+            ": bad { r:Result<Int,MapError> -- n:Int }\n"
+            "  r case\n"
+            "    Ok(v) when map.empty:Map<String,Int> \"k\" map.get ? => v\n"
+            "    _ => 0\n"
+            "  end\n"
+            ";"
+        )
+
+
+def test_checker_guarded_wildcard_is_not_exhaustive() -> None:
+    with pytest.raises(CheckerError, match="case is not exhaustive"):
+        check_source(
+            ": bad { b:Bool -- n:Int }\n"
+            "  b case\n"
+            "    _ when true => 1\n"
+            "  end\n"
+            ";"
+        )
+
+
+def test_checker_unguarded_wildcard_remains_exhaustive_with_guarded_branch() -> None:
+    check_source(
+        ": ok { b:Bool -- n:Int }\n"
+        "  b case\n"
+        "    true when false => 1\n"
         "    _ => 0\n"
         "  end\n"
         ";"
@@ -1810,6 +1907,46 @@ def test_checker_marks_self_call_in_tail_case_branch() -> None:
     assert call.name == "loop"
     assert call.resolution.is_self_tail_call is True
     assert _marked_calls(program.words[0].body) == [call]
+
+
+def test_checker_marks_self_call_in_guarded_tail_case_branch() -> None:
+    program = check_source(
+        ": loop { n:Int -- n2:Int }\n"
+        "  n case\n"
+        "    _ when n 0 > => n 1 - loop\n"
+        "    _ => n\n"
+        "  end\n"
+        ";"
+    )
+
+    case_node = program.words[0].body.items[1]
+    assert isinstance(case_node, CaseNode)
+    call = case_node.branches[0].body.items[3]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "loop"
+    assert call.resolution.is_self_tail_call is True
+    assert _marked_calls(program.words[0].body) == [call]
+
+
+def test_checker_does_not_mark_self_call_inside_case_guard_as_tail() -> None:
+    program = check_source(
+        ": loop { n:Int -- n2:Int }\n"
+        "  n case\n"
+        "    _ when n 1 - loop 0 > => n\n"
+        "    _ => n\n"
+        "  end\n"
+        ";"
+    )
+
+    case_node = program.words[0].body.items[1]
+    assert isinstance(case_node, CaseNode)
+    guard = case_node.branches[0].guard
+    assert guard is not None
+    call = guard.items[3]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "loop"
+    assert call.resolution.is_self_tail_call is False
+    assert _marked_calls(program.words[0].body) == []
 
 
 def test_checker_phase4_scc_dirty_propagation_passes_with_annotations():

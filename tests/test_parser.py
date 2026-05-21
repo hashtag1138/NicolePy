@@ -102,6 +102,47 @@ def test_parser_case_has_no_scrutinee_field():
         PatternKind.LITERAL,
         PatternKind.WILDCARD,
     ]
+    assert all(branch.guard is None for branch in case_node.branches)
+
+
+def test_parser_case_with_guarded_branch_parses():
+    program = parse_source(
+        ": classify { r:Result<Int,MapError> -- text:String }\n"
+        "  r case\n"
+        "    Ok(v) when v 0 > => \"positive\"\n"
+        "    _ => \"other\"\n"
+        "  end\n"
+        ";"
+    )
+    case_node = program.words[0].body.items[1]
+    assert isinstance(case_node, CaseNode)
+
+    guarded = case_node.branches[0]
+    assert guarded.pattern.kind is PatternKind.OK
+    assert guarded.pattern.binding == "v"
+    assert guarded.guard is not None
+    assert isinstance(guarded.guard.items[0], IdentifierNode)
+    assert isinstance(guarded.guard.items[1], LiteralNode)
+    assert isinstance(guarded.guard.items[2], OperatorNode)
+
+
+def test_parser_case_with_mixed_guarded_and_unguarded_branches_parses():
+    program = parse_source(
+        ": classify { n:Int -- text:String }\n"
+        "  n case\n"
+        "    0 when true => \"zero\"\n"
+        "    1 => \"one\"\n"
+        "    _ when false => \"never\"\n"
+        "    _ => \"many\"\n"
+        "  end\n"
+        ";"
+    )
+    case_node = program.words[0].body.items[1]
+    assert isinstance(case_node, CaseNode)
+    assert case_node.branches[0].guard is not None
+    assert case_node.branches[1].guard is None
+    assert case_node.branches[2].guard is not None
+    assert case_node.branches[3].guard is None
 
 
 def test_parser_quotation():
@@ -419,6 +460,32 @@ def test_parser_accepts_err_variant_pattern(variant_name):
     ],
 )
 def test_parser_rejects_invalid_constructor_patterns(source):
+    with pytest.raises(ParseError):
+        parse_source(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        (
+            ": bad-case { n:Int -- text:String }\n"
+            "  n case\n"
+            "    0 if true => \"bad\"\n"
+            "    _ => \"ok\"\n"
+            "  end\n"
+            ";"
+        ),
+        (
+            ": bad-case { n:Int -- text:String }\n"
+            "  n case\n"
+            "    0 => when true \"bad\"\n"
+            "    _ => \"ok\"\n"
+            "  end\n"
+            ";"
+        ),
+    ],
+)
+def test_parser_rejects_invalid_guard_syntax(source):
     with pytest.raises(ParseError):
         parse_source(source)
 
