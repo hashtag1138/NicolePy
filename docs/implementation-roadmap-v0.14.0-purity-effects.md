@@ -2,8 +2,16 @@
 
 ## Source of truth
 
+Workspace reference for this roadmap:
+
+```text
+WORKSPACE_ROOT=/data/data/com.termux/files/home/Sources/nicole
+
+SPEC_REPO=${WORKSPACE_ROOT}/nicole_language_docs_seed
+```
+
 Nicole specification repository:
-~/Sources/nicole_language_docs_seed
+`${SPEC_REPO}`
 
 Specification tag:
 v0.14.0-purity-effects
