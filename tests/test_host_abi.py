@@ -354,3 +354,17 @@ def test_host_contract_accepts_nested_valid_abi_types() -> None:
     contract = host_contract_from_words([HostWord(name="host.run", signature=signature, effect=HostEffect.PURE)])
 
     assert "host.run" in contract.words
+
+
+def test_host_contract_accepts_unit_input_and_output_types() -> None:
+    signature = signature_from_source(": hostsig { u:Unit -- out:Unit } ;")
+    contract = host_contract_from_words([HostWord(name="host.unit", signature=signature, effect=HostEffect.PURE)])
+
+    assert "host.unit" in contract.words
+
+
+def test_export_contract_accepts_unit_input_and_output_types() -> None:
+    signature = signature_from_source(": appsig { u:Unit -- out:Unit } ;")
+    contract = export_contract_from_words([ExportWord(export_name="app.unit", internal_name="app.unit", signature=signature)])
+
+    assert "app.unit" in contract.words

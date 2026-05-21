@@ -18,6 +18,7 @@ from nicole.runtime import (
     RuntimeHostBindings,
     RuntimeQuote,
     RuntimeStack,
+    UNIT,
     _execute_call,
     _execute_identifier,
     _execute_operator,
@@ -411,6 +412,111 @@ def test_runtime_host_multi_output_wrong_element_type() -> None:
     runtime = RuntimeHostBindings({"host.pair": lambda: (1, "bad")})
     with pytest.raises(RuntimeError, match="host output 'b'"):
         run_export(checked, "app.pair", runtime)
+
+
+def test_runtime_unit_input_and_output_accept_unit_sentinel() -> None:
+    checked = analyze_program(
+        "export : app.echo-unit { u:Unit -- v:Unit }\n"
+        "  u\n"
+        ";\n"
+    )
+
+    result = run_export(checked, "app.echo-unit", RuntimeHostBindings({}), UNIT)
+    assert result is UNIT
+
+
+def test_runtime_unit_input_rejects_non_unit_values() -> None:
+    checked = analyze_program(
+        "export : app.echo-unit { u:Unit -- v:Unit }\n"
+        "  u\n"
+        ";\n"
+    )
+
+    with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
+        run_export(checked, "app.echo-unit", RuntimeHostBindings({}), 123)
+    with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
+        run_export(checked, "app.echo-unit", RuntimeHostBindings({}), "abc")
+    with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
+        run_export(checked, "app.echo-unit", RuntimeHostBindings({}), True)
+    with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
+        run_export(checked, "app.echo-unit", RuntimeHostBindings({}), None)
+
+
+def test_runtime_zero_output_and_unit_output_are_distinct() -> None:
+    checked = analyze_program(
+        "export : app.no-output { -- }\n"
+        ";\n"
+        "export : app.unit-output { -- u:Unit }\n"
+        "  host.produce-unit\n"
+        ";\n",
+        host_contract=host_contract_from_words(
+            [HostWord(name="host.produce-unit", signature=signature_from_source(": hostproduce { -- u:Unit } ;"), effect=HostEffect.PURE)]
+        ),
+    )
+
+    runtime = RuntimeHostBindings({"host.produce-unit": lambda: UNIT})
+    assert run_export(checked, "app.no-output", runtime) is None
+    assert run_export(checked, "app.unit-output", runtime) is UNIT
+
+
+def test_runtime_host_unit_boundaries() -> None:
+    host_in_signature = signature_from_source(": hostconsume { u:Unit -- n:Int } ;")
+    host_out_signature = signature_from_source(": hostproduce { -- u:Unit } ;")
+    host_contract = host_contract_from_words(
+        [
+            HostWord(name="host.consume-unit", signature=host_in_signature, effect=HostEffect.PURE),
+            HostWord(name="host.produce-unit", signature=host_out_signature, effect=HostEffect.PURE),
+        ]
+    )
+
+    checked = analyze_program(
+        "export : app.consume { -- n:Int }\n"
+        "  host.produce-unit\n"
+        "  host.consume-unit\n"
+        ";\n"
+        "export : app.direct-consume { u:Unit -- n:Int }\n"
+        "  u host.consume-unit\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    runtime_ok = RuntimeHostBindings(
+        {
+            "host.produce-unit": lambda: UNIT,
+            "host.consume-unit": lambda u: 7,
+        }
+    )
+    assert run_export(checked, "app.consume", runtime_ok) == 7
+    assert run_export(checked, "app.direct-consume", runtime_ok, UNIT) == 7
+
+    runtime_bad_output = RuntimeHostBindings(
+        {
+            "host.produce-unit": lambda: None,
+            "host.consume-unit": lambda u: 7,
+        }
+    )
+    with pytest.raises(RuntimeError, match="host output 'u': expected Unit"):
+        run_export(checked, "app.consume", runtime_bad_output)
+
+    runtime_bad_output_2 = RuntimeHostBindings(
+        {
+            "host.produce-unit": lambda: 123,
+            "host.consume-unit": lambda u: 7,
+        }
+    )
+    with pytest.raises(RuntimeError, match="host output 'u': expected Unit"):
+        run_export(checked, "app.consume", runtime_bad_output_2)
+
+    runtime_bad_input = RuntimeHostBindings(
+        {
+            "host.produce-unit": lambda: None,
+            "host.consume-unit": lambda u: 7,
+        }
+    )
+    with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
+        run_export(checked, "app.direct-consume", runtime_bad_input, 123)
+    with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
+        run_export(checked, "app.direct-consume", runtime_bad_input, None)
 
 
 def test_runtime_if_true_executes_then_branch() -> None:

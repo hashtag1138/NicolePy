@@ -30,11 +30,22 @@ __all__ = [
     "RuntimeError",
     "RuntimeStack",
     "RuntimeHostBindings",
+    "UNIT",
     "Ok",
     "Err",
     "RuntimeQuote",
     "run_export",
 ]
+
+
+class _UnitValue:
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "UNIT"
+
+
+UNIT = _UnitValue()
 
 
 @dataclass(slots=True)
@@ -838,6 +849,8 @@ def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None
         ok = isinstance(value, str)
     elif type_name == "Bool":
         ok = type(value) is bool
+    elif type_name == "Unit":
+        ok = value is UNIT
     elif type_name == "Quote":
         ok = isinstance(value, RuntimeQuote)
     elif type_name == "Result":
