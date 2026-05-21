@@ -22,10 +22,12 @@ Implementation follows specification, never the inverse.
 
 This repository is an implementation workspace, not a source of truth for the language.
 
-Normative reference currently tracked by this repository:
+NicolePy currently targets migration toward `v0.15.0-collection-core-spec`.
 
-- tag: `v0.14.0-purity-effects`
-- commit: `b8ab130aba6fffad1803f4f948306e47e55d995b`
+Current target reference:
+
+- tag: `v0.15.0-collection-core-spec`
+- commit: `67084a65a69d95540f635309b1a77fda4414eee4`
 
 ## Quick start
 
@@ -41,7 +43,7 @@ python -m pytest -q
 `from nicole.pipeline import analyze_program` is the canonical static entrypoint.
 It performs parse -> signature collection -> standard builtin injection -> resolution -> checking -> export collection.
 
-Active execution architecture in v0.14:
+Active execution architecture in the current migration baseline:
 
 - source
 - lexer
@@ -80,7 +82,7 @@ Current documentation constraints:
 
 Syntax and reserved-name note:
 
-- canonical definition forms in v0.14 are `:`, `dirty :`, `pub :`, `pub dirty :`, `export :`, and `export dirty :`
+- canonical definition forms in the current baseline are `:`, `dirty :`, `pub :`, `pub dirty :`, `export :`, and `export dirty :`
 - invalid modifier orders include `dirty pub :`, `dirty export :`, and `: dirty foo`
 - exact `dirty` is reserved and invalid as a word name, subword name, local, capture, or output label
 - names such as `dirty-int`, `dirty_log`, `is-dirty`, and `dirty.value` remain valid

@@ -20,10 +20,12 @@ The public examples are also useful consolidation material:
 Implementation follows specification, never the inverse.
 If there is any conflict, the specification wins.
 
-Revision of reference:
+NicolePy currently targets migration toward `v0.15.0-collection-core-spec`.
 
-- tag: `v0.14.0-purity-effects`
-- commit: `b8ab130aba6fffad1803f4f948306e47e55d995b`
+Current target reference:
+
+- tag: `v0.15.0-collection-core-spec`
+- commit: `67084a65a69d95540f635309b1a77fda4414eee4`
 
 ## 1. Core Principles
 
@@ -41,7 +43,7 @@ Revision of reference:
 - Input names create immutable local variables.
 - Output names are documentary only and do not create variables.
 
-Modifier forms in v0.14:
+Modifier forms in the current migration baseline:
 
 - `: foo { -- } ;`
 - `dirty : foo { -- } ;`
