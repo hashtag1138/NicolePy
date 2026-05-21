@@ -327,6 +327,48 @@ class Checker:
             stack.append(StackValue(_builtin_type("Int")))
             return
 
+        if node.name == "list.is-empty":
+            collection_type = self._pop_type(stack, node.span.line, node.span.column)
+            if _extract_list_item_type(collection_type) is None:
+                self._raise_error("list.is-empty expects List<T>", node.span.line, node.span.column)
+            stack.append(StackValue(_builtin_type("Bool")))
+            return
+
+        if node.name == "list.first":
+            list_type = self._pop_type(stack, node.span.line, node.span.column)
+            item_type = _extract_list_item_type(list_type)
+            if item_type is None:
+                self._raise_error("list.first expects List<T>", node.span.line, node.span.column)
+            stack.append(StackValue(_result_type(node.span, item_type, _builtin_type("ListError"))))
+            return
+
+        if node.name == "list.last":
+            list_type = self._pop_type(stack, node.span.line, node.span.column)
+            item_type = _extract_list_item_type(list_type)
+            if item_type is None:
+                self._raise_error("list.last expects List<T>", node.span.line, node.span.column)
+            stack.append(StackValue(_result_type(node.span, item_type, _builtin_type("ListError"))))
+            return
+
+        if node.name == "list.append":
+            value_type = self._pop_type(stack, node.span.line, node.span.column)
+            list_type = self._pop_type(stack, node.span.line, node.span.column)
+            item_type = _extract_list_item_type(list_type)
+            if item_type is None:
+                self._raise_error("list.append expects List<T> T", node.span.line, node.span.column)
+            if not _same_type(value_type, item_type):
+                self._raise_error("list.append value type does not match list element type", node.span.line, node.span.column)
+            stack.append(StackValue(TypeNode(span=node.span, name="List", args=(item_type,))))
+            return
+
+        if node.name == "list.reverse":
+            list_type = self._pop_type(stack, node.span.line, node.span.column)
+            item_type = _extract_list_item_type(list_type)
+            if item_type is None:
+                self._raise_error("list.reverse expects List<T>", node.span.line, node.span.column)
+            stack.append(StackValue(TypeNode(span=node.span, name="List", args=(item_type,))))
+            return
+
         if node.name == "list.concat":
             right_type = self._pop_type(stack, node.span.line, node.span.column)
             left_type = self._pop_type(stack, node.span.line, node.span.column)
@@ -455,6 +497,31 @@ class Checker:
             if _extract_map_types(collection_type) is None:
                 self._raise_error("map.len expects Map<K,V>", node.span.line, node.span.column)
             stack.append(StackValue(_builtin_type("Int")))
+            return
+
+        if node.name == "map.is-empty":
+            collection_type = self._pop_type(stack, node.span.line, node.span.column)
+            if _extract_map_types(collection_type) is None:
+                self._raise_error("map.is-empty expects Map<K,V>", node.span.line, node.span.column)
+            stack.append(StackValue(_builtin_type("Bool")))
+            return
+
+        if node.name == "map.keys":
+            map_type = self._pop_type(stack, node.span.line, node.span.column)
+            map_parts = _extract_map_types(map_type)
+            if map_parts is None:
+                self._raise_error("map.keys expects Map<K,V>", node.span.line, node.span.column)
+            expected_key_type, _ = map_parts
+            stack.append(StackValue(TypeNode(span=node.span, name="List", args=(expected_key_type,))))
+            return
+
+        if node.name == "map.values":
+            map_type = self._pop_type(stack, node.span.line, node.span.column)
+            map_parts = _extract_map_types(map_type)
+            if map_parts is None:
+                self._raise_error("map.values expects Map<K,V>", node.span.line, node.span.column)
+            _, expected_value_type = map_parts
+            stack.append(StackValue(TypeNode(span=node.span, name="List", args=(expected_value_type,))))
             return
 
         if node.name == "map.contains":

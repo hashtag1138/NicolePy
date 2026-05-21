@@ -268,6 +268,19 @@ def test_pipeline_accepts_capturing_quote_for_list_reduce() -> None:
     assert isinstance(result, CheckedProgram)
 
 
+def test_pipeline_accepts_collection_core_step2_builtins() -> None:
+    result = analyze_program(
+        ": step2 { -- n:Int }\n"
+        "  [1, 2] list.reverse list.first drop\n"
+        "  map.empty:Map<String,Int> \"a\" 1 map.set map.keys drop\n"
+        "  map.empty:Map<String,Int> map.is-empty drop\n"
+        "  0\n"
+        ";"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
 def test_pipeline_accepts_propagate_with_matching_result_error_type() -> None:
     result = analyze_program(
         "export : ok { -- r:Result<Int,MapError> }\n"

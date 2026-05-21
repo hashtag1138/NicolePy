@@ -50,6 +50,34 @@ def load_standard_symbols() -> list[WordSymbol]:
             outputs=(_param("n", _named_type("Int")),),
         ),
         _builtin(
+            "list.is-empty",
+            inputs=(_param("xs", _list_of("T")),),
+            outputs=(_param("ok", _named_type("Bool")),),
+        ),
+        _builtin(
+            "list.first",
+            inputs=(_param("xs", _list_of("T")),),
+            outputs=(_param("r", _result_of(_named_type("T"), _named_type("ListError"))),),
+        ),
+        _builtin(
+            "list.last",
+            inputs=(_param("xs", _list_of("T")),),
+            outputs=(_param("r", _result_of(_named_type("T"), _named_type("ListError"))),),
+        ),
+        _builtin(
+            "list.append",
+            inputs=(
+                _param("xs", _list_of("T")),
+                _param("value", _named_type("T")),
+            ),
+            outputs=(_param("ys", _list_of("T")),),
+        ),
+        _builtin(
+            "list.reverse",
+            inputs=(_param("xs", _list_of("T")),),
+            outputs=(_param("ys", _list_of("T")),),
+        ),
+        _builtin(
             "list.get",
             inputs=(
                 _param("xs", _list_of("T")),
@@ -148,6 +176,21 @@ def load_standard_symbols() -> list[WordSymbol]:
             "map.len",
             inputs=(_param("m", _map_of("K", "V")),),
             outputs=(_param("n", _named_type("Int")),),
+        ),
+        _builtin(
+            "map.is-empty",
+            inputs=(_param("m", _map_of("K", "V")),),
+            outputs=(_param("ok", _named_type("Bool")),),
+        ),
+        _builtin(
+            "map.keys",
+            inputs=(_param("m", _map_of("K", "V")),),
+            outputs=(_param("xs", _list_of("K")),),
+        ),
+        _builtin(
+            "map.values",
+            inputs=(_param("m", _map_of("K", "V")),),
+            outputs=(_param("xs", _list_of("V")),),
         ),
     ]
 

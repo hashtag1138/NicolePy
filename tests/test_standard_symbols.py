@@ -25,6 +25,11 @@ def test_load_standard_symbols_contains_all_v1_builtins():
         "result.is-err",
         "result.unwrap-or",
         "list.len",
+        "list.is-empty",
+        "list.first",
+        "list.last",
+        "list.append",
+        "list.reverse",
         "list.get",
         "list.set",
         "list.concat",
@@ -37,6 +42,9 @@ def test_load_standard_symbols_contains_all_v1_builtins():
         "map.set",
         "map.remove",
         "map.len",
+        "map.is-empty",
+        "map.keys",
+        "map.values",
     }
 
 
@@ -145,9 +153,34 @@ def test_non_v1_builtins_are_not_in_standard_symbol_inventory() -> None:
     assert "list.push" not in names
     assert "list.pop" not in names
     assert "list.contains" not in names
-    assert "map.keys" not in names
-    assert "map.values" not in names
     assert "map.items" not in names
+
+
+def test_list_first_signature_shape() -> None:
+    symbol = next(symbol for symbol in load_standard_symbols() if symbol.name == "list.first")
+
+    assert len(symbol.signature.inputs) == 1
+    assert symbol.signature.inputs[0].type_node.name == "List"
+    assert len(symbol.signature.outputs) == 1
+    assert symbol.signature.outputs[0].type_node.name == "Result"
+    assert symbol.signature.outputs[0].type_node.args[0].name == "T"
+    assert symbol.signature.outputs[0].type_node.args[1].name == "ListError"
+
+
+def test_map_keys_and_values_signature_shape() -> None:
+    builtins = {symbol.name: symbol for symbol in load_standard_symbols()}
+
+    map_keys = builtins["map.keys"]
+    assert len(map_keys.signature.inputs) == 1
+    assert len(map_keys.signature.outputs) == 1
+    assert map_keys.signature.outputs[0].type_node.name == "List"
+    assert map_keys.signature.outputs[0].type_node.args[0].name == "K"
+
+    map_values = builtins["map.values"]
+    assert len(map_values.signature.inputs) == 1
+    assert len(map_values.signature.outputs) == 1
+    assert map_values.signature.outputs[0].type_node.name == "List"
+    assert map_values.signature.outputs[0].type_node.args[0].name == "V"
 
 
 def test_higher_order_builtins_are_marked_callable_only_for_quotes():

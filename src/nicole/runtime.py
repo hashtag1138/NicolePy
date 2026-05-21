@@ -270,6 +270,21 @@ def _execute_identifier(
         _ensure_matches_type(map_value, "Map", context="map.len map")
         stack.push(len(map_value))
         return
+    if node.name == "map.is-empty":
+        map_value = stack.pop()
+        _ensure_matches_type(map_value, "Map", context="map.is-empty map")
+        stack.push(len(map_value) == 0)
+        return
+    if node.name == "map.keys":
+        map_value = stack.pop()
+        _ensure_matches_type(map_value, "Map", context="map.keys map")
+        stack.push(tuple(map_value.keys()))
+        return
+    if node.name == "map.values":
+        map_value = stack.pop()
+        _ensure_matches_type(map_value, "Map", context="map.values map")
+        stack.push(tuple(map_value.values()))
+        return
     if node.name == "result.is-ok":
         result_value = stack.pop()
         _ensure_matches_type(result_value, "Result", context="result.is-ok input")
@@ -293,6 +308,38 @@ def _execute_identifier(
         value = stack.pop()
         _ensure_matches_type(value, "List", context="list.len input")
         stack.push(len(value))
+        return
+    if node.name == "list.is-empty":
+        value = stack.pop()
+        _ensure_matches_type(value, "List", context="list.is-empty input")
+        stack.push(len(value) == 0)
+        return
+    if node.name == "list.first":
+        list_value = stack.pop()
+        _ensure_matches_type(list_value, "List", context="list.first list")
+        if len(list_value) == 0:
+            stack.push(Err("OutOfBounds"))
+            return
+        stack.push(Ok(list_value[0]))
+        return
+    if node.name == "list.last":
+        list_value = stack.pop()
+        _ensure_matches_type(list_value, "List", context="list.last list")
+        if len(list_value) == 0:
+            stack.push(Err("OutOfBounds"))
+            return
+        stack.push(Ok(list_value[-1]))
+        return
+    if node.name == "list.append":
+        value = stack.pop()
+        list_value = stack.pop()
+        _ensure_matches_type(list_value, "List", context="list.append list")
+        stack.push(list_value + (value,))
+        return
+    if node.name == "list.reverse":
+        list_value = stack.pop()
+        _ensure_matches_type(list_value, "List", context="list.reverse list")
+        stack.push(tuple(reversed(list_value)))
         return
     if node.name == "list.set":
         value = stack.pop()

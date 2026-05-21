@@ -958,6 +958,62 @@ def test_runtime_list_len_malformed_runtime_value_is_controlled_error() -> None:
         _execute_identifier(list_len_node, {}, stack, {}, RuntimeHostBindings({}))
 
 
+def test_runtime_list_is_empty_executes() -> None:
+    checked = analyze_program(
+        "export : app.empty { -- b:Bool }\n"
+        "  []:List<Int> list.is-empty\n"
+        ";\n"
+        "export : app.non-empty { -- b:Bool }\n"
+        "  [1] list.is-empty\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.empty", RuntimeHostBindings({})) is True
+    assert run_export(checked, "app.non-empty", RuntimeHostBindings({})) is False
+
+
+def test_runtime_list_first_and_last_execute() -> None:
+    checked = analyze_program(
+        "export : app.first { -- r:Result<Int,ListError> }\n"
+        "  [10, 20, 30] list.first\n"
+        ";\n"
+        "export : app.last { -- r:Result<Int,ListError> }\n"
+        "  [10, 20, 30] list.last\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.first", RuntimeHostBindings({})) == Ok(10)
+    assert run_export(checked, "app.last", RuntimeHostBindings({})) == Ok(30)
+
+
+def test_runtime_list_first_and_last_empty_return_out_of_bounds_error() -> None:
+    checked = analyze_program(
+        "export : app.first-empty { -- r:Result<Int,ListError> }\n"
+        "  []:List<Int> list.first\n"
+        ";\n"
+        "export : app.last-empty { -- r:Result<Int,ListError> }\n"
+        "  []:List<Int> list.last\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.first-empty", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "app.last-empty", RuntimeHostBindings({})) == Err("OutOfBounds")
+
+
+def test_runtime_list_append_and_reverse_execute() -> None:
+    checked = analyze_program(
+        "export : app.append { -- xs:List<Int> }\n"
+        "  [1, 2] 3 list.append\n"
+        ";\n"
+        "export : app.reverse { -- xs:List<Int> }\n"
+        "  [1, 2, 3] list.reverse\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.append", RuntimeHostBindings({})) == (1, 2, 3)
+    assert run_export(checked, "app.reverse", RuntimeHostBindings({})) == (3, 2, 1)
+
+
 def test_runtime_list_push_is_not_available_in_v1_surface() -> None:
     with pytest.raises(ResolutionError, match="unresolved name"):
         analyze_program(
@@ -2099,6 +2155,40 @@ def test_runtime_map_len_executes() -> None:
     )
 
     assert run_export(checked, "app.run", RuntimeHostBindings({})) == 2
+
+
+def test_runtime_map_is_empty_executes() -> None:
+    checked = analyze_program(
+        "export : app.empty { -- b:Bool }\n"
+        "  map.empty:Map<String,Int> map.is-empty\n"
+        ";\n"
+        "export : app.non-empty { -- b:Bool }\n"
+        "  map.empty:Map<String,Int> \"a\" 1 map.set map.is-empty\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.empty", RuntimeHostBindings({})) is True
+    assert run_export(checked, "app.non-empty", RuntimeHostBindings({})) is False
+
+
+def test_runtime_map_keys_and_values_preserve_insertion_order() -> None:
+    checked = analyze_program(
+        "export : app.keys { -- xs:List<String> }\n"
+        "  map.empty:Map<String,Int>\n"
+        "  \"a\" 1 map.set\n"
+        "  \"b\" 2 map.set\n"
+        "  map.keys\n"
+        ";\n"
+        "export : app.values { -- xs:List<Int> }\n"
+        "  map.empty:Map<String,Int>\n"
+        "  \"a\" 1 map.set\n"
+        "  \"b\" 2 map.set\n"
+        "  map.values\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.keys", RuntimeHostBindings({})) == ("a", "b")
+    assert run_export(checked, "app.values", RuntimeHostBindings({})) == (1, 2)
 
 
 def test_runtime_if_false_executes_else_branch() -> None:

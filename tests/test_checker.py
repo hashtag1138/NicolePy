@@ -475,10 +475,52 @@ def test_checker_accepts_list_len_builtin():
     )
 
 
+def test_checker_accepts_list_is_empty_builtin():
+    check_source(
+        ": empty { -- b:Bool }\n"
+        "  []:List<Int> list.is-empty\n"
+        ";"
+    )
+
+
+def test_checker_accepts_list_first_and_last_builtins():
+    check_source(
+        ": first-last { -- a:Result<Int,ListError> b:Result<Int,ListError> }\n"
+        "  [4, 9] list.first\n"
+        "  [4, 9] list.last\n"
+        ";"
+    )
+
+
+def test_checker_accepts_list_append_and_reverse_builtins():
+    check_source(
+        ": append-reverse { -- xs:List<Int> }\n"
+        "  [1, 2] 3 list.append list.reverse\n"
+        ";"
+    )
+
+
 def test_checker_accepts_map_len_builtin():
     check_source(
         ": len { -- n:Int }\n"
         "  map.empty:Map<String,Int> map.len\n"
+        ";"
+    )
+
+
+def test_checker_accepts_map_is_empty_builtin():
+    check_source(
+        ": empty { -- b:Bool }\n"
+        "  map.empty:Map<String,Int> map.is-empty\n"
+        ";"
+    )
+
+
+def test_checker_accepts_map_keys_and_values_builtins():
+    check_source(
+        ": kv { -- ks:List<String> vs:List<Int> }\n"
+        "  map.empty:Map<String,Int> map.keys\n"
+        "  map.empty:Map<String,Int> map.values\n"
         ";"
     )
 
