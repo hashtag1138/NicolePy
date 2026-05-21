@@ -583,6 +583,72 @@ def test_runtime_case_result_other_error_no_match() -> None:
         run_export(checked, "app.unwrap", RuntimeHostBindings({}), Err("Other"))
 
 
+def test_runtime_propagate_ok_continues_execution() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "k" 41 map.set\n'
+        '  "k" map.get\n'
+        "  ?\n"
+        "  1 +\n"
+        "  Ok!\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok(42)
+
+
+def test_runtime_propagate_err_returns_immediately() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "missing" map.get\n'
+        "  ?\n"
+        "  0 +\n"
+        "  Ok!\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("MissingKey")
+
+
+def test_runtime_propagate_is_frame_local_inside_quotation() -> None:
+    checked = analyze_program(
+        "export : app.run { -- n:Int }\n"
+        "  map.empty:Map<String,Int>\n"
+        "  :[ | m:Map<String,Int> -- r:Result<Int,MapError> |\n"
+        '    m "missing" map.get\n'
+        "    ?\n"
+        "    1 +\n"
+        "    Ok!\n"
+        "  ;]\n"
+        "  call\n"
+        "  9 result.unwrap-or\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 9
+
+
+def test_runtime_propagate_multiple_in_one_frame() -> None:
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "a" 1 map.set\n'
+        '  "a" map.get\n'
+        "  ?\n"
+        "  drop\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "missing" map.get\n'
+        "  ?\n"
+        "  drop\n"
+        "  100 Ok!\n"
+        ";\n"
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("MissingKey")
+
+
 def test_runtime_case_branch_local_binding_does_not_escape_branch_scope() -> None:
     host_signature = signature_from_source(": hostfetch { -- r:Result<Int,MapError> } ;")
     host_contract = host_contract_from_words([HostWord(name="host.fetch", signature=host_signature, effect=HostEffect.PURE)])

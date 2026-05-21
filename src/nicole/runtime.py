@@ -15,6 +15,7 @@ from .ast_nodes import (
     OperatorNode,
     PatternKind,
     PatternNode,
+    PropagateNode,
     QuoteNode,
     ResultErrNode,
     ResultOkNode,
@@ -58,6 +59,10 @@ class Err:
 class RuntimeQuote:
     node: QuoteNode
     captured_locals: Mapping[str, object]
+
+@dataclass(frozen=True, slots=True)
+class _FramePropagationSignal(Exception):
+    error: str
 
 
 class RuntimeStack:
@@ -140,11 +145,14 @@ def _invoke_word(
         _ensure_matches_type(value, parameter.type_node.name, context=f"input '{parameter.name}'")
         locals_env[parameter.name] = value
 
-    stack = RuntimeStack()
-    _execute_block(word.body, locals_env, stack, word_index, runtime_bindings)
-
     outputs = word.signature.outputs
-    result_values = stack.values()
+    stack = RuntimeStack()
+    try:
+        _execute_block(word.body, locals_env, stack, word_index, runtime_bindings)
+        result_values = stack.values()
+    except _FramePropagationSignal as signal:
+        result_values = (Err(signal.error),)
+
     if len(result_values) != len(outputs):
         raise RuntimeError(
             f"wrong runtime signature for {word.name}: expected {len(outputs)} outputs, got {len(result_values)}"
@@ -195,8 +203,22 @@ def _execute_block(
             if item.operator == "call":
                 _execute_call(locals_env, stack, word_index, runtime_bindings)
                 continue
+            if item.operator == "?":
+                result_value = stack.pop()
+                _ensure_matches_type(result_value, "Result", context="? input")
+                if isinstance(result_value, Ok):
+                    stack.push(result_value.value)
+                    continue
+                raise _FramePropagationSignal(result_value.error)
             _execute_operator(item.operator, stack)
             continue
+        if isinstance(item, PropagateNode):
+            result_value = stack.pop()
+            _ensure_matches_type(result_value, "Result", context="? input")
+            if isinstance(result_value, Ok):
+                stack.push(result_value.value)
+                continue
+            raise _FramePropagationSignal(result_value.error)
         if isinstance(item, IdentifierNode):
             _execute_identifier(item, locals_env, stack, word_index, runtime_bindings)
             continue
@@ -613,9 +635,11 @@ def _invoke_runtime_quote_value(
         quote_locals[parameter.name] = value
 
     quote_stack = RuntimeStack()
-    _execute_block(quote.body, quote_locals, quote_stack, word_index, runtime_bindings)
-
-    result_values = quote_stack.values()
+    try:
+        _execute_block(quote.body, quote_locals, quote_stack, word_index, runtime_bindings)
+        result_values = quote_stack.values()
+    except _FramePropagationSignal as signal:
+        result_values = (Err(signal.error),)
     if len(result_values) != len(quote.outputs):
         raise RuntimeError(
             "wrong runtime signature for quotation: "

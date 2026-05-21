@@ -296,6 +296,38 @@ def test_pipeline_accepts_propagate_with_matching_result_error_type() -> None:
     assert isinstance(result, CheckedProgram)
 
 
+def test_pipeline_accepts_propagate_error_path_shape() -> None:
+    result = analyze_program(
+        "export : err { -- r:Result<Int,MapError> }\n"
+        "  map.empty:Map<String,Int>\n"
+        '  "missing" map.get\n'
+        "  ?\n"
+        "  1 +\n"
+        "  Ok!\n"
+        ";\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_accepts_propagate_inside_quotation_frame() -> None:
+    result = analyze_program(
+        "export : qscope { -- n:Int }\n"
+        "  map.empty:Map<String,Int>\n"
+        "  :[ | m:Map<String,Int> -- r:Result<Int,MapError> |\n"
+        '    m "missing" map.get\n'
+        "    ?\n"
+        "    1 +\n"
+        "    Ok!\n"
+        "  ;]\n"
+        "  call\n"
+        "  0 result.unwrap-or\n"
+        ";\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
 def test_pipeline_rejects_propagate_with_mismatched_error_type() -> None:
     with pytest.raises(CheckerError):
         analyze_program(
