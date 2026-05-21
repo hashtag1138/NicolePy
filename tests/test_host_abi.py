@@ -368,3 +368,22 @@ def test_export_contract_accepts_unit_input_and_output_types() -> None:
     contract = export_contract_from_words([ExportWord(export_name="app.unit", internal_name="app.unit", signature=signature)])
 
     assert "app.unit" in contract.words
+
+
+def test_export_contract_accepts_deep_nested_valid_abi_types() -> None:
+    signature = signature_from_source(
+        ": appsig { payload:Map<String,List<Result<Int,Bool>>> -- out:Result<List<Int>,MapError> } ;"
+    )
+    contract = export_contract_from_words(
+        [ExportWord(export_name="app.deep", internal_name="app.deep", signature=signature)]
+    )
+
+    assert "app.deep" in contract.words
+
+
+def test_host_contract_rejects_deep_nested_invalid_custom_type() -> None:
+    signature = signature_from_source(
+        ": hostsig { payload:Map<String,List<Result<Int,Custom>>> -- out:Result<List<Int>,MapError> } ;"
+    )
+    with pytest.raises(HostABIError, match="ABI-compatible"):
+        host_contract_from_words([HostWord(name="host.deep", signature=signature, effect=HostEffect.PURE)])

@@ -519,6 +519,104 @@ def test_runtime_host_unit_boundaries() -> None:
         run_export(checked, "app.direct-consume", runtime_bad_input, None)
 
 
+def test_runtime_accepts_valid_nested_list_result_input() -> None:
+    checked = analyze_program(
+        "export : app.echo { xs:List<Result<Int,Bool>> -- ys:List<Result<Int,Bool>> }\n"
+        "  xs\n"
+        ";\n"
+    )
+
+    payload = (Ok(1), Err(True), Ok(2))
+    assert run_export(checked, "app.echo", RuntimeHostBindings({}), payload) == payload
+
+
+def test_runtime_rejects_invalid_nested_list_result_input() -> None:
+    checked = analyze_program(
+        "export : app.echo { xs:List<Result<Int,Bool>> -- ys:List<Result<Int,Bool>> }\n"
+        "  xs\n"
+        ";\n"
+    )
+
+    with pytest.raises(RuntimeError, match="input 'xs': expected List<Result<Int, Bool>>"):
+        run_export(checked, "app.echo", RuntimeHostBindings({}), (Ok("x"), Err(True)))
+
+
+def test_runtime_accepts_valid_nested_map_result_host_output() -> None:
+    host_signature = signature_from_source(": hostmap { -- m:Map<String,Result<Int,Bool>> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
+    checked = analyze_program(
+        "export : app.run { -- m:Map<String,Result<Int,Bool>> }\n"
+        "  host.map\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    value = {"a": Ok(1), "b": Err(True)}
+    assert run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: value})) == value
+
+
+def test_runtime_rejects_invalid_nested_map_result_host_output() -> None:
+    host_signature = signature_from_source(": hostmap { -- m:Map<String,Result<Int,Bool>> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
+    checked = analyze_program(
+        "export : app.run { -- m:Map<String,Result<Int,Bool>> }\n"
+        "  host.map\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    with pytest.raises(RuntimeError, match="host output 'm': expected Map<String, Result<Int, Bool>>"):
+        run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"a": "wrong"}}))
+
+
+def test_runtime_accepts_valid_nested_result_host_output() -> None:
+    host_signature = signature_from_source(": hostresult { -- r:Result<Int,Bool> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.result", signature=host_signature, effect=HostEffect.PURE)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,Bool> }\n"
+        "  host.result\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    assert run_export(checked, "app.run", RuntimeHostBindings({"host.result": lambda: Ok(1)})) == Ok(1)
+    assert run_export(checked, "app.run", RuntimeHostBindings({"host.result": lambda: Err(True)})) == Err(True)
+
+
+def test_runtime_rejects_invalid_nested_result_host_output() -> None:
+    host_signature = signature_from_source(": hostresult { -- r:Result<Int,Bool> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.result", signature=host_signature, effect=HostEffect.PURE)])
+    checked = analyze_program(
+        "export : app.run { -- r:Result<Int,Bool> }\n"
+        "  host.result\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    with pytest.raises(RuntimeError, match="host output 'r': expected Result<Int, Bool>"):
+        run_export(checked, "app.run", RuntimeHostBindings({"host.result": lambda: Ok("x")}))
+    with pytest.raises(RuntimeError, match="host output 'r': expected Result<Int, Bool>"):
+        run_export(checked, "app.run", RuntimeHostBindings({"host.result": lambda: Err(123)}))
+
+
+def test_runtime_deep_nested_recursive_validation() -> None:
+    host_signature = signature_from_source(": hostdeep { -- xs:List<Result<Map<String,List<Int>>,Bool>> } ;")
+    host_contract = host_contract_from_words([HostWord(name="host.deep", signature=host_signature, effect=HostEffect.PURE)])
+    checked = analyze_program(
+        "export : app.run { -- xs:List<Result<Map<String,List<Int>>,Bool>> }\n"
+        "  host.deep\n"
+        ";\n",
+        host_contract=host_contract,
+    )
+
+    good = (Ok({"a": (1, 2)}), Err(True))
+    assert run_export(checked, "app.run", RuntimeHostBindings({"host.deep": lambda: good})) == good
+
+    bad = (Ok({"a": (1, "x")}), Err(True))
+    with pytest.raises(RuntimeError, match="host output 'xs': expected List<Result<Map<String, List<Int>>, Bool>>"):
+        run_export(checked, "app.run", RuntimeHostBindings({"host.deep": lambda: bad}))
+
+
 def test_runtime_if_true_executes_then_branch() -> None:
     checked = analyze_program(
         "export : app.run { -- }\n"
@@ -685,7 +783,7 @@ def test_runtime_case_result_other_error_no_match() -> None:
         ";"
     )
 
-    with pytest.raises(RuntimeError, match="runtime case match failure"):
+    with pytest.raises(RuntimeError, match="input 'r': expected Result<Int, MapError>"):
         run_export(checked, "app.unwrap", RuntimeHostBindings({}), Err("Other"))
 
 
@@ -1334,7 +1432,7 @@ def test_runtime_list_set_preserves_stored_ok_value() -> None:
 
 
 def test_runtime_list_set_preserves_stored_err_value() -> None:
-    stored_err = Err("x")
+    stored_err = Err("MissingKey")
     host_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
     host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
@@ -1581,7 +1679,7 @@ def test_runtime_list_get_preserves_stored_ok_value() -> None:
 
 
 def test_runtime_list_get_preserves_stored_err_value() -> None:
-    stored_err = Err("x")
+    stored_err = Err("MissingKey")
     host_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
     host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
@@ -1715,7 +1813,7 @@ def test_runtime_map_get_runtime_quote_is_preserved() -> None:
 
 def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
     stored_ok = Ok(123)
-    stored_err = Err("x")
+    stored_err = Err("MissingKey")
     host_signature = signature_from_source(": hostmap { -- m:Map<String,Result<Int,MapError>> } ;")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
@@ -1960,7 +2058,7 @@ def test_runtime_map_set_preserves_runtime_quote_value() -> None:
 
 def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
     stored_ok = Ok(123)
-    stored_err = Err("x")
+    stored_err = Err("MissingKey")
     ok_signature = signature_from_source(": hostok { -- r:Result<Int,MapError> } ;")
     err_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
     host_contract = host_contract_from_words(

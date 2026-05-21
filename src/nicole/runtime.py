@@ -21,6 +21,7 @@ from .ast_nodes import (
     ResultOkNode,
     TypedEmptyListNode,
     TypedEmptyMapNode,
+    TypeNode,
     WordDefNode,
 )
 from .pipeline import CheckedProgram
@@ -153,7 +154,7 @@ def _invoke_word(
 
     locals_env: dict[str, object] = {}
     for parameter, value in zip(expected_inputs, args):
-        _ensure_matches_type(value, parameter.type_node.name, context=f"input '{parameter.name}'")
+        _ensure_matches_type(value, parameter.type_node, context=f"input '{parameter.name}'")
         locals_env[parameter.name] = value
 
     outputs = word.signature.outputs
@@ -169,7 +170,7 @@ def _invoke_word(
             f"wrong runtime signature for {word.name}: expected {len(outputs)} outputs, got {len(result_values)}"
         )
     for parameter, value in zip(outputs, result_values):
-        _ensure_matches_type(value, parameter.type_node.name, context=f"output '{parameter.name}'")
+        _ensure_matches_type(value, parameter.type_node, context=f"output '{parameter.name}'")
 
     if len(result_values) == 0:
         return None
@@ -530,7 +531,7 @@ def _execute_host_call(node: IdentifierNode, stack: RuntimeStack, runtime_bindin
     input_values: list[object] = []
     for parameter in reversed(signature.inputs):
         value = stack.pop()
-        _ensure_matches_type(value, parameter.type_node.name, context=f"host input '{parameter.name}'")
+        _ensure_matches_type(value, parameter.type_node, context=f"host input '{parameter.name}'")
         input_values.append(value)
     input_values.reverse()
 
@@ -543,7 +544,7 @@ def _execute_host_call(node: IdentifierNode, stack: RuntimeStack, runtime_bindin
         return
     if output_count == 1:
         parameter = signature.outputs[0]
-        _ensure_matches_type(result, parameter.type_node.name, context=f"host output '{parameter.name}'")
+        _ensure_matches_type(result, parameter.type_node, context=f"host output '{parameter.name}'")
         stack.push(result)
         return
 
@@ -554,7 +555,7 @@ def _execute_host_call(node: IdentifierNode, stack: RuntimeStack, runtime_bindin
             f"wrong runtime signature for host word {node.name}: expected {output_count} outputs, got {len(result)}"
         )
     for parameter, value in zip(signature.outputs, result):
-        _ensure_matches_type(value, parameter.type_node.name, context=f"host output '{parameter.name}'")
+        _ensure_matches_type(value, parameter.type_node, context=f"host output '{parameter.name}'")
         stack.push(value)
 
 
@@ -597,7 +598,7 @@ def _create_runtime_quote(node: QuoteNode, stack: RuntimeStack) -> RuntimeQuote:
     captured: dict[str, object] = {}
     for parameter in reversed(node.captures):
         value = stack.pop()
-        _ensure_matches_type(value, parameter.type_node.name, context=f"quotation capture '{parameter.name}'")
+        _ensure_matches_type(value, parameter.type_node, context=f"quotation capture '{parameter.name}'")
         captured[parameter.name] = value
     return RuntimeQuote(node=node, captured_locals=MappingProxyType(captured))
 
@@ -638,7 +639,7 @@ def _invoke_runtime_quote_value(
             f"expected {len(quote.inputs)} inputs, got {len(input_values)}"
         )
     for parameter, value in zip(quote.inputs, input_values):
-        _ensure_matches_type(value, parameter.type_node.name, context=f"quotation input '{parameter.name}'")
+        _ensure_matches_type(value, parameter.type_node, context=f"quotation input '{parameter.name}'")
 
     quote_locals = dict(quote_value.captured_locals)
     for parameter, value in zip(quote.inputs, input_values):
@@ -656,7 +657,7 @@ def _invoke_runtime_quote_value(
             f"expected {len(quote.outputs)} outputs, got {len(result_values)}"
         )
     for parameter, value in zip(quote.outputs, result_values):
-        _ensure_matches_type(value, parameter.type_node.name, context=f"quotation output '{parameter.name}'")
+        _ensure_matches_type(value, parameter.type_node, context=f"quotation output '{parameter.name}'")
     return result_values
 
 
@@ -840,35 +841,91 @@ def _execute_operator(operator: str, stack: RuntimeStack) -> None:
     raise RuntimeError(f"runtime feature not supported: operator {operator}")
 
 
-def _ensure_matches_type(value: object, type_name: str, *, context: str) -> None:
-    if type_name == "Int":
-        ok = type(value) is int
-    elif type_name == "Float":
-        ok = type(value) is float
-    elif type_name == "String":
-        ok = isinstance(value, str)
-    elif type_name == "Bool":
-        ok = type(value) is bool
-    elif type_name == "Unit":
-        ok = value is UNIT
-    elif type_name == "Quote":
-        ok = isinstance(value, RuntimeQuote)
-    elif type_name == "Result":
-        ok = isinstance(value, (Ok, Err))
-    elif type_name == "List":
-        ok = isinstance(value, tuple)
-    elif type_name == "Map":
-        ok = isinstance(value, dict)
-    elif type_name == "MapError":
-        ok = value == "MissingKey"
-    elif type_name == "ListError":
-        ok = value == "OutOfBounds"
-    else:
-        raise RuntimeError(f"runtime feature not supported: type {type_name}")
-
-    if ok:
+def _ensure_matches_type(value: object, type_spec: str | TypeNode, *, context: str) -> None:
+    expected = _describe_type(type_spec)
+    if _matches_type(value, type_spec):
         return
-    raise RuntimeError(f"wrong runtime signature for {context}: expected {type_name}")
+    raise RuntimeError(f"wrong runtime signature for {context}: expected {expected}")
+
+
+def _matches_type(value: object, type_spec: str | TypeNode) -> bool:
+    if isinstance(type_spec, TypeNode):
+        type_name = type_spec.name
+        if type_name == "List":
+            if not _matches_type_name(value, "List"):
+                return False
+            if len(type_spec.args) != 1 or not isinstance(type_spec.args[0], TypeNode):
+                raise RuntimeError("runtime feature not supported: type List")
+            item_type = type_spec.args[0]
+            return all(_matches_type(item, item_type) for item in value)
+
+        if type_name == "Map":
+            if not _matches_type_name(value, "Map"):
+                return False
+            if len(type_spec.args) != 2:
+                raise RuntimeError("runtime feature not supported: type Map")
+            key_type = type_spec.args[0]
+            value_type = type_spec.args[1]
+            if not isinstance(key_type, TypeNode) or not isinstance(value_type, TypeNode):
+                raise RuntimeError("runtime feature not supported: type Map")
+            return all(_matches_type(k, key_type) and _matches_type(v, value_type) for k, v in value.items())
+
+        if type_name == "Result":
+            if len(type_spec.args) != 2:
+                raise RuntimeError("runtime feature not supported: type Result")
+            ok_type = type_spec.args[0]
+            err_type = type_spec.args[1]
+            if not isinstance(ok_type, TypeNode) or not isinstance(err_type, TypeNode):
+                raise RuntimeError("runtime feature not supported: type Result")
+            if isinstance(value, Ok):
+                return _matches_type(value.value, ok_type)
+            if isinstance(value, Err):
+                return _matches_type(value.error, err_type)
+            return False
+
+        return _matches_type_name(value, type_name)
+
+    return _matches_type_name(value, type_spec)
+
+
+def _matches_type_name(value: object, type_name: str) -> bool:
+    if type_name == "Int":
+        return type(value) is int
+    if type_name == "Float":
+        return type(value) is float
+    if type_name == "String":
+        return isinstance(value, str)
+    if type_name == "Bool":
+        return type(value) is bool
+    if type_name == "Unit":
+        return value is UNIT
+    if type_name in {"Quote", "DirtyQuote"}:
+        return isinstance(value, RuntimeQuote)
+    if type_name == "Result":
+        return isinstance(value, (Ok, Err))
+    if type_name == "List":
+        return isinstance(value, tuple)
+    if type_name == "Map":
+        return isinstance(value, dict)
+    if type_name == "MapError":
+        return value == "MissingKey"
+    if type_name == "ListError":
+        return value == "OutOfBounds"
+    raise RuntimeError(f"runtime feature not supported: type {type_name}")
+
+
+def _describe_type(type_spec: str | TypeNode) -> str:
+    if isinstance(type_spec, str):
+        return type_spec
+    if not type_spec.args:
+        return type_spec.name
+    rendered_args: list[str] = []
+    for argument in type_spec.args:
+        if isinstance(argument, TypeNode):
+            rendered_args.append(_describe_type(argument))
+        else:
+            rendered_args.append("...")
+    return f"{type_spec.name}<{', '.join(rendered_args)}>"
 
 
 def _ensure_supported_map_key(value: object, *, context: str) -> None:
