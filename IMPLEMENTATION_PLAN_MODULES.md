@@ -289,10 +289,10 @@ Residual gaps:
 
 ## Phase 2B — Resolver imports and aliases
 
-Status: `pending`
+Status: `complete`
 
 Goal:
-- Implement module-aware resolution with import requirements, alias visibility, reserved-root protections, and import-cycle rejection.
+- Implement module-aware resolution with import requirements, alias visibility, and reserved-root protections using currently available symbol metadata.
 
 Allowed files:
 - `src/nicole/symbols.py`
@@ -315,7 +315,7 @@ Required behavior:
 - Resolve alias-qualified names only when alias is introduced by import.
 - Reject unresolved external qualified references without required import.
 - Enforce reserved-root protections for alias and visible-root collisions.
-- Reject import cycles.
+- Reject import cycles only when a complete import graph is available to the compiler.
 
 Non-goals:
 - No checker stack/effect semantics changes.
@@ -323,7 +323,7 @@ Non-goals:
 - No runtime behavior changes.
 
 Tests:
-- Add/update resolver tests for module-local short names, `@module.word`, alias-qualified references, missing imports, alias collisions, reserved-root violations, and import-cycle rejection.
+- Add/update resolver tests for module-local short names, `@module.word`, alias-qualified references, missing imports, alias collisions, reserved-root violations, and conditional cycle rejection when complete import graph information is available.
 
 Validation:
 - `PYTHONPATH=src .venv/bin/python -m pytest tests/test_resolver.py -q`
@@ -335,16 +335,30 @@ Risks:
 - Resolver metadata changes may impact checker effect analysis and diagnostics.
 
 Modified files:
-- none
+- `src/nicole/symbols.py`
+- `src/nicole/resolver.py`
+- `tests/test_resolver.py`
+- `IMPLEMENTATION_PLAN_MODULES.md`
 
 Validation results:
-- none
+- Implementation commit: `b19f06ebe55c3e54ccf2c623fc462231fc608392`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_resolver.py -q`
+- `14 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_signature_collector.py -q`
+- `18 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_parser.py tests/test_resolver.py tests/test_signature_collector.py -q`
+- `117 passed`
+- Phase 2B resolver/import/alias validation executed
+- Phase 2B audit passed
+- resolver.py deletion anomaly was a tooling artifact, not an actual deletion
 
 Blockers:
 - none
 
 Residual gaps:
-- none
+- Full import-graph cycle rejection is deferred until compilation-unit/module-loading assembly provides complete graph information.
+- Visible-root collision diagnostics are limited to currently representable alias collisions in Phase 2B metadata.
+- with_standard_symbols() metadata preservation remains deferred to Phase 2D.
 
 ---
 
@@ -633,7 +647,7 @@ Residual gaps:
 | Phase 1B | complete |
 | Phase 1C | complete |
 | Phase 2A | complete |
-| Phase 2B | pending |
+| Phase 2B | complete |
 | Phase 2C | pending |
 | Phase 2D | pending |
 | Phase 3 | pending |
@@ -661,3 +675,6 @@ Residual gaps:
 - Removed legacy program.words fallback from Phase 2A signature collection.
 - Corrected Phase 2A duplicate detection from module-wide scope to owner scope.
 - Phase 2A completed and passed audit.
+- Corrected Phase 2B cycle scope: enforce cycle rejection only with complete import graph; defer full graph-cycle rejection until compilation-unit/module-loading assembly exists.
+- Implemented Phase 2B module-aware resolver behavior for same-module, qualified import, and alias-based resolution paths.
+- Phase 2B completed and passed audit with module-aware resolver/import/alias behavior.
