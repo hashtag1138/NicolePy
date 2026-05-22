@@ -11,7 +11,7 @@ The execution model is unchanged:
 
 ```python
 checked = analyze_program(source, host_contract=host_contract)
-run_export(checked, "app.run", runtime_bindings)
+run_export(checked, "@app.run", runtime_bindings)
 ```
 
 The runtime still consumes only `CheckedProgram`.

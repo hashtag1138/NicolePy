@@ -1,4 +1,7 @@
-# Implementation Roadmap — Nicole v0.14.0 Purity/Effects
+# Historical Archive — Implementation Roadmap — Nicole v0.14.0 Purity/Effects
+
+This document is a historical implementation roadmap.
+It is not current language guidance for the active `v0.1.0-modules-freeze` target.
 
 ## Source of truth
 

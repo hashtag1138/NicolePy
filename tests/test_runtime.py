@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import sys
 
 import pytest
@@ -7,11 +6,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.checker import CheckerError
-from nicole.ast_nodes import ModuleDeclaration, WordDefNode
 from nicole.host_abi import HostABIError, HostEffect, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
-from nicole.pipeline import analyze_program as _analyze_program
+from nicole.pipeline import analyze_program
 from nicole.resolver import ResolutionError
 from nicole.runtime import (
     Err,
@@ -28,81 +26,27 @@ from nicole.runtime import (
 )
 
 
-_LEGACY_EXPORT_RE = re.compile(
-    r"^\s*export\s*:\s*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\.([A-Za-z_][A-Za-z0-9_-]*)\s*(\{.*)$"
-)
-_TOP_LEVEL_WORD_RE = re.compile(r"^:\s*([A-Za-z_][A-Za-z0-9_-]*)\b")
-
-
-def _to_module_source(source: str) -> str:
-    if "module @" in source:
-        return source
-
-    transformed: list[str] = []
-    exports: list[str] = []
-    module_words: set[str] = set()
-    module_name = "app"
-    skipping_legacy_export_body = False
-
-    for raw_line in source.splitlines():
-        if skipping_legacy_export_body:
-            if raw_line.strip() == ";":
-                skipping_legacy_export_body = False
-            continue
-
-        match = _LEGACY_EXPORT_RE.match(raw_line)
-        if match:
-            export_module, export_word, signature_tail = match.groups()
-            module_name = export_module
-            exports.append(export_word)
-            if export_word in module_words:
-                skipping_legacy_export_body = True
-                continue
-            transformed.append(f": {export_word} {signature_tail}")
-            module_words.add(export_word)
-            continue
-
-        top_level_match = _TOP_LEVEL_WORD_RE.match(raw_line)
-        if top_level_match:
-            module_words.add(top_level_match.group(1))
-        transformed.append(raw_line)
-
-    body_lines = [f"  {line}" if line else "" for line in transformed]
-    for export_word in exports:
-        body_lines.append(f"  export : {export_word}")
-
-    body = "\n".join(body_lines).rstrip()
-    return f"module @{module_name}\n{body}\nend-module\n"
-
-
-def analyze_program(source: str, host_contract=None):
-    migrated = _to_module_source(source)
-    if host_contract is None:
-        return _analyze_program(migrated)
-    return _analyze_program(migrated, host_contract=host_contract)
-
-
 def signature_from_source(source: str):
-    program = Parser(lex(_to_module_source(source))).parse()
-    for declaration in program.declarations:
-        if not isinstance(declaration, ModuleDeclaration):
-            continue
-        for item in declaration.items:
-            if isinstance(item, WordDefNode):
-                return item.signature
-    raise AssertionError("expected a word signature fixture")
+    return Parser(lex(source)).parse().words[0].signature
 
 
 def test_runtime_valid_host_call() -> None:
-    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     seen: list[str] = []
 
     checked = analyze_program(
-        "export : app.run { -- }\n"
-        '  "hello" host.log\n'
-        ";",
+        """module @app
+  : run { -- }
+    "hello" host.log
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -149,12 +93,19 @@ def test_runtime_rot_underflow() -> None:
 
 
 def test_runtime_missing_host_binding() -> None:
-    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- }\n"
-        '  "hello" host.log\n'
-        ";",
+        """module @app
+  : run { -- }
+    "hello" host.log
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -164,12 +115,19 @@ def test_runtime_missing_host_binding() -> None:
 
 
 def test_runtime_host_callable_exception_is_normalized() -> None:
-    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- }\n"
-        '  "hello" host.log\n'
-        ";",
+        """module @app
+  : run { -- }
+    "hello" host.log
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -182,7 +140,13 @@ def test_runtime_host_callable_exception_is_normalized() -> None:
 
 
 def test_runtime_missing_export() -> None:
-    checked = analyze_program("export : app.run { -- n:Int }\n  1\n;")
+    checked = analyze_program("""module @app
+  : run { -- n:Int }
+    1
+  ;
+  export : run
+end-module
+""")
 
     with pytest.raises(RuntimeError, match="missing export: @app.missing"):
         run_export(checked, "@app.missing", RuntimeHostBindings({}))
@@ -190,9 +154,13 @@ def test_runtime_missing_export() -> None:
 
 def test_runtime_wrong_arity() -> None:
     checked = analyze_program(
-        "export : app.add { a:Int b:Int -- result:Int }\n"
-        "  a b +\n"
-        ";"
+        """module @app
+  : add { a:Int b:Int -- result:Int }
+    a b +
+  ;
+  export : add
+end-module
+"""
     )
 
     with pytest.raises(RuntimeError, match="wrong arity"):
@@ -203,12 +171,19 @@ def test_runtime_wrong_arity() -> None:
 
 
 def test_runtime_wrong_runtime_signature() -> None:
-    host_signature = signature_from_source(": hostsig { -- n:Int } ;")
+    host_signature = signature_from_source("""module @app
+  : hostsig { -- n:Int } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.random-int", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  host.random-int\n"
-        ";",
+        """module @app
+  : run { -- n:Int }
+    host.random-int
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -219,9 +194,13 @@ def test_runtime_wrong_runtime_signature() -> None:
 
 def test_runtime_typed_arithmetic_export() -> None:
     checked = analyze_program(
-        "export : app.add { a:Int b:Int -- result:Int }\n"
-        "  a b +\n"
-        ";"
+        """module @app
+  : add { a:Int b:Int -- result:Int }
+    a b +
+  ;
+  export : add
+end-module
+"""
     )
 
     result = run_export(checked, "@app.add", RuntimeHostBindings({}), 2, 3)
@@ -231,18 +210,25 @@ def test_runtime_typed_arithmetic_export() -> None:
 
 def test_runtime_comparison_operators_execute() -> None:
     checked = analyze_program(
-        "export : app.lt-int { -- b:Bool }\n"
-        "  1 2 <\n"
-        ";\n"
-        "export : app.ge-float { -- b:Bool }\n"
-        "  2.0 3.0 >=\n"
-        ";\n"
-        "export : app.eq { -- b:Bool }\n"
-        "  3 3 =\n"
-        ";\n"
-        "export : app.ne { -- b:Bool }\n"
-        "  3 4 !=\n"
-        ";"
+        """module @app
+  : lt-int { -- b:Bool }
+    1 2 <
+  ;
+  : ge-float { -- b:Bool }
+    2.0 3.0 >=
+  ;
+  : eq { -- b:Bool }
+    3 3 =
+  ;
+  : ne { -- b:Bool }
+    3 4 !=
+  ;
+  export : lt-int
+  export : ge-float
+  export : eq
+  export : ne
+end-module
+"""
     )
 
     assert run_export(checked, "@app.lt-int", RuntimeHostBindings({})) is True
@@ -253,18 +239,25 @@ def test_runtime_comparison_operators_execute() -> None:
 
 def test_runtime_boolean_operators_execute() -> None:
     checked = analyze_program(
-        "export : app.andv { -- b:Bool }\n"
-        "  true false and\n"
-        ";\n"
-        "export : app.orv { -- b:Bool }\n"
-        "  true false or\n"
-        ";\n"
-        "export : app.not-true { -- b:Bool }\n"
-        "  true not\n"
-        ";\n"
-        "export : app.not-false { -- b:Bool }\n"
-        "  false not\n"
-        ";"
+        """module @app
+  : andv { -- b:Bool }
+    true false and
+  ;
+  : orv { -- b:Bool }
+    true false or
+  ;
+  : not-true { -- b:Bool }
+    true not
+  ;
+  : not-false { -- b:Bool }
+    false not
+  ;
+  export : andv
+  export : orv
+  export : not-true
+  export : not-false
+end-module
+"""
     )
 
     assert run_export(checked, "@app.andv", RuntimeHostBindings({})) is False
@@ -288,12 +281,17 @@ def test_runtime_boolean_operators_reject_non_bool() -> None:
 
 def test_runtime_over_and_rot_execute() -> None:
     checked = analyze_program(
-        "export : app.over { -- a:Int b:Int c:Int }\n"
-        "  1 2 over\n"
-        ";\n"
-        "export : app.rot { -- a:Int b:Int c:Int }\n"
-        "  1 2 3 rot\n"
-        ";"
+        """module @app
+  : over { -- a:Int b:Int c:Int }
+    1 2 over
+  ;
+  : rot { -- a:Int b:Int c:Int }
+    1 2 3 rot
+  ;
+  export : over
+  export : rot
+end-module
+"""
     )
 
     assert run_export(checked, "@app.over", RuntimeHostBindings({})) == (1, 2, 1)
@@ -301,38 +299,63 @@ def test_runtime_over_and_rot_execute() -> None:
 
 
 def test_runtime_division_by_zero_is_normalized() -> None:
-    checked = analyze_program("export : app.run { -- n:Int }\n  1 0 div\n;")
+    checked = analyze_program("""module @app
+  : run { -- n:Int }
+    1 0 div
+  ;
+  export : run
+end-module
+""")
 
     with pytest.raises(RuntimeError, match="runtime arithmetic error: div by zero"):
         run_export(checked, "@app.run", RuntimeHostBindings({}))
 
 
 def test_runtime_modulo_by_zero_is_normalized() -> None:
-    checked = analyze_program("export : app.run { -- n:Int }\n  1 0 mod\n;")
+    checked = analyze_program("""module @app
+  : run { -- n:Int }
+    1 0 mod
+  ;
+  export : run
+end-module
+""")
 
     with pytest.raises(RuntimeError, match="runtime arithmetic error: mod by zero"):
         run_export(checked, "@app.run", RuntimeHostBindings({}))
 
 
 def test_runtime_float_division_by_zero_is_normalized() -> None:
-    checked = analyze_program("export : app.run { -- n:Float }\n  1.0 0.0 /.\n;")
+    checked = analyze_program("""module @app
+  : run { -- n:Float }
+    1.0 0.0 /.
+  ;
+  export : run
+end-module
+""")
 
     with pytest.raises(RuntimeError, match="runtime arithmetic error: /\\. by zero"):
         run_export(checked, "@app.run", RuntimeHostBindings({}))
 
 
 def test_runtime_nicole_word_calling_host_word() -> None:
-    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     seen: list[str] = []
     checked = analyze_program(
-        ": log-it { msg:String -- }\n"
-        "  msg host.log\n"
-        ";\n"
-        "export : app.run { -- }\n"
-        '  "hello" log-it\n'
-        ";",
+        """module @app
+  : log-it { msg:String -- }
+    msg host.log
+  ;
+  : run { -- }
+    "hello" log-it
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -343,20 +366,27 @@ def test_runtime_nicole_word_calling_host_word() -> None:
 
 
 def test_runtime_nested_nicole_word_calls() -> None:
-    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     seen: list[str] = []
     checked = analyze_program(
-        ": inner { msg:String -- }\n"
-        "  msg host.log\n"
-        ";\n"
-        ": middle { msg:String -- }\n"
-        "  msg inner\n"
-        ";\n"
-        "export : app.run { -- }\n"
-        '  "hello" middle\n'
-        ";",
+        """module @app
+  : inner { msg:String -- }
+    msg host.log
+  ;
+  : middle { msg:String -- }
+    msg inner
+  ;
+  : run { -- }
+    "hello" middle
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -368,16 +398,20 @@ def test_runtime_nested_nicole_word_calls() -> None:
 
 def test_runtime_self_tail_call_countdown_beyond_python_recursion_depth() -> None:
     checked = analyze_program(
-        ": countdown { n:Int -- out:Int }\n"
-        "  n 0 = if\n"
-        "    0\n"
-        "  else\n"
-        "    n 1 - countdown\n"
-        "  end\n"
-        ";\n"
-        "export : app.run { n:Int -- out:Int }\n"
-        "  n countdown\n"
-        ";\n"
+        """module @app
+  : countdown { n:Int -- out:Int }
+    n 0 = if
+      0
+    else
+      n 1 - countdown
+    end
+  ;
+  : run { n:Int -- out:Int }
+    n countdown
+  ;
+  export : run
+end-module
+"""
     )
 
     depth = sys.getrecursionlimit() + 1000
@@ -386,16 +420,20 @@ def test_runtime_self_tail_call_countdown_beyond_python_recursion_depth() -> Non
 
 def test_runtime_self_tail_call_accumulator_style_beyond_python_recursion_depth() -> None:
     checked = analyze_program(
-        ": sum-down-acc { n:Int acc:Int -- result:Int }\n"
-        "  n 0 = if\n"
-        "    acc\n"
-        "  else\n"
-        "    n 1 - acc n + sum-down-acc\n"
-        "  end\n"
-        ";\n"
-        "export : app.run { n:Int -- result:Int }\n"
-        "  n 0 sum-down-acc\n"
-        ";\n"
+        """module @app
+  : sum-down-acc { n:Int acc:Int -- result:Int }
+    n 0 = if
+      acc
+    else
+      n 1 - acc n + sum-down-acc
+    end
+  ;
+  : run { n:Int -- result:Int }
+    n 0 sum-down-acc
+  ;
+  export : run
+end-module
+"""
     )
 
     depth = sys.getrecursionlimit() + 1000
@@ -404,16 +442,20 @@ def test_runtime_self_tail_call_accumulator_style_beyond_python_recursion_depth(
 
 def test_runtime_non_tail_recursion_remains_unoptimized() -> None:
     checked = analyze_program(
-        ": non-tail { n:Int -- out:Int }\n"
-        "  n 0 = if\n"
-        "    0\n"
-        "  else\n"
-        "    n 1 - non-tail 1 +\n"
-        "  end\n"
-        ";\n"
-        "export : app.run { n:Int -- out:Int }\n"
-        "  n non-tail\n"
-        ";\n"
+        """module @app
+  : non-tail { n:Int -- out:Int }
+    n 0 = if
+      0
+    else
+      n 1 - non-tail 1 +
+    end
+  ;
+  : run { n:Int -- out:Int }
+    n non-tail
+  ;
+  export : run
+end-module
+"""
     )
 
     depth = sys.getrecursionlimit() + 200
@@ -423,23 +465,27 @@ def test_runtime_non_tail_recursion_remains_unoptimized() -> None:
 
 def test_runtime_mutual_recursion_remains_unoptimized() -> None:
     checked = analyze_program(
-        ": even { n:Int -- out:Int }\n"
-        "  n 0 = if\n"
-        "    0\n"
-        "  else\n"
-        "    n 1 - odd\n"
-        "  end\n"
-        ";\n"
-        ": odd { n:Int -- out:Int }\n"
-        "  n 0 = if\n"
-        "    1\n"
-        "  else\n"
-        "    n 1 - even\n"
-        "  end\n"
-        ";\n"
-        "export : app.run { n:Int -- out:Int }\n"
-        "  n even\n"
-        ";\n"
+        """module @app
+  : even { n:Int -- out:Int }
+    n 0 = if
+      0
+    else
+      n 1 - odd
+    end
+  ;
+  : odd { n:Int -- out:Int }
+    n 0 = if
+      1
+    else
+      n 1 - even
+    end
+  ;
+  : run { n:Int -- out:Int }
+    n even
+  ;
+  export : run
+end-module
+"""
     )
 
     depth = sys.getrecursionlimit() + 200
@@ -449,18 +495,22 @@ def test_runtime_mutual_recursion_remains_unoptimized() -> None:
 
 def test_runtime_quote_mediated_recursion_remains_unoptimized() -> None:
     checked = analyze_program(
-        ": loop-via-quote { n:Int -- out:Int }\n"
-        "  n 0 = if\n"
-        "    0\n"
-        "  else\n"
-        "    n 1 -\n"
-        "    :[ | x:Int -- y:Int | x loop-via-quote ;]\n"
-        "    call\n"
-        "  end\n"
-        ";\n"
-        "export : app.run { n:Int -- out:Int }\n"
-        "  n loop-via-quote\n"
-        ";\n"
+        """module @app
+  : loop-via-quote { n:Int -- out:Int }
+    n 0 = if
+      0
+    else
+      n 1 -
+      :[ | x:Int -- y:Int | x loop-via-quote ;]
+      call
+    end
+  ;
+  : run { n:Int -- out:Int }
+    n loop-via-quote
+  ;
+  export : run
+end-module
+"""
     )
 
     depth = sys.getrecursionlimit() + 200
@@ -470,16 +520,20 @@ def test_runtime_quote_mediated_recursion_remains_unoptimized() -> None:
 
 def test_runtime_self_call_followed_by_propagate_remains_unoptimized() -> None:
     checked = analyze_program(
-        ": loop-result { n:Int -- r:Result<Int,MapError> }\n"
-        "  n 0 = if\n"
-        "    0 Ok!\n"
-        "  else\n"
-        "    n 1 - loop-result ? Ok!\n"
-        "  end\n"
-        ";\n"
-        "export : app.run { n:Int -- r:Result<Int,MapError> }\n"
-        "  n loop-result\n"
-        ";\n"
+        """module @app
+  : loop-result { n:Int -- r:Result<Int,MapError> }
+    n 0 = if
+      0 Ok!
+    else
+      n 1 - loop-result ? Ok!
+    end
+  ;
+  : run { n:Int -- r:Result<Int,MapError> }
+    n loop-result
+  ;
+  export : run
+end-module
+"""
     )
 
     depth = sys.getrecursionlimit() + 200
@@ -488,8 +542,14 @@ def test_runtime_self_call_followed_by_propagate_remains_unoptimized() -> None:
 
 
 def test_runtime_multiple_host_words() -> None:
-    log_signature = signature_from_source(": hostlog { msg:String -- } ;")
-    random_signature = signature_from_source(": hostrandom { -- n:Int } ;")
+    log_signature = signature_from_source("""module @app
+  : hostlog { msg:String -- } ;
+end-module
+""")
+    random_signature = signature_from_source("""module @app
+  : hostrandom { -- n:Int } ;
+end-module
+""")
     host_contract = host_contract_from_words(
         [
             HostWord(name="host.log", signature=log_signature, effect=HostEffect.PURE),
@@ -499,10 +559,14 @@ def test_runtime_multiple_host_words() -> None:
 
     seen: list[str] = []
     checked = analyze_program(
-        "export : app.process { msg:String -- n:Int }\n"
-        "  msg host.log\n"
-        "  host.random-int\n"
-        ";",
+        """module @app
+  : process { msg:String -- n:Int }
+    msg host.log
+    host.random-int
+  ;
+  export : process
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -519,29 +583,31 @@ def test_runtime_multiple_host_words() -> None:
 
 
 def test_runtime_scopes_with_same_nested_name_remain_distinct() -> None:
-    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
 
     seen: list[str] = []
     checked = analyze_program(
-        ": alpha { -- }\n"
-        "  : helper { -- }\n"
-        '    "alpha" host.log\n'
-        "  ;\n"
-        "  helper\n"
-        ";\n"
-        ": beta { -- }\n"
-        "  : helper { -- }\n"
-        '    "beta" host.log\n'
-        "  ;\n"
-        "  helper\n"
-        ";\n"
-        "export : app.alpha { -- }\n"
-        "  alpha\n"
-        ";\n"
-        "export : app.beta { -- }\n"
-        "  beta\n"
-        ";",
+        """module @app
+  : alpha { -- }
+    : helper { -- }
+      "alpha" host.log
+    ;
+    helper
+  ;
+  : beta { -- }
+    : helper { -- }
+      "beta" host.log
+    ;
+    helper
+  ;
+  export : alpha
+  export : beta
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -553,12 +619,19 @@ def test_runtime_scopes_with_same_nested_name_remain_distinct() -> None:
 
 
 def test_runtime_host_multi_output() -> None:
-    host_signature = signature_from_source(": hostpair { -- a:Int b:Int } ;")
+    host_signature = signature_from_source("""module @app
+  : hostpair { -- a:Int b:Int } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.pair", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.pair { -- a:Int b:Int }\n"
-        "  host.pair\n"
-        ";",
+        """module @app
+  : pair { -- a:Int b:Int }
+    host.pair
+  ;
+  export : pair
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -569,12 +642,19 @@ def test_runtime_host_multi_output() -> None:
 
 
 def test_runtime_host_multi_output_wrong_tuple_size() -> None:
-    host_signature = signature_from_source(": hostpair { -- a:Int b:Int } ;")
+    host_signature = signature_from_source("""module @app
+  : hostpair { -- a:Int b:Int } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.pair", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.pair { -- a:Int b:Int }\n"
-        "  host.pair\n"
-        ";",
+        """module @app
+  : pair { -- a:Int b:Int }
+    host.pair
+  ;
+  export : pair
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -584,12 +664,19 @@ def test_runtime_host_multi_output_wrong_tuple_size() -> None:
 
 
 def test_runtime_host_multi_output_wrong_element_type() -> None:
-    host_signature = signature_from_source(": hostpair { -- a:Int b:Int } ;")
+    host_signature = signature_from_source("""module @app
+  : hostpair { -- a:Int b:Int } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.pair", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.pair { -- a:Int b:Int }\n"
-        "  host.pair\n"
-        ";",
+        """module @app
+  : pair { -- a:Int b:Int }
+    host.pair
+  ;
+  export : pair
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -600,9 +687,13 @@ def test_runtime_host_multi_output_wrong_element_type() -> None:
 
 def test_runtime_unit_input_and_output_accept_unit_sentinel() -> None:
     checked = analyze_program(
-        "export : app.echo-unit { u:Unit -- v:Unit }\n"
-        "  u\n"
-        ";\n"
+        """module @app
+  : echo-unit { u:Unit -- v:Unit }
+    u
+  ;
+  export : echo-unit
+end-module
+"""
     )
 
     result = run_export(checked, "@app.echo-unit", RuntimeHostBindings({}), UNIT)
@@ -611,9 +702,13 @@ def test_runtime_unit_input_and_output_accept_unit_sentinel() -> None:
 
 def test_runtime_unit_input_rejects_non_unit_values() -> None:
     checked = analyze_program(
-        "export : app.echo-unit { u:Unit -- v:Unit }\n"
-        "  u\n"
-        ";\n"
+        """module @app
+  : echo-unit { u:Unit -- v:Unit }
+    u
+  ;
+  export : echo-unit
+end-module
+"""
     )
 
     with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
@@ -628,13 +723,21 @@ def test_runtime_unit_input_rejects_non_unit_values() -> None:
 
 def test_runtime_zero_output_and_unit_output_are_distinct() -> None:
     checked = analyze_program(
-        "export : app.no-output { -- }\n"
-        ";\n"
-        "export : app.unit-output { -- u:Unit }\n"
-        "  host.produce-unit\n"
-        ";\n",
+        """module @app
+  : no-output { -- }
+  ;
+  : unit-output { -- u:Unit }
+    host.produce-unit
+  ;
+  export : no-output
+  export : unit-output
+end-module
+""",
         host_contract=host_contract_from_words(
-            [HostWord(name="host.produce-unit", signature=signature_from_source(": hostproduce { -- u:Unit } ;"), effect=HostEffect.PURE)]
+            [HostWord(name="host.produce-unit", signature=signature_from_source("""module @app
+  : hostproduce { -- u:Unit } ;
+end-module
+"""), effect=HostEffect.PURE)]
         ),
     )
 
@@ -644,8 +747,14 @@ def test_runtime_zero_output_and_unit_output_are_distinct() -> None:
 
 
 def test_runtime_host_unit_boundaries() -> None:
-    host_in_signature = signature_from_source(": hostconsume { u:Unit -- n:Int } ;")
-    host_out_signature = signature_from_source(": hostproduce { -- u:Unit } ;")
+    host_in_signature = signature_from_source("""module @app
+  : hostconsume { u:Unit -- n:Int } ;
+end-module
+""")
+    host_out_signature = signature_from_source("""module @app
+  : hostproduce { -- u:Unit } ;
+end-module
+""")
     host_contract = host_contract_from_words(
         [
             HostWord(name="host.consume-unit", signature=host_in_signature, effect=HostEffect.PURE),
@@ -654,13 +763,18 @@ def test_runtime_host_unit_boundaries() -> None:
     )
 
     checked = analyze_program(
-        "export : app.consume { -- n:Int }\n"
-        "  host.produce-unit\n"
-        "  host.consume-unit\n"
-        ";\n"
-        "export : app.direct-consume { u:Unit -- n:Int }\n"
-        "  u host.consume-unit\n"
-        ";\n",
+        """module @app
+  : consume { -- n:Int }
+    host.produce-unit
+    host.consume-unit
+  ;
+  : direct-consume { u:Unit -- n:Int }
+    u host.consume-unit
+  ;
+  export : consume
+  export : direct-consume
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -705,9 +819,13 @@ def test_runtime_host_unit_boundaries() -> None:
 
 def test_runtime_accepts_valid_nested_list_result_input() -> None:
     checked = analyze_program(
-        "export : app.echo { xs:List<Result<Int,Bool>> -- ys:List<Result<Int,Bool>> }\n"
-        "  xs\n"
-        ";\n"
+        """module @app
+  : echo { xs:List<Result<Int,Bool>> -- ys:List<Result<Int,Bool>> }
+    xs
+  ;
+  export : echo
+end-module
+"""
     )
 
     payload = (Ok(1), Err(True), Ok(2))
@@ -716,9 +834,13 @@ def test_runtime_accepts_valid_nested_list_result_input() -> None:
 
 def test_runtime_rejects_invalid_nested_list_result_input() -> None:
     checked = analyze_program(
-        "export : app.echo { xs:List<Result<Int,Bool>> -- ys:List<Result<Int,Bool>> }\n"
-        "  xs\n"
-        ";\n"
+        """module @app
+  : echo { xs:List<Result<Int,Bool>> -- ys:List<Result<Int,Bool>> }
+    xs
+  ;
+  export : echo
+end-module
+"""
     )
 
     with pytest.raises(RuntimeError, match="input 'xs': expected List<Result<Int, Bool>>"):
@@ -726,12 +848,19 @@ def test_runtime_rejects_invalid_nested_list_result_input() -> None:
 
 
 def test_runtime_accepts_valid_nested_map_result_host_output() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,Result<Int,Bool>> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,Result<Int,Bool>> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- m:Map<String,Result<Int,Bool>> }\n"
-        "  host.map\n"
-        ";\n",
+        """module @app
+  : run { -- m:Map<String,Result<Int,Bool>> }
+    host.map
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -740,12 +869,19 @@ def test_runtime_accepts_valid_nested_map_result_host_output() -> None:
 
 
 def test_runtime_rejects_invalid_nested_map_result_host_output() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,Result<Int,Bool>> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,Result<Int,Bool>> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- m:Map<String,Result<Int,Bool>> }\n"
-        "  host.map\n"
-        ";\n",
+        """module @app
+  : run { -- m:Map<String,Result<Int,Bool>> }
+    host.map
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -754,12 +890,19 @@ def test_runtime_rejects_invalid_nested_map_result_host_output() -> None:
 
 
 def test_runtime_accepts_valid_nested_result_host_output() -> None:
-    host_signature = signature_from_source(": hostresult { -- r:Result<Int,Bool> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostresult { -- r:Result<Int,Bool> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.result", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,Bool> }\n"
-        "  host.result\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Int,Bool> }
+    host.result
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -768,12 +911,19 @@ def test_runtime_accepts_valid_nested_result_host_output() -> None:
 
 
 def test_runtime_rejects_invalid_nested_result_host_output() -> None:
-    host_signature = signature_from_source(": hostresult { -- r:Result<Int,Bool> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostresult { -- r:Result<Int,Bool> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.result", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,Bool> }\n"
-        "  host.result\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Int,Bool> }
+    host.result
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -784,12 +934,19 @@ def test_runtime_rejects_invalid_nested_result_host_output() -> None:
 
 
 def test_runtime_deep_nested_recursive_validation() -> None:
-    host_signature = signature_from_source(": hostdeep { -- xs:List<Result<Map<String,List<Int>>,Bool>> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostdeep { -- xs:List<Result<Map<String,List<Int>>,Bool>> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.deep", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- xs:List<Result<Map<String,List<Int>>,Bool>> }\n"
-        "  host.deep\n"
-        ";\n",
+        """module @app
+  : run { -- xs:List<Result<Map<String,List<Int>>,Bool>> }
+    host.deep
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -803,16 +960,23 @@ def test_runtime_deep_nested_recursive_validation() -> None:
 
 def test_runtime_if_true_executes_then_branch() -> None:
     checked = analyze_program(
-        "export : app.run { -- }\n"
-        "  true\n"
-        "  if\n"
-        '    "yes" host.log\n'
-        "  else\n"
-        '    "no" host.log\n'
-        "  end\n"
-        ";",
+        """module @app
+  : run { -- }
+    true
+    if
+      "yes" host.log
+    else
+      "no" host.log
+    end
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract_from_words(
-            [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"), effect=HostEffect.PURE)]
+            [HostWord(name="host.log", signature=signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+"""), effect=HostEffect.PURE)]
         ),
     )
 
@@ -823,17 +987,21 @@ def test_runtime_if_true_executes_then_branch() -> None:
 
 def test_runtime_nested_if_in_nested_word() -> None:
     checked = analyze_program(
-        ": inner { flag:Bool -- n:Int }\n"
-        "  flag if\n"
-        "    1\n"
-        "  else\n"
-        "    0\n"
-        "  end\n"
-        ";\n"
-        "export : app.run { -- n:Int }\n"
-        "  true\n"
-        "  inner\n"
-        ";"
+        """module @app
+  : inner { flag:Bool -- n:Int }
+    flag if
+      1
+    else
+      0
+    end
+  ;
+  : run { -- n:Int }
+    true
+    inner
+  ;
+  export : run
+end-module
+"""
     )
 
     result = run_export(checked, "@app.run", RuntimeHostBindings({}))
@@ -842,13 +1010,17 @@ def test_runtime_nested_if_in_nested_word() -> None:
 
 def test_runtime_case_bool_true_false_branches() -> None:
     checked = analyze_program(
-        "export : app.choose { flag:Bool -- n:Int }\n"
-        "  flag\n"
-        "  case\n"
-        "    true => 1\n"
-        "    false => 2\n"
-        "  end\n"
-        ";\n"
+        """module @app
+  : choose { flag:Bool -- n:Int }
+    flag
+    case
+      true => 1
+      false => 2
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), True) == 1
@@ -857,13 +1029,17 @@ def test_runtime_case_bool_true_false_branches() -> None:
 
 def test_runtime_case_produces_stack_output() -> None:
     checked = analyze_program(
-        "export : app.choose { flag:Bool -- n:Int }\n"
-        "  flag\n"
-        "  case\n"
-        "    true => 1\n"
-        "    false => 2\n"
-        "  end\n"
-        ";\n"
+        """module @app
+  : choose { flag:Bool -- n:Int }
+    flag
+    case
+      true => 1
+      false => 2
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), True) == 1
@@ -872,19 +1048,26 @@ def test_runtime_case_produces_stack_output() -> None:
 
 def test_runtime_case_can_call_nicole_word() -> None:
     host_contract = host_contract_from_words(
-        [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"), effect=HostEffect.PURE)]
+        [HostWord(name="host.log", signature=signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+"""), effect=HostEffect.PURE)]
     )
     checked = analyze_program(
-        ": log-yes { -- }\n"
-        '  "yes" host.log\n'
-        ";\n"
-        "export : app.run { flag:Bool -- }\n"
-        "  flag\n"
-        "  case\n"
-        "    true => log-yes\n"
-        "    false => log-yes\n"
-        "  end\n"
-        ";",
+        """module @app
+  : log-yes { -- }
+    "yes" host.log
+  ;
+  : run { flag:Bool -- }
+    flag
+    case
+      true => log-yes
+      false => log-yes
+    end
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -896,18 +1079,22 @@ def test_runtime_case_can_call_nicole_word() -> None:
 
 def test_runtime_nested_case() -> None:
     checked = analyze_program(
-        "export : app.run { flag:Bool -- n:Int }\n"
-        "  flag\n"
-        "  case\n"
-        "    true =>\n"
-        "      false\n"
-        "      case\n"
-        "        true => 1\n"
-        "        false => 2\n"
-        "      end\n"
-        "    false => 3\n"
-        "  end\n"
-        ";"
+        """module @app
+  : run { flag:Bool -- n:Int }
+    flag
+    case
+      true =>
+        false
+        case
+          true => 1
+          false => 2
+        end
+      false => 3
+    end
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({}), True) == 2
@@ -916,13 +1103,17 @@ def test_runtime_nested_case() -> None:
 
 def test_runtime_case_result_ok_binding() -> None:
     checked = analyze_program(
-        "export : app.unwrap { r:Result<Int,MapError> -- n:Int }\n"
-        "  r\n"
-        "  case\n"
-        "    Ok(v) => v\n"
-        "    Err(MissingKey) => 0\n"
-        "  end\n"
-        ";"
+        """module @app
+  : unwrap { r:Result<Int,MapError> -- n:Int }
+    r
+    case
+      Ok(v) => v
+      Err(MissingKey) => 0
+    end
+  ;
+  export : unwrap
+end-module
+"""
     )
 
     assert run_export(checked, "@app.unwrap", RuntimeHostBindings({}), Ok(42)) == 42
@@ -930,13 +1121,17 @@ def test_runtime_case_result_ok_binding() -> None:
 
 def test_runtime_case_result_err_missing_key_variant() -> None:
     checked = analyze_program(
-        "export : app.unwrap { r:Result<Int,MapError> -- n:Int }\n"
-        "  r\n"
-        "  case\n"
-        "    Ok(v) => v\n"
-        "    Err(MissingKey) => 0\n"
-        "  end\n"
-        ";"
+        """module @app
+  : unwrap { r:Result<Int,MapError> -- n:Int }
+    r
+    case
+      Ok(v) => v
+      Err(MissingKey) => 0
+    end
+  ;
+  export : unwrap
+end-module
+"""
     )
 
     assert run_export(checked, "@app.unwrap", RuntimeHostBindings({}), Err("MissingKey")) == 0
@@ -944,13 +1139,17 @@ def test_runtime_case_result_err_missing_key_variant() -> None:
 
 def test_runtime_case_result_err_out_of_bounds_variant() -> None:
     checked = analyze_program(
-        "export : app.unwrap { r:Result<Int,ListError> -- n:Int }\n"
-        "  r\n"
-        "  case\n"
-        "    Ok(v) => v\n"
-        "    Err(OutOfBounds) => 0\n"
-        "  end\n"
-        ";"
+        """module @app
+  : unwrap { r:Result<Int,ListError> -- n:Int }
+    r
+    case
+      Ok(v) => v
+      Err(OutOfBounds) => 0
+    end
+  ;
+  export : unwrap
+end-module
+"""
     )
 
     assert run_export(checked, "@app.unwrap", RuntimeHostBindings({}), Err("OutOfBounds")) == 0
@@ -958,13 +1157,17 @@ def test_runtime_case_result_err_out_of_bounds_variant() -> None:
 
 def test_runtime_case_result_other_error_no_match() -> None:
     checked = analyze_program(
-        "export : app.unwrap { r:Result<Int,MapError> -- n:Int }\n"
-        "  r\n"
-        "  case\n"
-        "    Err(MissingKey) => 0\n"
-        "    Ok(v) => v\n"
-        "  end\n"
-        ";"
+        """module @app
+  : unwrap { r:Result<Int,MapError> -- n:Int }
+    r
+    case
+      Err(MissingKey) => 0
+      Ok(v) => v
+    end
+  ;
+  export : unwrap
+end-module
+"""
     )
 
     with pytest.raises(RuntimeError, match="input 'r': expected Result<Int, MapError>"):
@@ -973,14 +1176,18 @@ def test_runtime_case_result_other_error_no_match() -> None:
 
 def test_runtime_propagate_ok_continues_execution() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,MapError> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "k" 41 map.set\n'
-        '  "k" map.get\n'
-        "  ?\n"
-        "  1 +\n"
-        "  Ok!\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,MapError> }
+    map.empty:Map<String,Int>
+    "k" 41 map.set
+    "k" map.get
+    ?
+    1 +
+    Ok!
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(42)
@@ -988,13 +1195,17 @@ def test_runtime_propagate_ok_continues_execution() -> None:
 
 def test_runtime_propagate_err_returns_immediately() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,MapError> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "missing" map.get\n'
-        "  ?\n"
-        "  0 +\n"
-        "  Ok!\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,MapError> }
+    map.empty:Map<String,Int>
+    "missing" map.get
+    ?
+    0 +
+    Ok!
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("MissingKey")
@@ -1002,17 +1213,21 @@ def test_runtime_propagate_err_returns_immediately() -> None:
 
 def test_runtime_propagate_is_frame_local_inside_quotation() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  map.empty:Map<String,Int>\n"
-        "  :[ | m:Map<String,Int> -- r:Result<Int,MapError> |\n"
-        '    m "missing" map.get\n'
-        "    ?\n"
-        "    1 +\n"
-        "    Ok!\n"
-        "  ;]\n"
-        "  call\n"
-        "  9 result.unwrap-or\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    map.empty:Map<String,Int>
+    :[ | m:Map<String,Int> -- r:Result<Int,MapError> |
+      m "missing" map.get
+      ?
+      1 +
+      Ok!
+    ;]
+    call
+    9 result.unwrap-or
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 9
@@ -1020,44 +1235,61 @@ def test_runtime_propagate_is_frame_local_inside_quotation() -> None:
 
 def test_runtime_propagate_multiple_in_one_frame() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,MapError> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "a" 1 map.set\n'
-        '  "a" map.get\n'
-        "  ?\n"
-        "  drop\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "missing" map.get\n'
-        "  ?\n"
-        "  drop\n"
-        "  100 Ok!\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,MapError> }
+    map.empty:Map<String,Int>
+    "a" 1 map.set
+    "a" map.get
+    ?
+    drop
+    map.empty:Map<String,Int>
+    "missing" map.get
+    ?
+    drop
+    100 Ok!
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("MissingKey")
 
 
 def test_runtime_case_branch_local_binding_does_not_escape_branch_scope() -> None:
-    host_signature = signature_from_source(": hostfetch { -- r:Result<Int,MapError> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostfetch { -- r:Result<Int,MapError> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.fetch", signature=host_signature, effect=HostEffect.PURE)])
 
     with pytest.raises(ResolutionError):
         analyze_program(
-            "export : app.run { -- n:Int }\n"
-            "  host.fetch\n"
-            "  case\n"
-            "    Ok(v) => v\n"
-            "    Err(MissingKey) => 0\n"
-            "  end\n"
-            "  v\n"
-            ";",
+            """module @app
+  : run { -- n:Int }
+    host.fetch
+    case
+      Ok(v) => v
+      Err(MissingKey) => 0
+    end
+    v
+  ;
+  export : run
+end-module
+""",
             host_contract=host_contract,
         )
 
 
 def test_runtime_case_err_binding_returns_runtime_error_value() -> None:
-    fetch_signature = signature_from_source(": hostfetch { -- r:Result<Int,MapError> } ;")
-    fallback_signature = signature_from_source(": hostfallback { -- e:MapError } ;")
+    fetch_signature = signature_from_source("""module @app
+  : hostfetch { -- r:Result<Int,MapError> } ;
+end-module
+""")
+    fallback_signature = signature_from_source("""module @app
+  : hostfallback { -- e:MapError } ;
+end-module
+""")
     host_contract = host_contract_from_words(
         [
             HostWord(name="host.fetch", signature=fetch_signature, effect=HostEffect.PURE),
@@ -1065,13 +1297,17 @@ def test_runtime_case_err_binding_returns_runtime_error_value() -> None:
         ]
     )
     checked = analyze_program(
-        "export : app.run { -- e:MapError }\n"
-        "  host.fetch\n"
-        "  case\n"
-        "    Ok(v) => host.fallback-error\n"
-        "    Err(e) => e\n"
-        "  end\n"
-        ";",
+        """module @app
+  : run { -- e:MapError }
+    host.fetch
+    case
+      Ok(v) => host.fallback-error
+      Err(e) => e
+    end
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -1086,14 +1322,18 @@ def test_runtime_case_err_binding_returns_runtime_error_value() -> None:
 
 def test_runtime_case_first_matching_branch_wins() -> None:
     checked = analyze_program(
-        "export : app.choose { b:Bool -- n:Int }\n"
-        "  b\n"
-        "  case\n"
-        "    _ => 10\n"
-        "    true => 1\n"
-        "    false => 2\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { b:Bool -- n:Int }
+    b
+    case
+      _ => 10
+      true => 1
+      false => 2
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     # Wildcard comes first in source/AST order, so it must win.
@@ -1102,13 +1342,17 @@ def test_runtime_case_first_matching_branch_wins() -> None:
 
 def test_runtime_case_guard_true_selects_branch() -> None:
     checked = analyze_program(
-        "export : app.choose { n:Int -- out:Int }\n"
-        "  n\n"
-        "  case\n"
-        "    _ when true => 1\n"
-        "    _ => 2\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { n:Int -- out:Int }
+    n
+    case
+      _ when true => 1
+      _ => 2
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 42) == 1
@@ -1116,13 +1360,17 @@ def test_runtime_case_guard_true_selects_branch() -> None:
 
 def test_runtime_case_guard_false_falls_through() -> None:
     checked = analyze_program(
-        "export : app.choose { n:Int -- out:Int }\n"
-        "  n\n"
-        "  case\n"
-        "    _ when false => 1\n"
-        "    _ => 2\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { n:Int -- out:Int }
+    n
+    case
+      _ when false => 1
+      _ => 2
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 42) == 2
@@ -1130,14 +1378,18 @@ def test_runtime_case_guard_false_falls_through() -> None:
 
 def test_runtime_case_pattern_mismatch_does_not_evaluate_guard() -> None:
     checked = analyze_program(
-        "export : app.choose { b:Bool -- out:Int }\n"
-        "  b\n"
-        "  case\n"
-        "    true when true => 1\n"
-        "    true => 3\n"
-        "    false => 2\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { b:Bool -- out:Int }
+    b
+    case
+      true when true => 1
+      true => 3
+      false => 2
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), False) == 2
@@ -1145,14 +1397,18 @@ def test_runtime_case_pattern_mismatch_does_not_evaluate_guard() -> None:
 
 def test_runtime_case_guard_can_use_pattern_binding() -> None:
     checked = analyze_program(
-        "export : app.choose { r:Result<Int,MapError> -- out:Int }\n"
-        "  r\n"
-        "  case\n"
-        "    Ok(v) when v 0 > => 1\n"
-        "    Ok(v) => 0\n"
-        "    Err(MissingKey) => 99\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { r:Result<Int,MapError> -- out:Int }
+    r
+    case
+      Ok(v) when v 0 > => 1
+      Ok(v) => 0
+      Err(MissingKey) => 99
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), Ok(4)) == 1
@@ -1161,14 +1417,18 @@ def test_runtime_case_guard_can_use_pattern_binding() -> None:
 
 def test_runtime_case_first_eligible_guarded_branch_wins() -> None:
     checked = analyze_program(
-        "export : app.choose { n:Int -- out:Int }\n"
-        "  n\n"
-        "  case\n"
-        "    _ when true => 10\n"
-        "    _ when true => 20\n"
-        "    _ => 30\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { n:Int -- out:Int }
+    n
+    case
+      _ when true => 10
+      _ when true => 20
+      _ => 30
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 7) == 10
@@ -1176,14 +1436,18 @@ def test_runtime_case_first_eligible_guarded_branch_wins() -> None:
 
 def test_runtime_case_unguarded_branch_still_works_with_guarded_branch_present() -> None:
     checked = analyze_program(
-        "export : app.choose { b:Bool -- out:Int }\n"
-        "  b\n"
-        "  case\n"
-        "    true when false => 1\n"
-        "    true => 2\n"
-        "    false => 3\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { b:Bool -- out:Int }
+    b
+    case
+      true when false => 1
+      true => 2
+      false => 3
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), True) == 2
@@ -1192,13 +1456,17 @@ def test_runtime_case_unguarded_branch_still_works_with_guarded_branch_present()
 
 def test_runtime_case_wildcard_guard_is_conditional() -> None:
     checked = analyze_program(
-        "export : app.choose { n:Int -- out:Int }\n"
-        "  n\n"
-        "  case\n"
-        "    _ when n 0 > => 1\n"
-        "    _ => 2\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { n:Int -- out:Int }
+    n
+    case
+      _ when n 0 > => 1
+      _ => 2
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 9) == 1
@@ -1207,13 +1475,17 @@ def test_runtime_case_wildcard_guard_is_conditional() -> None:
 
 def test_runtime_case_wildcard_guard_false_falls_through_to_unguarded_wildcard() -> None:
     checked = analyze_program(
-        "export : app.choose { n:Int -- out:Int }\n"
-        "  n\n"
-        "  case\n"
-        "    _ when false => 1\n"
-        "    _ => 2\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { n:Int -- out:Int }
+    n
+    case
+      _ when false => 1
+      _ => 2
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 0) == 2
@@ -1221,12 +1493,16 @@ def test_runtime_case_wildcard_guard_false_falls_through_to_unguarded_wildcard()
 
 def test_runtime_case_no_branch_match_behavior_unchanged() -> None:
     checked = analyze_program(
-        "export : app.choose { n:Int -- out:Int }\n"
-        "  n\n"
-        "  case\n"
-        "    0 when true => 1\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { n:Int -- out:Int }
+    n
+    case
+      0 when true => 1
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     with pytest.raises(RuntimeError, match="runtime case match failure"):
@@ -1235,13 +1511,17 @@ def test_runtime_case_no_branch_match_behavior_unchanged() -> None:
 
 def test_runtime_case_guard_does_not_leak_stack_values() -> None:
     checked = analyze_program(
-        "export : app.choose { n:Int -- out:Int }\n"
-        "  n\n"
-        "  case\n"
-        "    _ when n 0 > => 100\n"
-        "    _ => 200\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { n:Int -- out:Int }
+    n
+    case
+      _ when n 0 > => 100
+      _ => 200
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 1) == 100
@@ -1251,18 +1531,26 @@ def test_runtime_case_guard_does_not_leak_stack_values() -> None:
 def test_runtime_quote_literal_returns_runtime_quote_value() -> None:
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
         analyze_program(
-            "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
-            "  :[ | -- n:Int | 1 ;]\n"
-            ";\n"
+            """module @app
+  : run { -- q:Quote<{ | -- n:Int }> }
+    :[ | -- n:Int | 1 ;]
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_call_returns_literal() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  :[ | -- n:Int | 7 ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    :[ | -- n:Int | 7 ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 7
@@ -1270,10 +1558,14 @@ def test_runtime_call_returns_literal() -> None:
 
 def test_runtime_call_executes_arithmetic() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  :[ | -- n:Int | 1 2 + ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    :[ | -- n:Int | 1 2 + ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 3
@@ -1281,11 +1573,15 @@ def test_runtime_call_executes_arithmetic() -> None:
 
 def test_runtime_call_with_one_input() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  5\n"
-        "  :[ | x:Int -- y:Int | x 1 + ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    5
+    :[ | x:Int -- y:Int | x 1 + ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 6
@@ -1293,11 +1589,15 @@ def test_runtime_call_with_one_input() -> None:
 
 def test_runtime_call_with_multiple_inputs() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  1 2\n"
-        "  :[ | x:Int y:Int -- z:Int | x y + ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    1 2
+    :[ | x:Int y:Int -- z:Int | x y + ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 3
@@ -1305,11 +1605,15 @@ def test_runtime_call_with_multiple_inputs() -> None:
 
 def test_runtime_call_non_commutative_input_order() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  7 3\n"
-        "  :[ | x:Int y:Int -- z:Int | x y - ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    7 3
+    :[ | x:Int y:Int -- z:Int | x y - ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 4
@@ -1317,12 +1621,16 @@ def test_runtime_call_non_commutative_input_order() -> None:
 
 def test_runtime_call_with_capture_end_to_end() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  5\n"
-        "  10\n"
-        "  :[ a:Int | x:Int -- y:Int | a x + ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    5
+    10
+    :[ a:Int | x:Int -- y:Int | a x + ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 15
@@ -1330,12 +1638,16 @@ def test_runtime_call_with_capture_end_to_end() -> None:
 
 def test_runtime_call_capture_and_input_interaction() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  4\n"
-        "  3\n"
-        "  :[ k:Int | x:Int -- y:Int | x k * ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    4
+    3
+    :[ k:Int | x:Int -- y:Int | x k * ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 12
@@ -1343,11 +1655,15 @@ def test_runtime_call_capture_and_input_interaction() -> None:
 
 def test_runtime_call_multiple_output_order() -> None:
     checked = analyze_program(
-        "export : app.run { -- first:Int second:Int }\n"
-        "  1 2\n"
-        "  :[ | x:Int y:Int -- first:Int second:Int | y x ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- first:Int second:Int }
+    1 2
+    :[ | x:Int y:Int -- first:Int second:Int | y x ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (2, 1)
@@ -1355,28 +1671,39 @@ def test_runtime_call_multiple_output_order() -> None:
 
 def test_runtime_call_can_call_nicole_word() -> None:
     checked = analyze_program(
-        ": plus-one { x:Int -- y:Int }\n"
-        "  x 1 +\n"
-        ";\n"
-        "export : app.run { -- n:Int }\n"
-        "  5\n"
-        "  :[ | x:Int -- y:Int | x plus-one ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : plus-one { x:Int -- y:Int }
+    x 1 +
+  ;
+  : run { -- n:Int }
+    5
+    :[ | x:Int -- y:Int | x plus-one ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 6
 
 
 def test_runtime_call_can_call_host_word() -> None:
-    host_signature = signature_from_source(": hostsig { n:Int -- out:Int } ;")
+    host_signature = signature_from_source("""module @app
+  : hostsig { n:Int -- out:Int } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.inc", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  5\n"
-        "  :[ | x:Int -- y:Int | x host.inc ;]\n"
-        "  call\n"
-        ";\n",
+        """module @app
+  : run { -- n:Int }
+    5
+    :[ | x:Int -- y:Int | x host.inc ;]
+    call
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -1394,20 +1721,28 @@ def test_runtime_call_on_non_quote_is_controlled_error() -> None:
 def test_runtime_nested_quotes_are_not_auto_executed() -> None:
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
         analyze_program(
-            "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
-            "  :[ | -- q:Quote<{ | -- n:Int }> | :[ | -- n:Int | 1 ;] ;]\n"
-            "  call\n"
-            ";\n"
+            """module @app
+  : run { -- q:Quote<{ | -- n:Int }> }
+    :[ | -- q:Quote<{ | -- n:Int }> | :[ | -- n:Int | 1 ;] ;]
+    call
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_nested_quote_executes_only_with_explicit_second_call() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  :[ | -- q:Quote<{ | -- n:Int }> | :[ | -- n:Int | 1 ;] ;]\n"
-        "  call\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    :[ | -- q:Quote<{ | -- n:Int }> | :[ | -- n:Int | 1 ;] ;]
+    call
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 1
@@ -1415,9 +1750,13 @@ def test_runtime_nested_quote_executes_only_with_explicit_second_call() -> None:
 
 def test_runtime_typed_empty_list_returns_empty_tuple() -> None:
     checked = analyze_program(
-        "export : app.run { -- xs:List<Int> }\n"
-        "  []:List<Int>\n"
-        ";\n"
+        """module @app
+  : run { -- xs:List<Int> }
+    []:List<Int>
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == ()
@@ -1425,21 +1764,32 @@ def test_runtime_typed_empty_list_returns_empty_tuple() -> None:
 
 def test_runtime_list_literal_returns_tuple_in_source_order() -> None:
     checked = analyze_program(
-        "export : app.run { -- xs:List<Int> }\n"
-        "  [1, 2, 3]\n"
-        ";\n"
+        """module @app
+  : run { -- xs:List<Int> }
+    [1, 2, 3]
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (1, 2, 3)
 
 
 def test_runtime_list_literal_elements_evaluate_left_to_right() -> None:
-    host_signature = signature_from_source(": hostnext { -- n:Int } ;")
+    host_signature = signature_from_source("""module @app
+  : hostnext { -- n:Int } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.next", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- xs:List<Int> }\n"
-        "  [host.next, host.next, host.next]\n"
-        ";\n",
+        """module @app
+  : run { -- xs:List<Int> }
+    [host.next, host.next, host.next]
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -1454,9 +1804,13 @@ def test_runtime_list_literal_elements_evaluate_left_to_right() -> None:
 
 def test_runtime_nested_list_literal_returns_nested_tuple() -> None:
     checked = analyze_program(
-        "export : app.run { -- xs:List<List<Int>> }\n"
-        "  [[1, 2], [3, 4]]\n"
-        ";\n"
+        """module @app
+  : run { -- xs:List<List<Int>> }
+    [[1, 2], [3, 4]]
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == ((1, 2), (3, 4))
@@ -1465,19 +1819,30 @@ def test_runtime_nested_list_literal_returns_nested_tuple() -> None:
 def test_runtime_quotation_inside_list_is_preserved_not_executed() -> None:
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
         analyze_program(
-            "export : app.run { -- xs:List<Quote<{ | -- n:Int }>> }\n"
-            "  [:[ | -- n:Int | 1 ;]]\n"
-            ";\n"
+            """module @app
+  : run { -- xs:List<Quote<{ | -- n:Int }>> }
+    [:[ | -- n:Int | 1 ;]]
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_host_result_can_be_packed_into_list_literal() -> None:
-    host_signature = signature_from_source(": hostnum { -- n:Int } ;")
+    host_signature = signature_from_source("""module @app
+  : hostnum { -- n:Int } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.num", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- xs:List<Int> }\n"
-        "  [host.num, 2]\n"
-        ";\n",
+        """module @app
+  : run { -- xs:List<Int> }
+    [host.num, 2]
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -1485,12 +1850,19 @@ def test_runtime_host_result_can_be_packed_into_list_literal() -> None:
 
 
 def test_runtime_list_literal_error_in_element_aborts_construction() -> None:
-    host_signature = signature_from_source(": hostfail { -- n:Int } ;")
+    host_signature = signature_from_source("""module @app
+  : hostfail { -- n:Int } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.fail", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- xs:List<Int> }\n"
-        "  [1, host.fail, 3]\n"
-        ";\n",
+        """module @app
+  : run { -- xs:List<Int> }
+    [1, host.fail, 3]
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -1503,10 +1875,14 @@ def test_runtime_list_literal_error_in_element_aborts_construction() -> None:
 
 def test_runtime_list_len_typed_empty_list_is_zero() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  []:List<Int>\n"
-        "  list.len\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    []:List<Int>
+    list.len
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 0
@@ -1514,10 +1890,14 @@ def test_runtime_list_len_typed_empty_list_is_zero() -> None:
 
 def test_runtime_list_len_non_empty_list_literal() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  [1, 2, 3]\n"
-        "  list.len\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    [1, 2, 3]
+    list.len
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 3
@@ -1525,10 +1905,14 @@ def test_runtime_list_len_non_empty_list_literal() -> None:
 
 def test_runtime_list_len_nested_list_counts_top_level_only() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  [[1, 2], [3, 4], [5]]\n"
-        "  list.len\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    [[1, 2], [3, 4], [5]]
+    list.len
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 3
@@ -1536,10 +1920,14 @@ def test_runtime_list_len_nested_list_counts_top_level_only() -> None:
 
 def test_runtime_list_len_quotation_inside_list_counts_as_one() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  [:[ | -- n:Int | 1 ;], :[ | -- n:Int | 2 ;]]\n"
-        "  list.len\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    [:[ | -- n:Int | 1 ;], :[ | -- n:Int | 2 ;]]
+    list.len
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 2
@@ -1547,10 +1935,14 @@ def test_runtime_list_len_quotation_inside_list_counts_as_one() -> None:
 
 def test_runtime_list_len_malformed_runtime_value_is_controlled_error() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  []:List<Int>\n"
-        "  list.len\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    []:List<Int>
+    list.len
+  ;
+  export : run
+end-module
+"""
     )
     list_len_node = checked.program.words[0].body.items[1]
     stack = RuntimeStack()
@@ -1562,12 +1954,17 @@ def test_runtime_list_len_malformed_runtime_value_is_controlled_error() -> None:
 
 def test_runtime_list_is_empty_executes() -> None:
     checked = analyze_program(
-        "export : app.empty { -- b:Bool }\n"
-        "  []:List<Int> list.is-empty\n"
-        ";\n"
-        "export : app.non-empty { -- b:Bool }\n"
-        "  [1] list.is-empty\n"
-        ";\n"
+        """module @app
+  : empty { -- b:Bool }
+    []:List<Int> list.is-empty
+  ;
+  : non-empty { -- b:Bool }
+    [1] list.is-empty
+  ;
+  export : empty
+  export : non-empty
+end-module
+"""
     )
 
     assert run_export(checked, "@app.empty", RuntimeHostBindings({})) is True
@@ -1576,12 +1973,17 @@ def test_runtime_list_is_empty_executes() -> None:
 
 def test_runtime_list_first_and_last_execute() -> None:
     checked = analyze_program(
-        "export : app.first { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30] list.first\n"
-        ";\n"
-        "export : app.last { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30] list.last\n"
-        ";\n"
+        """module @app
+  : first { -- r:Result<Int,ListError> }
+    [10, 20, 30] list.first
+  ;
+  : last { -- r:Result<Int,ListError> }
+    [10, 20, 30] list.last
+  ;
+  export : first
+  export : last
+end-module
+"""
     )
 
     assert run_export(checked, "@app.first", RuntimeHostBindings({})) == Ok(10)
@@ -1590,12 +1992,17 @@ def test_runtime_list_first_and_last_execute() -> None:
 
 def test_runtime_list_first_and_last_empty_return_out_of_bounds_error() -> None:
     checked = analyze_program(
-        "export : app.first-empty { -- r:Result<Int,ListError> }\n"
-        "  []:List<Int> list.first\n"
-        ";\n"
-        "export : app.last-empty { -- r:Result<Int,ListError> }\n"
-        "  []:List<Int> list.last\n"
-        ";\n"
+        """module @app
+  : first-empty { -- r:Result<Int,ListError> }
+    []:List<Int> list.first
+  ;
+  : last-empty { -- r:Result<Int,ListError> }
+    []:List<Int> list.last
+  ;
+  export : first-empty
+  export : last-empty
+end-module
+"""
     )
 
     assert run_export(checked, "@app.first-empty", RuntimeHostBindings({})) == Err("OutOfBounds")
@@ -1604,12 +2011,17 @@ def test_runtime_list_first_and_last_empty_return_out_of_bounds_error() -> None:
 
 def test_runtime_list_append_and_reverse_execute() -> None:
     checked = analyze_program(
-        "export : app.append { -- xs:List<Int> }\n"
-        "  [1, 2] 3 list.append\n"
-        ";\n"
-        "export : app.reverse { -- xs:List<Int> }\n"
-        "  [1, 2, 3] list.reverse\n"
-        ";\n"
+        """module @app
+  : append { -- xs:List<Int> }
+    [1, 2] 3 list.append
+  ;
+  : reverse { -- xs:List<Int> }
+    [1, 2, 3] list.reverse
+  ;
+  export : append
+  export : reverse
+end-module
+"""
     )
 
     assert run_export(checked, "@app.append", RuntimeHostBindings({})) == (1, 2, 3)
@@ -1619,22 +2031,30 @@ def test_runtime_list_append_and_reverse_execute() -> None:
 def test_runtime_list_push_is_not_available_in_v1_surface() -> None:
     with pytest.raises(ResolutionError, match="unresolved name"):
         analyze_program(
-            "export : app.run { -- xs:List<Int> }\n"
-            "  []:List<Int>\n"
-            "  10\n"
-            "  list.push\n"
-            ";\n"
+            """module @app
+  : run { -- xs:List<Int> }
+    []:List<Int>
+    10
+    list.push
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_list_set_valid_replacement_returns_ok() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  0\n"
-        "  99\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [10, 20, 30]
+    0
+    99
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok((99, 20, 30))
@@ -1642,12 +2062,16 @@ def test_runtime_list_set_valid_replacement_returns_ok() -> None:
 
 def test_runtime_list_set_replacement_in_middle_position() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  1\n"
-        "  99\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [10, 20, 30]
+    1
+    99
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok((10, 99, 30))
@@ -1655,12 +2079,16 @@ def test_runtime_list_set_replacement_in_middle_position() -> None:
 
 def test_runtime_list_set_replacement_in_last_position() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  2\n"
-        "  99\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [10, 20, 30]
+    2
+    99
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok((10, 20, 99))
@@ -1668,12 +2096,16 @@ def test_runtime_list_set_replacement_in_last_position() -> None:
 
 def test_runtime_list_set_empty_list_returns_out_of_bounds() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  []:List<Int>\n"
-        "  0\n"
-        "  1\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    []:List<Int>
+    0
+    1
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
@@ -1681,12 +2113,16 @@ def test_runtime_list_set_empty_list_returns_out_of_bounds() -> None:
 
 def test_runtime_list_set_negative_index_returns_out_of_bounds() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  0 1 -\n"
-        "  99\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [10, 20, 30]
+    0 1 -
+    99
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
@@ -1694,12 +2130,16 @@ def test_runtime_list_set_negative_index_returns_out_of_bounds() -> None:
 
 def test_runtime_list_set_index_equal_to_length_returns_out_of_bounds() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  3\n"
-        "  99\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [10, 20, 30]
+    3
+    99
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
@@ -1707,12 +2147,16 @@ def test_runtime_list_set_index_equal_to_length_returns_out_of_bounds() -> None:
 
 def test_runtime_list_set_index_greater_than_length_returns_out_of_bounds() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  4\n"
-        "  99\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [10, 20, 30]
+    4
+    99
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
@@ -1720,12 +2164,16 @@ def test_runtime_list_set_index_greater_than_length_returns_out_of_bounds() -> N
 
 def test_runtime_list_set_nested_tuple_is_preserved() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<List<Int>>,ListError> }\n"
-        "  [[1], [2], [3]]\n"
-        "  1\n"
-        "  [9]\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<List<Int>>,ListError> }
+    [[1], [2], [3]]
+    1
+    [9]
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(((1,), (9,), (3,)))
@@ -1734,26 +2182,37 @@ def test_runtime_list_set_nested_tuple_is_preserved() -> None:
 def test_runtime_list_set_runtime_quote_is_preserved() -> None:
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
         analyze_program(
-            "export : app.run { -- r:Result<List<Quote<{ | -- n:Int }>>,ListError> }\n"
-            "  [:[ | -- n:Int | 1 ;], :[ | -- n:Int | 2 ;]]\n"
-            "  1\n"
-            "  :[ | -- n:Int | 3 ;]\n"
-            "  list.set\n"
-            ";\n"
+            """module @app
+  : run { -- r:Result<List<Quote<{ | -- n:Int }>>,ListError> }
+    [:[ | -- n:Int | 1 ;], :[ | -- n:Int | 2 ;]]
+    1
+    :[ | -- n:Int | 3 ;]
+    list.set
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_list_set_preserves_stored_ok_value() -> None:
     stored_ok = Ok(123)
-    host_signature = signature_from_source(": hostok { -- r:Result<Int,MapError> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostok { -- r:Result<Int,MapError> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.ok", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Result<Int,MapError>>,ListError> }\n"
-        "  [host.ok]\n"
-        "  0\n"
-        "  host.ok\n"
-        "  list.set\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<List<Result<Int,MapError>>,ListError> }
+    [host.ok]
+    0
+    host.ok
+    list.set
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -1765,15 +2224,22 @@ def test_runtime_list_set_preserves_stored_ok_value() -> None:
 
 def test_runtime_list_set_preserves_stored_err_value() -> None:
     stored_err = Err("MissingKey")
-    host_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
+    host_signature = signature_from_source("""module @app
+  : hosterr { -- r:Result<Int,MapError> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Result<Int,MapError>>,ListError> }\n"
-        "  [host.err]\n"
-        "  0\n"
-        "  host.err\n"
-        "  list.set\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<List<Result<Int,MapError>>,ListError> }
+    [host.err]
+    0
+    host.err
+    list.set
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -1785,12 +2251,16 @@ def test_runtime_list_set_preserves_stored_err_value() -> None:
 
 def test_runtime_list_set_returns_new_tuple_value() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [1, 2, 3]\n"
-        "  1\n"
-        "  9\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [1, 2, 3]
+    1
+    9
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
     list_set_node = checked.program.words[0].body.items[3]
     original = (1, 2, 3)
@@ -1808,12 +2278,16 @@ def test_runtime_list_set_returns_new_tuple_value() -> None:
 
 def test_runtime_list_set_malformed_runtime_list_is_controlled_error() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [1, 2, 3]\n"
-        "  1\n"
-        "  9\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [1, 2, 3]
+    1
+    9
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
     list_set_node = checked.program.words[0].body.items[3]
     stack = RuntimeStack()
@@ -1827,12 +2301,16 @@ def test_runtime_list_set_malformed_runtime_list_is_controlled_error() -> None:
 
 def test_runtime_list_set_malformed_runtime_index_is_controlled_error() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [1, 2, 3]\n"
-        "  1\n"
-        "  9\n"
-        "  list.set\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [1, 2, 3]
+    1
+    9
+    list.set
+  ;
+  export : run
+end-module
+"""
     )
     list_set_node = checked.program.words[0].body.items[3]
     stack = RuntimeStack()
@@ -1846,11 +2324,15 @@ def test_runtime_list_set_malformed_runtime_index_is_controlled_error() -> None:
 
 def test_runtime_list_get_valid_index_zero_returns_ok() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  0\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,ListError> }
+    [10, 20, 30]
+    0
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(10)
@@ -1858,11 +2340,15 @@ def test_runtime_list_get_valid_index_zero_returns_ok() -> None:
 
 def test_runtime_list_get_valid_middle_index_returns_ok() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  1\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,ListError> }
+    [10, 20, 30]
+    1
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(20)
@@ -1870,11 +2356,15 @@ def test_runtime_list_get_valid_middle_index_returns_ok() -> None:
 
 def test_runtime_list_get_valid_last_index_returns_ok() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  2\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,ListError> }
+    [10, 20, 30]
+    2
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(30)
@@ -1882,11 +2372,15 @@ def test_runtime_list_get_valid_last_index_returns_ok() -> None:
 
 def test_runtime_list_get_empty_list_access_returns_out_of_bounds() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,ListError> }\n"
-        "  []:List<Int>\n"
-        "  0\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,ListError> }
+    []:List<Int>
+    0
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
@@ -1894,11 +2388,15 @@ def test_runtime_list_get_empty_list_access_returns_out_of_bounds() -> None:
 
 def test_runtime_list_get_index_equal_to_length_returns_out_of_bounds() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  3\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,ListError> }
+    [10, 20, 30]
+    3
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
@@ -1906,11 +2404,15 @@ def test_runtime_list_get_index_equal_to_length_returns_out_of_bounds() -> None:
 
 def test_runtime_list_get_index_greater_than_length_returns_out_of_bounds() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  4\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,ListError> }
+    [10, 20, 30]
+    4
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
@@ -1918,11 +2420,15 @@ def test_runtime_list_get_index_greater_than_length_returns_out_of_bounds() -> N
 
 def test_runtime_list_get_negative_index_returns_out_of_bounds() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  0 1 -\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,ListError> }
+    [10, 20, 30]
+    0 1 -
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
@@ -1930,11 +2436,15 @@ def test_runtime_list_get_negative_index_returns_out_of_bounds() -> None:
 
 def test_runtime_list_get_nested_tuple_returned_unchanged() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [[1, 2], [3, 4]]\n"
-        "  0\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [[1, 2], [3, 4]]
+    0
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
     list_get_node = checked.program.words[0].body.items[2]
     inner = (1, 2)
@@ -1951,19 +2461,27 @@ def test_runtime_list_get_nested_tuple_returned_unchanged() -> None:
 def test_runtime_list_get_runtime_quote_returned_unchanged() -> None:
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
         analyze_program(
-            "export : app.run { -- q:Quote<{ | -- n:Int }> }\n"
-            "  :[ | -- n:Int | 1 ;]\n"
-            ";\n"
+            """module @app
+  : run { -- q:Quote<{ | -- n:Int }> }
+    :[ | -- n:Int | 1 ;]
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_list_get_malformed_index_is_controlled_error() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  0\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,ListError> }
+    [10, 20, 30]
+    0
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
     list_get_node = checked.program.words[0].body.items[2]
     stack = RuntimeStack()
@@ -1976,11 +2494,15 @@ def test_runtime_list_get_malformed_index_is_controlled_error() -> None:
 
 def test_runtime_list_get_malformed_list_is_controlled_error() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,ListError> }\n"
-        "  [10, 20, 30]\n"
-        "  0\n"
-        "  list.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,ListError> }
+    [10, 20, 30]
+    0
+    list.get
+  ;
+  export : run
+end-module
+"""
     )
     list_get_node = checked.program.words[0].body.items[2]
     stack = RuntimeStack()
@@ -1993,14 +2515,21 @@ def test_runtime_list_get_malformed_list_is_controlled_error() -> None:
 
 def test_runtime_list_get_preserves_stored_ok_value() -> None:
     stored_ok = Ok(123)
-    host_signature = signature_from_source(": hostok { -- r:Result<Int,MapError> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostok { -- r:Result<Int,MapError> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.ok", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Result<Int,MapError>,ListError> }\n"
-        "  [host.ok]\n"
-        "  0\n"
-        "  list.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Result<Int,MapError>,ListError> }
+    [host.ok]
+    0
+    list.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2012,14 +2541,21 @@ def test_runtime_list_get_preserves_stored_ok_value() -> None:
 
 def test_runtime_list_get_preserves_stored_err_value() -> None:
     stored_err = Err("MissingKey")
-    host_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
+    host_signature = signature_from_source("""module @app
+  : hosterr { -- r:Result<Int,MapError> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.err", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Result<Int,MapError>,ListError> }\n"
-        "  [host.err]\n"
-        "  0\n"
-        "  list.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Result<Int,MapError>,ListError> }
+    [host.err]
+    0
+    list.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2031,14 +2567,21 @@ def test_runtime_list_get_preserves_stored_err_value() -> None:
 
 def test_runtime_list_get_preserves_stored_tuple_identity() -> None:
     stored_tuple = (1, 2)
-    host_signature = signature_from_source(": hosttuple { -- xs:List<Int> } ;")
+    host_signature = signature_from_source("""module @app
+  : hosttuple { -- xs:List<Int> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.tuple", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,ListError> }\n"
-        "  [host.tuple]\n"
-        "  0\n"
-        "  list.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<List<Int>,ListError> }
+    [host.tuple]
+    0
+    list.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2050,23 +2593,34 @@ def test_runtime_list_get_preserves_stored_tuple_identity() -> None:
 
 def test_runtime_map_empty_returns_empty_dict() -> None:
     checked = analyze_program(
-        "export : app.run { -- m:Map<String,Int> }\n"
-        "  map.empty:Map<String,Int>\n"
-        ";\n"
+        """module @app
+  : run { -- m:Map<String,Int> }
+    map.empty:Map<String,Int>
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == {}
 
 
 def test_runtime_map_get_int_key_returns_ok() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<Int,String> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<String,MapError> }\n"
-        "  host.map\n"
-        "  1\n"
-        "  map.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<String,MapError> }
+    host.map
+    1
+    map.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2075,14 +2629,21 @@ def test_runtime_map_get_int_key_returns_ok() -> None:
 
 
 def test_runtime_map_get_string_key_returns_ok() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,Int> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,Int> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,MapError> }\n"
-        "  host.map\n"
-        '  "hello"\n'
-        "  map.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Int,MapError> }
+    host.map
+    "hello"
+    map.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2091,14 +2652,21 @@ def test_runtime_map_get_string_key_returns_ok() -> None:
 
 
 def test_runtime_map_get_bool_key_returns_ok() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<Bool,Int> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<Bool,Int> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,MapError> }\n"
-        "  host.map\n"
-        "  true\n"
-        "  map.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Int,MapError> }
+    host.map
+    true
+    map.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2108,11 +2676,15 @@ def test_runtime_map_get_bool_key_returns_ok() -> None:
 
 def test_runtime_map_get_missing_key_returns_missing_key() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,MapError> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "missing"\n'
-        "  map.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,MapError> }
+    map.empty:Map<String,Int>
+    "missing"
+    map.get
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("MissingKey")
@@ -2120,14 +2692,21 @@ def test_runtime_map_get_missing_key_returns_missing_key() -> None:
 
 def test_runtime_map_get_nested_tuple_is_preserved() -> None:
     stored_tuple = (1, 2)
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,List<Int>> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,List<Int>> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,MapError> }\n"
-        "  host.map\n"
-        '  "pair"\n'
-        "  map.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<List<Int>,MapError> }
+    host.map
+    "pair"
+    map.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2138,7 +2717,10 @@ def test_runtime_map_get_nested_tuple_is_preserved() -> None:
 
 
 def test_runtime_map_get_runtime_quote_is_preserved() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,Quote<{ | -- n:Int }>> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,Quote<{ | -- n:Int }>> } ;
+end-module
+""")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
         host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
 
@@ -2146,14 +2728,21 @@ def test_runtime_map_get_runtime_quote_is_preserved() -> None:
 def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
     stored_ok = Ok(123)
     stored_err = Err("MissingKey")
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,Result<Int,MapError>> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,Result<Int,MapError>> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Result<Int,MapError>,MapError> }\n"
-        "  host.map\n"
-        '  "ok"\n'
-        "  map.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Result<Int,MapError>,MapError> }
+    host.map
+    "ok"
+    map.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2163,11 +2752,15 @@ def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
     assert result_ok.value == stored_ok
 
     checked_err = analyze_program(
-        "export : app.run { -- r:Result<Result<Int,MapError>,MapError> }\n"
-        "  host.map\n"
-        '  "err"\n'
-        "  map.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Result<Int,MapError>,MapError> }
+    host.map
+    "err"
+    map.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
     result_err = run_export(checked_err, "@app.run", RuntimeHostBindings({"host.map": lambda: {"ok": stored_ok, "err": stored_err}}))
@@ -2179,37 +2772,55 @@ def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
 def test_runtime_map_get_unsupported_list_key_raises_runtime_error() -> None:
     with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
         analyze_program(
-            "export : app.run { -- r:Result<Int,MapError> }\n"
-            "  map.empty:Map<List<Int>,Int>\n"
-            "  [1]\n"
-            "  map.get\n"
-            ";\n"
+            """module @app
+  : run { -- r:Result<Int,MapError> }
+    map.empty:Map<List<Int>,Int>
+    [1]
+    map.get
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_map_get_unsupported_result_key_raises_runtime_error() -> None:
-    host_signature = signature_from_source(": hostkey { -- k:Result<Int,MapError> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostkey { -- k:Result<Int,MapError> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.key", signature=host_signature, effect=HostEffect.PURE)])
     with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
         analyze_program(
-            "export : app.run { -- r:Result<Int,MapError> }\n"
-            "  map.empty:Map<Result<Int,MapError>,Int>\n"
-            "  host.key\n"
-            "  map.get\n"
-            ";\n",
+            """module @app
+  : run { -- r:Result<Int,MapError> }
+    map.empty:Map<Result<Int,MapError>,Int>
+    host.key
+    map.get
+  ;
+  export : run
+end-module
+""",
             host_contract=host_contract,
         )
 
 
 def test_runtime_map_contains_existing_key_returns_true() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,Int> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,Int> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- b:Bool }\n"
-        "  host.map\n"
-        '  "hello"\n'
-        "  map.contains\n"
-        ";\n",
+        """module @app
+  : run { -- b:Bool }
+    host.map
+    "hello"
+    map.contains
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2219,25 +2830,36 @@ def test_runtime_map_contains_existing_key_returns_true() -> None:
 
 def test_runtime_map_contains_missing_key_returns_false() -> None:
     checked = analyze_program(
-        "export : app.run { -- b:Bool }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "missing"\n'
-        "  map.contains\n"
-        ";\n"
+        """module @app
+  : run { -- b:Bool }
+    map.empty:Map<String,Int>
+    "missing"
+    map.contains
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) is False
 
 
 def test_runtime_map_contains_bool_key_returns_true() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<Bool,Int> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<Bool,Int> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- b:Bool }\n"
-        "  host.map\n"
-        "  true\n"
-        "  map.contains\n"
-        ";\n",
+        """module @app
+  : run { -- b:Bool }
+    host.map
+    true
+    map.contains
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2248,21 +2870,29 @@ def test_runtime_map_contains_bool_key_returns_true() -> None:
 def test_runtime_map_contains_unsupported_quote_key_raises_runtime_error() -> None:
     with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
         analyze_program(
-            "export : app.run { -- b:Bool }\n"
-            "  map.empty:Map<Quote<{ | -- n:Int }>,Int>\n"
-            "  :[ | -- n:Int | 1 ;]\n"
-            "  map.contains\n"
-            ";\n"
+            """module @app
+  : run { -- b:Bool }
+    map.empty:Map<Quote<{ | -- n:Int }>,Int>
+    :[ | -- n:Int | 1 ;]
+    map.contains
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_map_get_malformed_runtime_map_is_controlled_error() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Int,MapError> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "hello"\n'
-        "  map.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Int,MapError> }
+    map.empty:Map<String,Int>
+    "hello"
+    map.get
+  ;
+  export : run
+end-module
+"""
     )
     map_get_node = checked.program.words[0].body.items[2]
     stack = RuntimeStack()
@@ -2275,11 +2905,15 @@ def test_runtime_map_get_malformed_runtime_map_is_controlled_error() -> None:
 
 def test_runtime_map_contains_malformed_runtime_map_is_controlled_error() -> None:
     checked = analyze_program(
-        "export : app.run { -- b:Bool }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "hello"\n'
-        "  map.contains\n"
-        ";\n"
+        """module @app
+  : run { -- b:Bool }
+    map.empty:Map<String,Int>
+    "hello"
+    map.contains
+  ;
+  export : run
+end-module
+"""
     )
     map_contains_node = checked.program.words[0].body.items[2]
     stack = RuntimeStack()
@@ -2292,27 +2926,38 @@ def test_runtime_map_contains_malformed_runtime_map_is_controlled_error() -> Non
 
 def test_runtime_map_set_inserts_new_int_key() -> None:
     checked = analyze_program(
-        "export : app.run { -- m:Map<Int,String> }\n"
-        "  map.empty:Map<Int,String>\n"
-        "  1\n"
-        '  "one"\n'
-        "  map.set\n"
-        ";\n"
+        """module @app
+  : run { -- m:Map<Int,String> }
+    map.empty:Map<Int,String>
+    1
+    "one"
+    map.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == {1: "one"}
 
 
 def test_runtime_map_set_updates_existing_int_key() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<Int,String> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- m:Map<Int,String> }\n"
-        "  host.map\n"
-        "  1\n"
-        '  "uno"\n'
-        "  map.set\n"
-        ";\n",
+        """module @app
+  : run { -- m:Map<Int,String> }
+    host.map
+    1
+    "uno"
+    map.set
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2321,12 +2966,16 @@ def test_runtime_map_set_updates_existing_int_key() -> None:
 
 def test_runtime_map_set_string_key() -> None:
     checked = analyze_program(
-        "export : app.run { -- m:Map<String,Int> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "hello"\n'
-        "  7\n"
-        "  map.set\n"
-        ";\n"
+        """module @app
+  : run { -- m:Map<String,Int> }
+    map.empty:Map<String,Int>
+    "hello"
+    7
+    map.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == {"hello": 7}
@@ -2334,12 +2983,16 @@ def test_runtime_map_set_string_key() -> None:
 
 def test_runtime_map_set_bool_key() -> None:
     checked = analyze_program(
-        "export : app.run { -- m:Map<Bool,Int> }\n"
-        "  map.empty:Map<Bool,Int>\n"
-        "  true\n"
-        "  7\n"
-        "  map.set\n"
-        ";\n"
+        """module @app
+  : run { -- m:Map<Bool,Int> }
+    map.empty:Map<Bool,Int>
+    true
+    7
+    map.set
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == {True: 7}
@@ -2347,15 +3000,22 @@ def test_runtime_map_set_bool_key() -> None:
 
 def test_runtime_map_set_returns_new_dict_and_preserves_original() -> None:
     host_map = {1: "one"}
-    host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<Int,String> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- m:Map<Int,String> }\n"
-        "  host.map\n"
-        "  2\n"
-        '  "two"\n'
-        "  map.set\n"
-        ";\n",
+        """module @app
+  : run { -- m:Map<Int,String> }
+    host.map
+    2
+    "two"
+    map.set
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2368,14 +3028,18 @@ def test_runtime_map_set_returns_new_dict_and_preserves_original() -> None:
 def test_runtime_map_set_preserves_nested_tuple_value() -> None:
     stored_tuple = (1, 2)
     checked = analyze_program(
-        "export : app.run { -- r:Result<List<Int>,MapError> }\n"
-        "  map.empty:Map<String,List<Int>>\n"
-        '  "pair"\n'
-        "  [1, 2]\n"
-        "  map.set\n"
-        '  "pair"\n'
-        "  map.get\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<List<Int>,MapError> }
+    map.empty:Map<String,List<Int>>
+    "pair"
+    [1, 2]
+    map.set
+    "pair"
+    map.get
+  ;
+  export : run
+end-module
+"""
     )
 
     result = run_export(checked, "@app.run", RuntimeHostBindings({}))
@@ -2383,7 +3047,10 @@ def test_runtime_map_set_preserves_nested_tuple_value() -> None:
 
 
 def test_runtime_map_set_preserves_runtime_quote_value() -> None:
-    host_signature = signature_from_source(": hostquote { -- q:Quote<{ | -- n:Int }> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostquote { -- q:Quote<{ | -- n:Int }> } ;
+end-module
+""")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
         host_contract_from_words([HostWord(name="host.quote", signature=host_signature, effect=HostEffect.PURE)])
 
@@ -2391,8 +3058,14 @@ def test_runtime_map_set_preserves_runtime_quote_value() -> None:
 def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
     stored_ok = Ok(123)
     stored_err = Err("MissingKey")
-    ok_signature = signature_from_source(": hostok { -- r:Result<Int,MapError> } ;")
-    err_signature = signature_from_source(": hosterr { -- r:Result<Int,MapError> } ;")
+    ok_signature = signature_from_source("""module @app
+  : hostok { -- r:Result<Int,MapError> } ;
+end-module
+""")
+    err_signature = signature_from_source("""module @app
+  : hosterr { -- r:Result<Int,MapError> } ;
+end-module
+""")
     host_contract = host_contract_from_words(
         [
             HostWord(name="host.ok", signature=ok_signature, effect=HostEffect.PURE),
@@ -2401,14 +3074,18 @@ def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
     )
 
     checked_ok = analyze_program(
-        "export : app.run { -- r:Result<Result<Int,MapError>,MapError> }\n"
-        "  map.empty:Map<String,Result<Int,MapError>>\n"
-        '  "ok"\n'
-        "  host.ok\n"
-        "  map.set\n"
-        '  "ok"\n'
-        "  map.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Result<Int,MapError>,MapError> }
+    map.empty:Map<String,Result<Int,MapError>>
+    "ok"
+    host.ok
+    map.set
+    "ok"
+    map.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
     result_ok = run_export(
@@ -2420,14 +3097,18 @@ def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
     assert result_ok.value is stored_ok
 
     checked_err = analyze_program(
-        "export : app.run { -- r:Result<Result<Int,MapError>,MapError> }\n"
-        "  map.empty:Map<String,Result<Int,MapError>>\n"
-        '  "err"\n'
-        "  host.err\n"
-        "  map.set\n"
-        '  "err"\n'
-        "  map.get\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Result<Int,MapError>,MapError> }
+    map.empty:Map<String,Result<Int,MapError>>
+    "err"
+    host.err
+    map.set
+    "err"
+    map.get
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
     result_err = run_export(
@@ -2441,12 +3122,16 @@ def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
 
 def test_runtime_map_set_malformed_runtime_map_is_controlled_error() -> None:
     checked = analyze_program(
-        "export : app.run { -- m:Map<String,Int> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "hello"\n'
-        "  1\n"
-        "  map.set\n"
-        ";\n"
+        """module @app
+  : run { -- m:Map<String,Int> }
+    map.empty:Map<String,Int>
+    "hello"
+    1
+    map.set
+  ;
+  export : run
+end-module
+"""
     )
     map_set_node = checked.program.words[0].body.items[3]
     stack = RuntimeStack()
@@ -2461,24 +3146,35 @@ def test_runtime_map_set_malformed_runtime_map_is_controlled_error() -> None:
 def test_runtime_map_set_unsupported_key_type_raises_runtime_error() -> None:
     with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
         analyze_program(
-            "export : app.run { -- m:Map<List<Int>,Int> }\n"
-            "  map.empty:Map<List<Int>,Int>\n"
-            "  [1]\n"
-            "  1\n"
-            "  map.set\n"
-            ";\n"
+            """module @app
+  : run { -- m:Map<List<Int>,Int> }
+    map.empty:Map<List<Int>,Int>
+    [1]
+    1
+    map.set
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_map_remove_existing_key_returns_ok_new_dict() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<Int,String> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Map<Int,String>,MapError> }\n"
-        "  host.map\n"
-        "  1\n"
-        "  map.remove\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Map<Int,String>,MapError> }
+    host.map
+    1
+    map.remove
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2487,11 +3183,15 @@ def test_runtime_map_remove_existing_key_returns_ok_new_dict() -> None:
 
 def test_runtime_map_remove_missing_key_returns_missing_key() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Map<String,Int>,MapError> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "missing"\n'
-        "  map.remove\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Map<String,Int>,MapError> }
+    map.empty:Map<String,Int>
+    "missing"
+    map.remove
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("MissingKey")
@@ -2499,14 +3199,21 @@ def test_runtime_map_remove_missing_key_returns_missing_key() -> None:
 
 def test_runtime_map_remove_returns_new_dict_and_preserves_original() -> None:
     host_map = {1: "one", 2: "two"}
-    host_signature = signature_from_source(": hostmap { -- m:Map<Int,String> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<Int,String> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Map<Int,String>,MapError> }\n"
-        "  host.map\n"
-        "  1\n"
-        "  map.remove\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Map<Int,String>,MapError> }
+    host.map
+    1
+    map.remove
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2518,14 +3225,21 @@ def test_runtime_map_remove_returns_new_dict_and_preserves_original() -> None:
 
 
 def test_runtime_map_remove_string_key() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,Int> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,Int> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Map<String,Int>,MapError> }\n"
-        "  host.map\n"
-        '  "hello"\n'
-        "  map.remove\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Map<String,Int>,MapError> }
+    host.map
+    "hello"
+    map.remove
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2533,14 +3247,21 @@ def test_runtime_map_remove_string_key() -> None:
 
 
 def test_runtime_map_remove_bool_key() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<Bool,Int> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<Bool,Int> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Map<Bool,Int>,MapError> }\n"
-        "  host.map\n"
-        "  true\n"
-        "  map.remove\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Map<Bool,Int>,MapError> }
+    host.map
+    true
+    map.remove
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2549,14 +3270,21 @@ def test_runtime_map_remove_bool_key() -> None:
 
 def test_runtime_map_remove_preserves_remaining_nested_values() -> None:
     stored_tuple = (1, 2)
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,List<Int>> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,List<Int>> } ;
+end-module
+""")
     host_contract = host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
     checked = analyze_program(
-        "export : app.run { -- r:Result<Map<String,List<Int>>,MapError> }\n"
-        "  host.map\n"
-        '  "drop"\n'
-        "  map.remove\n"
-        ";\n",
+        """module @app
+  : run { -- r:Result<Map<String,List<Int>>,MapError> }
+    host.map
+    "drop"
+    map.remove
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2571,18 +3299,25 @@ def test_runtime_map_remove_preserves_remaining_nested_values() -> None:
 
 
 def test_runtime_map_remove_preserves_remaining_quote_values() -> None:
-    host_signature = signature_from_source(": hostmap { -- m:Map<String,Quote<{ | -- n:Int }>> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostmap { -- m:Map<String,Quote<{ | -- n:Int }>> } ;
+end-module
+""")
     with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
         host_contract_from_words([HostWord(name="host.map", signature=host_signature, effect=HostEffect.PURE)])
 
 
 def test_runtime_map_remove_malformed_runtime_map_is_controlled_error() -> None:
     checked = analyze_program(
-        "export : app.run { -- r:Result<Map<String,Int>,MapError> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "hello"\n'
-        "  map.remove\n"
-        ";\n"
+        """module @app
+  : run { -- r:Result<Map<String,Int>,MapError> }
+    map.empty:Map<String,Int>
+    "hello"
+    map.remove
+  ;
+  export : run
+end-module
+"""
     )
     map_remove_node = checked.program.words[0].body.items[2]
     stack = RuntimeStack()
@@ -2596,21 +3331,29 @@ def test_runtime_map_remove_malformed_runtime_map_is_controlled_error() -> None:
 def test_runtime_map_remove_unsupported_key_type_raises_runtime_error() -> None:
     with pytest.raises(CheckerError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
         analyze_program(
-            "export : app.run { -- r:Result<Map<List<Int>,Int>,MapError> }\n"
-            "  map.empty:Map<List<Int>,Int>\n"
-            "  [1]\n"
-            "  map.remove\n"
-            ";\n"
+            """module @app
+  : run { -- r:Result<Map<List<Int>,Int>,MapError> }
+    map.empty:Map<List<Int>,Int>
+    [1]
+    map.remove
+  ;
+  export : run
+end-module
+"""
         )
 
 
 def test_runtime_list_map_executes() -> None:
     checked = analyze_program(
-        "export : app.run { -- ys:List<Int> }\n"
-        "  [1, 2]\n"
-        "  :[ | x:Int -- y:Int | x 1 + ;]\n"
-        "  list.map\n"
-        ";\n"
+        """module @app
+  : run { -- ys:List<Int> }
+    [1, 2]
+    :[ | x:Int -- y:Int | x 1 + ;]
+    list.map
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (2, 3)
@@ -2618,14 +3361,18 @@ def test_runtime_list_map_executes() -> None:
 
 def test_runtime_list_map_inside_quote_executes() -> None:
     checked = analyze_program(
-        "export : app.run { -- ys:List<Int> }\n"
-        "  :[ | -- ys:List<Int> |\n"
-        "    [1, 2]\n"
-        "    :[ | x:Int -- y:Int | x 1 + ;]\n"
-        "    list.map\n"
-        "  ;]\n"
-        "  call\n"
-        ";\n"
+        """module @app
+  : run { -- ys:List<Int> }
+    :[ | -- ys:List<Int> |
+      [1, 2]
+      :[ | x:Int -- y:Int | x 1 + ;]
+      list.map
+    ;]
+    call
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (2, 3)
@@ -2633,11 +3380,15 @@ def test_runtime_list_map_inside_quote_executes() -> None:
 
 def test_runtime_list_filter_executes() -> None:
     checked = analyze_program(
-        "export : app.run { -- ys:List<Int> }\n"
-        "  [1, 2, 3, 4]\n"
-        "  :[ | x:Int -- keep:Bool | true ;]\n"
-        "  list.filter\n"
-        ";\n"
+        """module @app
+  : run { -- ys:List<Int> }
+    [1, 2, 3, 4]
+    :[ | x:Int -- keep:Bool | true ;]
+    list.filter
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (1, 2, 3, 4)
@@ -2645,12 +3396,16 @@ def test_runtime_list_filter_executes() -> None:
 
 def test_runtime_list_fold_executes() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  [1, 2, 3]\n"
-        "  10\n"
-        "  :[ | acc:Int x:Int -- out:Int | acc x + ;]\n"
-        "  list.fold\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    [1, 2, 3]
+    10
+    :[ | acc:Int x:Int -- out:Int | acc x + ;]
+    list.fold
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 16
@@ -2658,27 +3413,38 @@ def test_runtime_list_fold_executes() -> None:
 
 def test_runtime_list_reduce_executes() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  [2, 3, 4]\n"
-        "  :[ | a:Int b:Int -- c:Int | a b + ;]\n"
-        "  list.reduce\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    [2, 3, 4]
+    :[ | a:Int b:Int -- c:Int | a b + ;]
+    list.reduce
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 9
 
 
 def test_runtime_list_reduce_empty_from_host_is_runtime_error() -> None:
-    host_signature = signature_from_source(": hostlist { -- xs:List<Int> } ;")
+    host_signature = signature_from_source("""module @app
+  : hostlist { -- xs:List<Int> } ;
+end-module
+""")
     host_contract = host_contract_from_words(
         [HostWord(name="host.list", signature=host_signature, effect=HostEffect.PURE)]
     )
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  host.list\n"
-        "  :[ | a:Int b:Int -- c:Int | a b + ;]\n"
-        "  list.reduce\n"
-        ";\n",
+        """module @app
+  : run { -- n:Int }
+    host.list
+    :[ | a:Int b:Int -- c:Int | a b + ;]
+    list.reduce
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2688,15 +3454,19 @@ def test_runtime_list_reduce_empty_from_host_is_runtime_error() -> None:
 
 def test_runtime_list_map_with_nested_quote_executes() -> None:
     checked = analyze_program(
-        "export : app.run { -- ys:List<Int> }\n"
-        "  [1, 2]\n"
-        "  :[ | x:Int -- y:Int |\n"
-        "    x\n"
-        "    :[ | n:Int -- m:Int | n 10 + ;]\n"
-        "    call\n"
-        "  ;]\n"
-        "  list.map\n"
-        ";\n"
+        """module @app
+  : run { -- ys:List<Int> }
+    [1, 2]
+    :[ | x:Int -- y:Int |
+      x
+      :[ | n:Int -- m:Int | n 10 + ;]
+      call
+    ;]
+    list.map
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (11, 12)
@@ -2704,10 +3474,14 @@ def test_runtime_list_map_with_nested_quote_executes() -> None:
 
 def test_runtime_result_is_ok_executes() -> None:
     checked = analyze_program(
-        "export : app.run { -- b:Bool }\n"
-        "  7 Ok!\n"
-        "  result.is-ok\n"
-        ";\n"
+        """module @app
+  : run { -- b:Bool }
+    7 Ok!
+    result.is-ok
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) is True
@@ -2715,10 +3489,14 @@ def test_runtime_result_is_ok_executes() -> None:
 
 def test_runtime_result_is_err_executes() -> None:
     checked = analyze_program(
-        "export : app.run { -- b:Bool }\n"
-        '  "x" Err!\n'
-        "  result.is-err\n"
-        ";\n"
+        """module @app
+  : run { -- b:Bool }
+    "x" Err!
+    result.is-err
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) is True
@@ -2726,23 +3504,31 @@ def test_runtime_result_is_err_executes() -> None:
 
 def test_runtime_err_constructor_preserves_generic_error_values() -> None:
     checked = analyze_program(
-        "export : app.err-string { -- r:Result<Int,String> }\n"
-        '  "abc" Err!\n'
-        ";\n"
-        "export : app.err-int { -- r:Result<Int,Int> }\n"
-        "  123 Err!\n"
-        ";\n"
-        "export : app.err-bool { -- r:Result<Int,Bool> }\n"
-        "  true Err!\n"
-        ";\n"
-        "export : app.err-list { -- r:Result<Int,List<String>> }\n"
-        "  [\"x\", \"y\"] Err!\n"
-        ";\n"
-        "export : app.err-map { -- r:Result<Int,Map<String,Int>> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "k" 7 map.set\n'
-        "  Err!\n"
-        ";\n"
+        """module @app
+  : err-string { -- r:Result<Int,String> }
+    "abc" Err!
+  ;
+  : err-int { -- r:Result<Int,Int> }
+    123 Err!
+  ;
+  : err-bool { -- r:Result<Int,Bool> }
+    true Err!
+  ;
+  : err-list { -- r:Result<Int,List<String>> }
+    ["x", "y"] Err!
+  ;
+  : err-map { -- r:Result<Int,Map<String,Int>> }
+    map.empty:Map<String,Int>
+    "k" 7 map.set
+    Err!
+  ;
+  export : err-string
+  export : err-int
+  export : err-bool
+  export : err-list
+  export : err-map
+end-module
+"""
     )
 
     assert run_export(checked, "@app.err-string", RuntimeHostBindings({})) == Err("abc")
@@ -2754,20 +3540,25 @@ def test_runtime_err_constructor_preserves_generic_error_values() -> None:
 
 def test_runtime_result_unwrap_or_executes() -> None:
     checked = analyze_program(
-        "export : app.ok { -- n:Int }\n"
-        "  [7]\n"
-        "  0\n"
-        "  list.get\n"
-        "  9\n"
-        "  result.unwrap-or\n"
-        ";\n"
-        "export : app.err { -- n:Int }\n"
-        "  []:List<Int>\n"
-        "  0\n"
-        "  list.get\n"
-        "  9\n"
-        "  result.unwrap-or\n"
-        ";\n"
+        """module @app
+  : ok { -- n:Int }
+    [7]
+    0
+    list.get
+    9
+    result.unwrap-or
+  ;
+  : err { -- n:Int }
+    []:List<Int>
+    0
+    list.get
+    9
+    result.unwrap-or
+  ;
+  export : ok
+  export : err
+end-module
+"""
     )
 
     assert run_export(checked, "@app.ok", RuntimeHostBindings({})) == 7
@@ -2776,12 +3567,16 @@ def test_runtime_result_unwrap_or_executes() -> None:
 
 def test_runtime_map_len_executes() -> None:
     checked = analyze_program(
-        "export : app.run { -- n:Int }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "a" 1 map.set\n'
-        '  "b" 2 map.set\n'
-        "  map.len\n"
-        ";\n"
+        """module @app
+  : run { -- n:Int }
+    map.empty:Map<String,Int>
+    "a" 1 map.set
+    "b" 2 map.set
+    map.len
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 2
@@ -2789,12 +3584,17 @@ def test_runtime_map_len_executes() -> None:
 
 def test_runtime_map_is_empty_executes() -> None:
     checked = analyze_program(
-        "export : app.empty { -- b:Bool }\n"
-        "  map.empty:Map<String,Int> map.is-empty\n"
-        ";\n"
-        "export : app.non-empty { -- b:Bool }\n"
-        "  map.empty:Map<String,Int> \"a\" 1 map.set map.is-empty\n"
-        ";\n"
+        """module @app
+  : empty { -- b:Bool }
+    map.empty:Map<String,Int> map.is-empty
+  ;
+  : non-empty { -- b:Bool }
+    map.empty:Map<String,Int> "a" 1 map.set map.is-empty
+  ;
+  export : empty
+  export : non-empty
+end-module
+"""
     )
 
     assert run_export(checked, "@app.empty", RuntimeHostBindings({})) is True
@@ -2803,18 +3603,23 @@ def test_runtime_map_is_empty_executes() -> None:
 
 def test_runtime_map_keys_and_values_preserve_insertion_order() -> None:
     checked = analyze_program(
-        "export : app.keys { -- xs:List<String> }\n"
-        "  map.empty:Map<String,Int>\n"
-        "  \"a\" 1 map.set\n"
-        "  \"b\" 2 map.set\n"
-        "  map.keys\n"
-        ";\n"
-        "export : app.values { -- xs:List<Int> }\n"
-        "  map.empty:Map<String,Int>\n"
-        "  \"a\" 1 map.set\n"
-        "  \"b\" 2 map.set\n"
-        "  map.values\n"
-        ";\n"
+        """module @app
+  : keys { -- xs:List<String> }
+    map.empty:Map<String,Int>
+    "a" 1 map.set
+    "b" 2 map.set
+    map.keys
+  ;
+  : values { -- xs:List<Int> }
+    map.empty:Map<String,Int>
+    "a" 1 map.set
+    "b" 2 map.set
+    map.values
+  ;
+  export : keys
+  export : values
+end-module
+"""
     )
 
     assert run_export(checked, "@app.keys", RuntimeHostBindings({})) == ("a", "b")
@@ -2823,16 +3628,23 @@ def test_runtime_map_keys_and_values_preserve_insertion_order() -> None:
 
 def test_runtime_if_false_executes_else_branch() -> None:
     checked = analyze_program(
-        "export : app.run { -- }\n"
-        "  false\n"
-        "  if\n"
-        '    "yes" host.log\n'
-        "  else\n"
-        '    "no" host.log\n'
-        "  end\n"
-        ";",
+        """module @app
+  : run { -- }
+    false
+    if
+      "yes" host.log
+    else
+      "no" host.log
+    end
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract_from_words(
-            [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"), effect=HostEffect.PURE)]
+            [HostWord(name="host.log", signature=signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+"""), effect=HostEffect.PURE)]
         ),
     )
 
@@ -2844,19 +3656,26 @@ def test_runtime_if_false_executes_else_branch() -> None:
 
 def test_runtime_if_can_call_nicole_word() -> None:
     host_contract = host_contract_from_words(
-        [HostWord(name="host.log", signature=signature_from_source(": hostsig { msg:String -- } ;"), effect=HostEffect.PURE)]
+        [HostWord(name="host.log", signature=signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+"""), effect=HostEffect.PURE)]
     )
     checked = analyze_program(
-        ": log-yes { -- }\n"
-        '  "yes" host.log\n'
-        ";\n"
-        "export : app.run { flag:Bool -- }\n"
-        "  flag if\n"
-        "    log-yes\n"
-        "  else\n"
-        "    log-yes\n"
-        "  end\n"
-        ";",
+        """module @app
+  : log-yes { -- }
+    "yes" host.log
+  ;
+  : run { flag:Bool -- }
+    flag if
+      log-yes
+    else
+      log-yes
+    end
+  ;
+  export : run
+end-module
+""",
         host_contract=host_contract,
     )
 
@@ -2868,13 +3687,17 @@ def test_runtime_if_can_call_nicole_word() -> None:
 
 def test_runtime_if_can_produce_stack_output() -> None:
     checked = analyze_program(
-        "export : app.choose { flag:Bool -- n:Int }\n"
-        "  flag if\n"
-        "    1\n"
-        "  else\n"
-        "    2\n"
-        "  end\n"
-        ";"
+        """module @app
+  : choose { flag:Bool -- n:Int }
+    flag if
+      1
+    else
+      2
+    end
+  ;
+  export : choose
+end-module
+"""
     )
 
     assert run_export(checked, "@app.choose", RuntimeHostBindings({}), True) == 1
@@ -2883,17 +3706,21 @@ def test_runtime_if_can_produce_stack_output() -> None:
 
 def test_runtime_nested_if_simple() -> None:
     checked = analyze_program(
-        "export : app.run { flag:Bool -- n:Int }\n"
-        "  flag if\n"
-        "    true if\n"
-        "      1\n"
-        "    else\n"
-        "      2\n"
-        "    end\n"
-        "  else\n"
-        "    3\n"
-        "  end\n"
-        ";"
+        """module @app
+  : run { flag:Bool -- n:Int }
+    flag if
+      true if
+        1
+      else
+        2
+      end
+    else
+      3
+    end
+  ;
+  export : run
+end-module
+"""
     )
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({}), True) == 1

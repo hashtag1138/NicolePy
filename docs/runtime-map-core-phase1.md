@@ -13,7 +13,7 @@ The canonical execution model remains:
 
 ```python
 checked = analyze_program(source, host_contract=host_contract)
-run_export(checked, "app.run", runtime_bindings)
+run_export(checked, "@app.run", runtime_bindings)
 ```
 
 Runtime consumes `CheckedProgram` only.

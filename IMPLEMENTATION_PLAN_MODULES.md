@@ -589,7 +589,7 @@ Residual gaps:
 
 ## Phase 4 — Legacy rejection, tests, docs, and SPEC_TARGET
 
-Status: `pending`
+Status: `complete`
 
 Goal:
 - Finalize public legacy rejection, complete test migration, update docs, and update `SPEC_TARGET.md` to modules-freeze target.
@@ -626,17 +626,43 @@ Exit criteria:
 Notes:
 - Transitional internal-only test scaffolding must be removed or disabled by phase end.
 
+Implementation decisions:
+- Updated public docs and `SPEC_TARGET.md` to the `v0.1.0-modules-freeze` target and canonical `@module.word` host ABI surface.
+- Rewrote runtime-facing docs and README examples to module-contained exports and canonical runtime export names.
+- Removed the runtime test migration shim from `tests/test_runtime.py` by rewriting fixtures explicitly as module-contained programs.
+- Kept explicit negative tests that assert rejection of legacy flat syntax.
+- Left `tests/test_checker.py` source auto-wrapping helper in place as internal-only test scaffolding because removing it would require a broad checker fixture rewrite with no production semantic value in Phase 4.
+
 Modified files:
-- none
+- `README.md`
+- `SPEC_TARGET.md`
+- `docs/runtime-quotations-call.md`
+- `docs/runtime-collection-core-phase1.md`
+- `docs/runtime-list-phase2.md`
+- `docs/runtime-map-core-phase1.md`
+- `docs/implementation-roadmap-v0.14.0-purity-effects.md`
+- `tests/test_runtime.py`
+- `IMPLEMENTATION_PLAN_MODULES.md`
 
 Validation results:
-- none
+- `grep -RIn "export : .*\\." README.md SPEC_TARGET.md docs tests src/nicole || true`
+- Remaining hits limited to explicit negative tests plus one README rejection example.
+- `grep -RIn "run_export(.*\"app\\." README.md SPEC_TARGET.md docs tests src/nicole || true`
+- no hits
+- `grep -RIn "export dirty" README.md SPEC_TARGET.md docs tests src/nicole || true`
+- Remaining hits limited to explicit parser rejection tests and the clearly historical archive roadmap.
+- `grep -RIn "_LEGACY_EXPORT_RE\\|_to_module_source" tests || true`
+- no hits
+- `grep -RIn "v0.17.0-case-guards-spec\\|v0.14.2-workspace-alignment" README.md SPEC_TARGET.md docs tests src/nicole || true`
+- no hits
+- `PYTHONPATH=src .venv/bin/python -m pytest -q`
+- `635 passed`
 
 Blockers:
 - none
 
 Residual gaps:
-- none
+- `tests/test_checker.py` still contains internal module-wrapping helper `_normalize_source(...)`; this does not affect public behavior but remains cleanup debt outside the runtime-scaffolding removal completed in Phase 4.
 
 ---
 
@@ -699,7 +725,7 @@ Residual gaps:
 | Phase 2C | complete |
 | Phase 2D | complete |
 | Phase 3 | complete |
-| Phase 4 | pending |
+| Phase 4 | complete |
 | Phase 5 | pending |
 
 ---
@@ -731,3 +757,4 @@ Residual gaps:
 - Phase 2D completed: preserved metadata through `with_standard_symbols()` and migrated pipeline tests to module-aware end-to-end integration scenarios without expanding into Phase 3 export ABI work.
 - Phase 3 completed with module-local export declaration validation, canonical `@module.word` host ABI publication, runtime canonical export lookup normalization, and module-aware ABI/pipeline/runtime export tests.
 - Corrected Phase 3 tracking table after audit recovery.
+- Phase 4 completed with modules-freeze target metadata refresh, public doc cleanup, runtime-doc canonical export examples, runtime test fixture migration away from legacy flat export scaffolding, and preserved full-suite green status.

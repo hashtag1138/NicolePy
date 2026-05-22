@@ -2,39 +2,28 @@
 
 Current target specification:
 
-- tag: v0.17.0-case-guards-spec
-- commit: 94240eceff7a6b8d925011f37e80c708c24c72c9
+- spec repo: `/data/data/com.termux/files/home/Sources/nicole/nicole_language_docs_seed`
+- tag: `v0.1.0-modules-freeze`
+- commit: `08706edd315e64c22b47e69b4121a0f0f04e7a9f`
 
-Implementation baseline:
+Target summary:
 
-- implementation tag: v0.14.2-workspace-alignment
-- implementation commit: 51a22f69ad78a0e8e65787fb38a44d55daf5218d
+- user-defined words are module-contained
+- imports are top-level declarations
+- exports are module-local declarations written as `export : word`
+- canonical host-visible export names are `@module.word`
+- legacy flat export syntax is not public behavior
 
-Conformance status:
+Current implementation state against this target:
 
-NicolePy implements the v0.16.0 direct self-tail-call guarantee.
-NicolePy implements the v0.17.0 guarded case branch semantics.
+- parser supports module/import/include/export declaration syntax
+- signature collection, resolver, checker, pipeline, host ABI, and runtime are module-aware
+- canonical export publication uses `@module.word`
+- runtime export lookup uses canonical/module-qualified identities
 
-Current state:
+Known deferred gaps outside the core Phase 1-4 target:
 
-- direct self-recursive tail calls are marked statically
-- runtime optimization applies to marked direct self-tail-calls
-- Nicole call-stack behavior is constant for these calls
-- no syntax change introduced for self-tail-call support
-- guarded case syntax is implemented: `pattern when guard => body`
-- guard evaluation happens only after a successful pattern match
-- pattern bindings are visible in the guard
-- guard must produce exactly `Bool`
-- guard context is pure; dirty calls are rejected statically
-- `?` is forbidden in guards
-- guarded branches are conditional and do not provide unconditional exhaustiveness coverage
-- `_ when guard` is allowed and remains non-exhaustive
-
-Known implementation gaps include:
-
-- no optimization guarantee for mutual recursion
-- no optimization guarantee for indirect recursion
-- no optimization guarantee for recursion through quotations
-- native/Python stack behavior remains outside the Nicole spec contract
+- full import-graph cycle rejection still depends on complete compilation-unit/module-loading graph information
+- visible-root collision diagnostics remain limited to currently representable alias-collision paths
 
 Nicole specification remains the only language source of truth.
