@@ -196,7 +196,12 @@ def load_standard_symbols() -> list[WordSymbol]:
 
 
 def with_standard_symbols(table: SymbolTable) -> SymbolTable:
-    enriched = SymbolTable(words={name: list(symbols) for name, symbols in table.words.items()})
+    enriched = SymbolTable(
+        words={name: list(symbols) for name, symbols in table.words.items()},
+        modules=dict(table.modules),
+        imports=list(table.imports),
+        aliases=dict(table.aliases),
+    )
     for builtin in load_standard_symbols():
         existing = enriched.words.get(builtin.name, [])
         if any(symbol.source is SymbolSource.USER for symbol in existing):

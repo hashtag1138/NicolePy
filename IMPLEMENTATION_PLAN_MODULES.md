@@ -434,7 +434,7 @@ Residual gaps:
 
 ## Phase 2D — Pipeline integration and Phase 2 audit
 
-Status: `pending`
+Status: `complete`
 
 Goal:
 - Integrate Phase 2A/2B/2C behaviors in pipeline, migrate Phase 2 tests coherently, and complete Phase 2 module-aware audit readiness.
@@ -485,17 +485,35 @@ Exit criteria:
 Risks:
 - Integration-step domino effects across symbols/resolver/checker can surface late if prior phase boundaries were not strict.
 
+Implementation decisions:
+- Preserve metadata by copying `modules`, `imports`, and `aliases` when constructing the augmented symbol table in `with_standard_symbols()`, while leaving builtin registration behavior unchanged.
+- Keep resolver/checker semantics unchanged; fix integration by preserving upstream metadata only.
+- Replace legacy top-level pipeline fixtures with module-contained end-to-end scenarios for same-module calls, import/alias resolution, builtins+imports, host+imports, dirty propagation, and tail self-call marking.
+
 Modified files:
-- none
+- `src/nicole/standard_symbols.py`
+- `tests/test_pipeline.py`
+- `IMPLEMENTATION_PLAN_MODULES.md`
 
 Validation results:
-- none
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_pipeline.py -q`
+- `12 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_signature_collector.py -q`
+- `18 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_resolver.py -q`
+- `14 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_checker.py -q`
+- `228 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_parser.py tests/test_signature_collector.py tests/test_resolver.py tests/test_checker.py tests/test_pipeline.py -q`
+- `357 passed`
+- Phase 2D metadata-preservation and pipeline-integration validation executed
 
 Blockers:
 - none
 
 Residual gaps:
-- none
+- Full import-graph cycle rejection remains deferred until compilation-unit/module-loading assembly provides complete graph information.
+- Visible-root collision diagnostics remain limited to currently representable alias-collision metadata paths from Phase 2B.
 
 ---
 
@@ -695,3 +713,4 @@ Residual gaps:
 - Phase 2B completed and passed audit with module-aware resolver/import/alias behavior.
 - Phase 2C completed with checker-local module-aware identity for effect graph and tail-call analysis, plus checker test migration to module-contained fixtures.
 - Corrected Phase 2D boundary to allow `src/nicole/standard_symbols.py` strictly for metadata preservation across standard-symbol augmentation (`modules`, `imports`, `aliases`, and module ownership metadata).
+- Phase 2D completed: preserved metadata through `with_standard_symbols()` and migrated pipeline tests to module-aware end-to-end integration scenarios without expanding into Phase 3 export ABI work.

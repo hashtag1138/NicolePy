@@ -5,357 +5,288 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from nicole.ast_nodes import IdentifierNode, ModuleDeclaration, WordDefNode
 from nicole.checker import CheckerError
-from nicole.host_abi import BindingAvailability, HostABIError, HostEffect, HostWord, host_contract_from_words
+from nicole.host_abi import HostEffect, HostWord, host_contract_from_words
 from nicole.pipeline import CheckedProgram, analyze_program
 from nicole.resolver import ResolutionError
-from nicole.parser import ParseError, Parser
+from nicole.parser import Parser
 from nicole.lexer import lex
 
 
-def signature_from_source(source: str):
-    return Parser(lex(source)).parse().words[0].signature
+def _parse_source(source: str):
+    return Parser(lex(source)).parse()
 
 
-def test_pipeline_accepts_program_without_export_or_host() -> None:
+def _get_module_word(program, *, module_name: str, word_name: str) -> WordDefNode:
+    for declaration in program.declarations:
+        if not isinstance(declaration, ModuleDeclaration):
+            continue
+        if ".".join(declaration.name.parts) != module_name:
+            continue
+        for item in declaration.items:
+            if isinstance(item, WordDefNode) and item.name == word_name:
+                return item
+    raise AssertionError(f"word '{word_name}' not found in module '@{module_name}'")
+
+
+def _signature_from_source(source: str, *, module_name: str, word_name: str):
+    program = _parse_source(source)
+    return _get_module_word(program, module_name=module_name, word_name=word_name).signature
+
+
+def test_pipeline_accepts_module_program_without_exports() -> None:
     result = analyze_program(
-        ": main { -- n:Int }\n"
-        "  1\n"
-        ";"
+        "module @app\n"
+        "  : main { -- n:Int }\n"
+        "    1\n"
+        "  ;\n"
+        "end-module\n"
     )
 
     assert isinstance(result, CheckedProgram)
     assert dict(result.export_contract.words) == {}
 
 
-def test_pipeline_collects_simple_export() -> None:
+def test_pipeline_resolves_same_module_short_name() -> None:
     result = analyze_program(
-        "export : main { -- n:Int }\n"
-        "  1\n"
-        ";"
+        "module @app\n"
+        "  : helper { -- }\n"
+        "  ;\n"
+        "  : run { -- }\n"
+        "    helper\n"
+        "  ;\n"
+        "end-module\n"
     )
 
-    assert "main" in result.export_contract.words
-    assert result.export_contract.words["main"].signature is result.symbols.words["main"][0].signature
+    call = _get_module_word(result.program, module_name="app", word_name="run").body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "app"
+    assert call.resolution.resolved_symbol.name == "helper"
 
 
-def test_pipeline_rejects_export_inside_subword() -> None:
-    with pytest.raises(ParseError):
+def test_pipeline_resolves_external_qualified_reference_with_import() -> None:
+    result = analyze_program(
+        "module @math\n"
+        "  : add { -- }\n"
+        "  ;\n"
+        "end-module\n"
+        "import @math\n"
+        "module @app\n"
+        "  : run { -- }\n"
+        "    @math.add\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    call = _get_module_word(result.program, module_name="app", word_name="run").body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "math"
+
+
+def test_pipeline_rejects_external_qualified_reference_without_import() -> None:
+    with pytest.raises(ResolutionError, match="unresolved name"):
         analyze_program(
-            ": outer { -- }\n"
-            "  export : inner { -- }\n"
+            "module @math\n"
+            "  : add { -- }\n"
             "  ;\n"
-            ";"
+            "end-module\n"
+            "module @app\n"
+            "  : run { -- }\n"
+            "    @math.add\n"
+            "  ;\n"
+            "end-module\n"
         )
 
 
-@pytest.mark.parametrize(
-    "source",
-    [
-        ": call { -- } ;",
-        ": MissingKey { -- } ;",
-        ": OutOfBounds { -- } ;",
-        ": result.custom { -- } ;",
-        ": list.custom { -- } ;",
-        ": map.custom { -- } ;",
-    ],
-)
-def test_pipeline_rejects_reserved_top_level_user_word_names(source: str) -> None:
-    with pytest.raises(ParseError):
-        analyze_program(source)
+def test_pipeline_resolves_alias_qualified_reference() -> None:
+    result = analyze_program(
+        "module @math\n"
+        "  : add { -- }\n"
+        "  ;\n"
+        "end-module\n"
+        "import @math as m\n"
+        "module @app\n"
+        "  : run { -- }\n"
+        "    m.add\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    call = _get_module_word(result.program, module_name="app", word_name="run").body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "math"
 
 
-@pytest.mark.parametrize(
-    "nested_name",
-    ["call", "result.custom", "list.custom", "map.custom"],
-)
-def test_pipeline_rejects_reserved_subword_names(nested_name: str) -> None:
-    with pytest.raises(ParseError):
-        analyze_program(
-            ": outer { -- }\n"
-            f"  : {nested_name} {{ -- }} ;\n"
-            ";"
-        )
+def test_pipeline_resolves_imported_word_alias() -> None:
+    result = analyze_program(
+        "module @math\n"
+        "  : add { -- }\n"
+        "  ;\n"
+        "end-module\n"
+        "import @math.add as add\n"
+        "module @app\n"
+        "  : run { -- }\n"
+        "    add\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    call = _get_module_word(result.program, module_name="app", word_name="run").body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "math"
+    assert call.resolution.resolved_symbol.name == "add"
 
 
-def test_pipeline_accepts_export_with_valid_host_contract() -> None:
-    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
+def test_pipeline_accepts_builtins_and_imports_together() -> None:
+    result = analyze_program(
+        "module @math\n"
+        "  : inc { n:Int -- out:Int }\n"
+        "    n 1 +\n"
+        "  ;\n"
+        "end-module\n"
+        "import @math\n"
+        "module @app\n"
+        "  : run { xs:List<Int> n:Int -- ok:Bool out:Int }\n"
+        "    xs list.is-empty\n"
+        "    n @math.inc\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_accepts_host_calls_with_imports() -> None:
+    host_signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    host_contract = host_contract_from_words([
+        HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)
+    ])
 
     result = analyze_program(
-        "export : send { msg:String -- }\n"
-        "  msg host.log\n"
-        ";",
+        "module @util\n"
+        "  : normalize { msg:String -- out:String }\n"
+        "    msg\n"
+        "  ;\n"
+        "end-module\n"
+        "import @util\n"
+        "module @app\n"
+        "  : send { msg:String -- }\n"
+        "    msg @util.normalize host.log\n"
+        "  ;\n"
+        "end-module\n",
         host_contract=host_contract,
     )
 
-    assert "send" in result.export_contract.words
+    send = _get_module_word(result.program, module_name="app", word_name="send")
+    import_call = send.body.items[1]
+    host_call = send.body.items[2]
+    assert isinstance(import_call, IdentifierNode)
+    assert isinstance(host_call, IdentifierNode)
+    assert import_call.resolution.resolved_symbol is not None
+    assert import_call.resolution.resolved_symbol.module == "util"
+    assert host_call.resolution.owner_scope == "host"
 
 
-def test_pipeline_rejects_missing_host_contract_entry() -> None:
-    with pytest.raises(ResolutionError):
-        analyze_program(
-            "export : send { msg:String -- }\n"
-            "  msg host.log\n"
-            ";"
-        )
-
-
-def test_pipeline_rejects_export_quote_input() -> None:
-    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        analyze_program(
-            "export : run { q:Quote<{ | -- }> -- }\n"
-            ";\n"
-        )
-
-
-def test_pipeline_rejects_export_quote_output() -> None:
-    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        analyze_program(
-            "export : run { -- q:Quote<{ | -- }> }\n"
-            "  :[ | -- | ;]\n"
-            ";\n"
-        )
-
-
-def test_pipeline_rejects_export_quote_nested_output() -> None:
-    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
-        analyze_program(
-            "export : run { xs:List<Quote<{ | -- }>> -- }\n"
-            ";\n"
-        )
-
-
-def test_pipeline_rejects_export_custom_type() -> None:
-    with pytest.raises(CheckerError, match="type is not supported in v1: Custom"):
-        analyze_program(
-            "export : bad { x:Custom -- }\n"
-            "  x drop\n"
-            ";\n"
-        )
-
-
-def test_pipeline_rejects_export_with_nested_invalid_type() -> None:
-    with pytest.raises(CheckerError, match="type is not supported in v1: Custom"):
-        analyze_program(
-            "export : bad { x:Result<List<Custom>,String> -- }\n"
-            "  x drop\n"
-            ";\n"
-        )
-
-
-def test_pipeline_accepts_export_with_nested_valid_abi_types() -> None:
+def test_pipeline_preserves_same_name_cross_module_words() -> None:
     result = analyze_program(
-        "export : ok { xs:List<Result<Int,String>> r:Result<List<Int>,MapError> -- }\n"
-        "  xs drop\n"
-        "  r drop\n"
-        ";\n"
+        "module @b\n"
+        "  : run { n:Int -- n2:Int }\n"
+        "    n\n"
+        "  ;\n"
+        "end-module\n"
+        "import @b\n"
+        "module @a\n"
+        "  : run { n:Int -- n2:Int }\n"
+        "    n @b.run\n"
+        "  ;\n"
+        "end-module\n"
     )
 
-    assert isinstance(result, CheckedProgram)
+    runs = result.symbols.words["run"]
+    assert len(runs) == 2
+    assert {symbol.module for symbol in runs} == {"a", "b"}
+
+    call = _get_module_word(result.program, module_name="a", word_name="run").body.items[1]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "b"
 
 
-def test_pipeline_accepts_local_quote_usage() -> None:
-    result = analyze_program(
-        ": local-ok { -- q:Quote<{ | -- }> }\n"
-        "  :[ | -- | ;]\n"
-        ";"
+def test_pipeline_rejects_pure_cross_module_call_to_dirty_same_name_word() -> None:
+    host_signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
     )
+    host_contract = host_contract_from_words([
+        HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)
+    ])
 
-    assert isinstance(result, CheckedProgram)
-
-
-def test_pipeline_rejects_local_unknown_nominal_type() -> None:
-    with pytest.raises(CheckerError, match="type is not supported in v1: Custom"):
+    with pytest.raises(CheckerError, match=r"inferred dirty.*missing dirty annotation"):
         analyze_program(
-            ": bad { x:Custom -- }\n"
-            "  x drop\n"
-            ";"
-        )
-
-
-def test_pipeline_accepts_local_nested_v1_types() -> None:
-    result = analyze_program(
-        ": ok { xs:List<Result<Int,Bool>> m:Map<String,List<Result<Int,Bool>>> -- }\n"
-        "  xs drop\n"
-        "  m drop\n"
-        ";"
-    )
-
-    assert isinstance(result, CheckedProgram)
-
-
-def test_pipeline_rejects_host_call_with_wrong_input_type() -> None:
-    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
-
-    with pytest.raises(CheckerError):
-        analyze_program(
-            "export : send { n:Int -- }\n"
-            "  n host.log\n"
-            ";",
+            "module @b\n"
+            "  dirty : run { msg:String -- }\n"
+            "    msg host.log\n"
+            "  ;\n"
+            "end-module\n"
+            "import @b\n"
+            "module @a\n"
+            "  : run { msg:String -- }\n"
+            "    msg @b.run\n"
+            "  ;\n"
+            "end-module\n",
             host_contract=host_contract,
         )
 
 
-def test_pipeline_rejects_direct_optional_host_word_call() -> None:
-    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    host_contract = host_contract_from_words(
-        [HostWord(name="host.log", signature=host_signature, availability=BindingAvailability.OPTIONAL, effect=HostEffect.PURE)]
-    )
-
-    with pytest.raises(ResolutionError, match="optional host word cannot be called directly in v1"):
-        analyze_program(
-            "export : send { msg:String -- }\n"
-            "  msg host.log\n"
-            ";",
-            host_contract=host_contract,
-        )
-
-
-def test_pipeline_rejects_list_reduce_on_provably_empty_list() -> None:
-    with pytest.raises(CheckerError, match="provably empty list"):
-        analyze_program(
-            "export : bad { -- n:Int }\n"
-            "  []:List<Int>\n"
-            "  :[ | a:Int b:Int -- c:Int |\n"
-            "    a b +\n"
-            "  ;]\n"
-            "  list.reduce\n"
-            ";"
-        )
-
-
-def test_pipeline_accepts_export_with_multiple_host_words() -> None:
-    log_signature = signature_from_source(": hostlog { msg:String -- } ;")
-    random_signature = signature_from_source(": hostrandom { -- n:Int } ;")
-    host_contract = host_contract_from_words(
-        [
-            HostWord(name="host.log", signature=log_signature, effect=HostEffect.PURE),
-            HostWord(name="host.random-int", signature=random_signature, effect=HostEffect.PURE),
-        ]
-    )
-
+def test_pipeline_marks_true_same_module_self_tail_call() -> None:
     result = analyze_program(
-        "export : run { msg:String -- n:Int }\n"
-        "  msg host.log\n"
-        "  host.random-int\n"
-        ";",
-        host_contract=host_contract,
+        "module @app\n"
+        "  : loop { n:Int -- n2:Int }\n"
+        "    n loop\n"
+        "  ;\n"
+        "end-module\n"
     )
 
-    assert "run" in result.export_contract.words
-    assert result.export_contract.words["run"].signature is result.symbols.words["run"][0].signature
+    loop = _get_module_word(result.program, module_name="app", word_name="loop")
+    call = loop.body.items[1]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.is_self_tail_call is True
 
 
-def test_pipeline_accepts_capturing_quote_for_list_map() -> None:
+def test_pipeline_does_not_mark_cross_module_same_name_tail_call_as_self() -> None:
     result = analyze_program(
-        ": main { xs:List<Int> offset:Int -- ys:List<Int> }\n"
-        "  xs\n"
-        "  offset\n"
-        "  :[ captured-offset:Int | x:Int -- y:Int | x captured-offset + ;]\n"
-        "  list.map\n"
-        ";"
+        "module @b\n"
+        "  : loop { n:Int -- n2:Int }\n"
+        "    n\n"
+        "  ;\n"
+        "end-module\n"
+        "import @b\n"
+        "module @a\n"
+        "  : loop { n:Int -- n2:Int }\n"
+        "    n @b.loop\n"
+        "  ;\n"
+        "end-module\n"
     )
 
-    assert isinstance(result, CheckedProgram)
-
-
-def test_pipeline_accepts_capturing_quote_for_list_fold() -> None:
-    result = analyze_program(
-        ": main { xs:List<Int> offset:Int -- n:Int }\n"
-        "  xs\n"
-        "  0\n"
-        "  offset\n"
-        "  :[ captured-offset:Int | acc:Int x:Int -- out:Int | acc x + captured-offset + ;]\n"
-        "  list.fold\n"
-        ";"
-    )
-
-    assert isinstance(result, CheckedProgram)
-
-
-def test_pipeline_accepts_capturing_quote_for_list_reduce() -> None:
-    result = analyze_program(
-        ": main { xs:List<Int> offset:Int -- n:Int }\n"
-        "  xs\n"
-        "  offset\n"
-        "  :[ captured-offset:Int | a:Int b:Int -- c:Int | a b + captured-offset + ;]\n"
-        "  list.reduce\n"
-        ";"
-    )
-
-    assert isinstance(result, CheckedProgram)
-
-
-def test_pipeline_accepts_collection_core_step2_builtins() -> None:
-    result = analyze_program(
-        ": step2 { -- n:Int }\n"
-        "  [1, 2] list.reverse list.first drop\n"
-        "  map.empty:Map<String,Int> \"a\" 1 map.set map.keys drop\n"
-        "  map.empty:Map<String,Int> map.is-empty drop\n"
-        "  0\n"
-        ";"
-    )
-
-    assert isinstance(result, CheckedProgram)
-
-
-def test_pipeline_accepts_propagate_with_matching_result_error_type() -> None:
-    result = analyze_program(
-        "export : ok { -- r:Result<Int,MapError> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "k"\n'
-        "  map.get\n"
-        "  ?\n"
-        "  1 +\n"
-        "  Ok!\n"
-        ";"
-    )
-
-    assert isinstance(result, CheckedProgram)
-
-
-def test_pipeline_accepts_propagate_error_path_shape() -> None:
-    result = analyze_program(
-        "export : err { -- r:Result<Int,MapError> }\n"
-        "  map.empty:Map<String,Int>\n"
-        '  "missing" map.get\n'
-        "  ?\n"
-        "  1 +\n"
-        "  Ok!\n"
-        ";\n"
-    )
-
-    assert isinstance(result, CheckedProgram)
-
-
-def test_pipeline_accepts_propagate_inside_quotation_frame() -> None:
-    result = analyze_program(
-        "export : qscope { -- n:Int }\n"
-        "  map.empty:Map<String,Int>\n"
-        "  :[ | m:Map<String,Int> -- r:Result<Int,MapError> |\n"
-        '    m "missing" map.get\n'
-        "    ?\n"
-        "    1 +\n"
-        "    Ok!\n"
-        "  ;]\n"
-        "  call\n"
-        "  0 result.unwrap-or\n"
-        ";\n"
-    )
-
-    assert isinstance(result, CheckedProgram)
-
-
-def test_pipeline_rejects_propagate_with_mismatched_error_type() -> None:
-    with pytest.raises(CheckerError):
-        analyze_program(
-            "export : bad { -- r:Result<Int,MapError> }\n"
-            "  []:List<Int>\n"
-            "  0\n"
-            "  list.get\n"
-            "  ?\n"
-            "  Ok!\n"
-            ";"
-        )
+    loop = _get_module_word(result.program, module_name="a", word_name="loop")
+    call = loop.body.items[1]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.is_self_tail_call is False
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "b"
