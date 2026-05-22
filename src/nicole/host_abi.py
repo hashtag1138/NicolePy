@@ -101,11 +101,19 @@ def collect_exports(symbols: SymbolTable) -> ExportContract:
         for symbol in symbols_for_name:
             if symbol.visibility is not Visibility.EXPORT:
                 continue
+            if symbol.module is None:
+                raise HostABIError(f"export symbol missing module ownership: {symbol.name}")
+            if symbol.owner is not None:
+                raise HostABIError(
+                    f"export target must be module-level word: @{symbol.module}.{symbol.qualified_name}"
+                )
             _validate_signature_types(symbol.signature, forbid_quote=True)
+            canonical_name = f"@{symbol.module}.{symbol.name}"
+            internal_name = f"@{symbol.module}.{symbol.qualified_name}"
             exports.append(
                 ExportWord(
-                    export_name=symbol.name,
-                    internal_name=symbol.qualified_name,
+                    export_name=canonical_name,
+                    internal_name=internal_name,
                     signature=symbol.signature,
                 )
             )

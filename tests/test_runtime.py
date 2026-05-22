@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import sys
 
 import pytest
@@ -6,10 +7,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.checker import CheckerError
+from nicole.ast_nodes import ModuleDeclaration, WordDefNode
 from nicole.host_abi import HostABIError, HostEffect, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
-from nicole.pipeline import analyze_program
+from nicole.pipeline import analyze_program as _analyze_program
 from nicole.resolver import ResolutionError
 from nicole.runtime import (
     Err,
@@ -26,8 +28,69 @@ from nicole.runtime import (
 )
 
 
+_LEGACY_EXPORT_RE = re.compile(
+    r"^\s*export\s*:\s*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\.([A-Za-z_][A-Za-z0-9_-]*)\s*(\{.*)$"
+)
+_TOP_LEVEL_WORD_RE = re.compile(r"^:\s*([A-Za-z_][A-Za-z0-9_-]*)\b")
+
+
+def _to_module_source(source: str) -> str:
+    if "module @" in source:
+        return source
+
+    transformed: list[str] = []
+    exports: list[str] = []
+    module_words: set[str] = set()
+    module_name = "app"
+    skipping_legacy_export_body = False
+
+    for raw_line in source.splitlines():
+        if skipping_legacy_export_body:
+            if raw_line.strip() == ";":
+                skipping_legacy_export_body = False
+            continue
+
+        match = _LEGACY_EXPORT_RE.match(raw_line)
+        if match:
+            export_module, export_word, signature_tail = match.groups()
+            module_name = export_module
+            exports.append(export_word)
+            if export_word in module_words:
+                skipping_legacy_export_body = True
+                continue
+            transformed.append(f": {export_word} {signature_tail}")
+            module_words.add(export_word)
+            continue
+
+        top_level_match = _TOP_LEVEL_WORD_RE.match(raw_line)
+        if top_level_match:
+            module_words.add(top_level_match.group(1))
+        transformed.append(raw_line)
+
+    body_lines = [f"  {line}" if line else "" for line in transformed]
+    for export_word in exports:
+        body_lines.append(f"  export : {export_word}")
+
+    body = "\n".join(body_lines).rstrip()
+    return f"module @{module_name}\n{body}\nend-module\n"
+
+
+def analyze_program(source: str, host_contract=None):
+    migrated = _to_module_source(source)
+    if host_contract is None:
+        return _analyze_program(migrated)
+    return _analyze_program(migrated, host_contract=host_contract)
+
+
 def signature_from_source(source: str):
-    return Parser(lex(source)).parse().words[0].signature
+    program = Parser(lex(_to_module_source(source))).parse()
+    for declaration in program.declarations:
+        if not isinstance(declaration, ModuleDeclaration):
+            continue
+        for item in declaration.items:
+            if isinstance(item, WordDefNode):
+                return item.signature
+    raise AssertionError("expected a word signature fixture")
 
 
 def test_runtime_valid_host_call() -> None:
@@ -44,7 +107,7 @@ def test_runtime_valid_host_call() -> None:
     )
 
     runtime = RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)})
-    result = run_export(checked, "app.run", runtime)
+    result = run_export(checked, "@app.run", runtime)
 
     assert result is None
     assert seen == ["hello"]
@@ -97,7 +160,7 @@ def test_runtime_missing_host_binding() -> None:
 
     runtime = RuntimeHostBindings({})
     with pytest.raises(RuntimeError, match="missing host binding: host.log"):
-        run_export(checked, "app.run", runtime)
+        run_export(checked, "@app.run", runtime)
 
 
 def test_runtime_host_callable_exception_is_normalized() -> None:
@@ -115,14 +178,14 @@ def test_runtime_host_callable_exception_is_normalized() -> None:
 
     runtime = RuntimeHostBindings({"host.log": boom})
     with pytest.raises(RuntimeError, match="runtime host error: host.log"):
-        run_export(checked, "app.run", runtime)
+        run_export(checked, "@app.run", runtime)
 
 
 def test_runtime_missing_export() -> None:
     checked = analyze_program("export : app.run { -- n:Int }\n  1\n;")
 
-    with pytest.raises(RuntimeError, match="missing export: missing.export"):
-        run_export(checked, "missing.export", RuntimeHostBindings({}))
+    with pytest.raises(RuntimeError, match="missing export: @app.missing"):
+        run_export(checked, "@app.missing", RuntimeHostBindings({}))
 
 
 def test_runtime_wrong_arity() -> None:
@@ -133,10 +196,10 @@ def test_runtime_wrong_arity() -> None:
     )
 
     with pytest.raises(RuntimeError, match="wrong arity"):
-        run_export(checked, "app.add", RuntimeHostBindings({}), 1)
+        run_export(checked, "@app.add", RuntimeHostBindings({}), 1)
 
     with pytest.raises(RuntimeError, match="wrong arity"):
-        run_export(checked, "app.add", RuntimeHostBindings({}), 1, 2, 3)
+        run_export(checked, "@app.add", RuntimeHostBindings({}), 1, 2, 3)
 
 
 def test_runtime_wrong_runtime_signature() -> None:
@@ -151,7 +214,7 @@ def test_runtime_wrong_runtime_signature() -> None:
 
     runtime = RuntimeHostBindings({"host.random-int": lambda: "not-an-int"})
     with pytest.raises(RuntimeError, match="wrong runtime signature"):
-        run_export(checked, "app.run", runtime)
+        run_export(checked, "@app.run", runtime)
 
 
 def test_runtime_typed_arithmetic_export() -> None:
@@ -161,7 +224,7 @@ def test_runtime_typed_arithmetic_export() -> None:
         ";"
     )
 
-    result = run_export(checked, "app.add", RuntimeHostBindings({}), 2, 3)
+    result = run_export(checked, "@app.add", RuntimeHostBindings({}), 2, 3)
 
     assert result == 5
 
@@ -182,10 +245,10 @@ def test_runtime_comparison_operators_execute() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.lt-int", RuntimeHostBindings({})) is True
-    assert run_export(checked, "app.ge-float", RuntimeHostBindings({})) is False
-    assert run_export(checked, "app.eq", RuntimeHostBindings({})) is True
-    assert run_export(checked, "app.ne", RuntimeHostBindings({})) is True
+    assert run_export(checked, "@app.lt-int", RuntimeHostBindings({})) is True
+    assert run_export(checked, "@app.ge-float", RuntimeHostBindings({})) is False
+    assert run_export(checked, "@app.eq", RuntimeHostBindings({})) is True
+    assert run_export(checked, "@app.ne", RuntimeHostBindings({})) is True
 
 
 def test_runtime_boolean_operators_execute() -> None:
@@ -204,10 +267,10 @@ def test_runtime_boolean_operators_execute() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.andv", RuntimeHostBindings({})) is False
-    assert run_export(checked, "app.orv", RuntimeHostBindings({})) is True
-    assert run_export(checked, "app.not-true", RuntimeHostBindings({})) is False
-    assert run_export(checked, "app.not-false", RuntimeHostBindings({})) is True
+    assert run_export(checked, "@app.andv", RuntimeHostBindings({})) is False
+    assert run_export(checked, "@app.orv", RuntimeHostBindings({})) is True
+    assert run_export(checked, "@app.not-true", RuntimeHostBindings({})) is False
+    assert run_export(checked, "@app.not-false", RuntimeHostBindings({})) is True
 
 
 def test_runtime_boolean_operators_reject_non_bool() -> None:
@@ -233,29 +296,29 @@ def test_runtime_over_and_rot_execute() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.over", RuntimeHostBindings({})) == (1, 2, 1)
-    assert run_export(checked, "app.rot", RuntimeHostBindings({})) == (2, 3, 1)
+    assert run_export(checked, "@app.over", RuntimeHostBindings({})) == (1, 2, 1)
+    assert run_export(checked, "@app.rot", RuntimeHostBindings({})) == (2, 3, 1)
 
 
 def test_runtime_division_by_zero_is_normalized() -> None:
     checked = analyze_program("export : app.run { -- n:Int }\n  1 0 div\n;")
 
     with pytest.raises(RuntimeError, match="runtime arithmetic error: div by zero"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+        run_export(checked, "@app.run", RuntimeHostBindings({}))
 
 
 def test_runtime_modulo_by_zero_is_normalized() -> None:
     checked = analyze_program("export : app.run { -- n:Int }\n  1 0 mod\n;")
 
     with pytest.raises(RuntimeError, match="runtime arithmetic error: mod by zero"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+        run_export(checked, "@app.run", RuntimeHostBindings({}))
 
 
 def test_runtime_float_division_by_zero_is_normalized() -> None:
     checked = analyze_program("export : app.run { -- n:Float }\n  1.0 0.0 /.\n;")
 
     with pytest.raises(RuntimeError, match="runtime arithmetic error: /\\. by zero"):
-        run_export(checked, "app.run", RuntimeHostBindings({}))
+        run_export(checked, "@app.run", RuntimeHostBindings({}))
 
 
 def test_runtime_nicole_word_calling_host_word() -> None:
@@ -274,7 +337,7 @@ def test_runtime_nicole_word_calling_host_word() -> None:
     )
 
     runtime = RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)})
-    run_export(checked, "app.run", runtime)
+    run_export(checked, "@app.run", runtime)
 
     assert seen == ["hello"]
 
@@ -298,7 +361,7 @@ def test_runtime_nested_nicole_word_calls() -> None:
     )
 
     runtime = RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)})
-    run_export(checked, "app.run", runtime)
+    run_export(checked, "@app.run", runtime)
 
     assert seen == ["hello"]
 
@@ -318,7 +381,7 @@ def test_runtime_self_tail_call_countdown_beyond_python_recursion_depth() -> Non
     )
 
     depth = sys.getrecursionlimit() + 1000
-    assert run_export(checked, "app.run", RuntimeHostBindings({}), depth) == 0
+    assert run_export(checked, "@app.run", RuntimeHostBindings({}), depth) == 0
 
 
 def test_runtime_self_tail_call_accumulator_style_beyond_python_recursion_depth() -> None:
@@ -336,7 +399,7 @@ def test_runtime_self_tail_call_accumulator_style_beyond_python_recursion_depth(
     )
 
     depth = sys.getrecursionlimit() + 1000
-    assert run_export(checked, "app.run", RuntimeHostBindings({}), depth) == depth * (depth + 1) // 2
+    assert run_export(checked, "@app.run", RuntimeHostBindings({}), depth) == depth * (depth + 1) // 2
 
 
 def test_runtime_non_tail_recursion_remains_unoptimized() -> None:
@@ -355,7 +418,7 @@ def test_runtime_non_tail_recursion_remains_unoptimized() -> None:
 
     depth = sys.getrecursionlimit() + 200
     with pytest.raises(RecursionError):
-        run_export(checked, "app.run", RuntimeHostBindings({}), depth)
+        run_export(checked, "@app.run", RuntimeHostBindings({}), depth)
 
 
 def test_runtime_mutual_recursion_remains_unoptimized() -> None:
@@ -381,7 +444,7 @@ def test_runtime_mutual_recursion_remains_unoptimized() -> None:
 
     depth = sys.getrecursionlimit() + 200
     with pytest.raises(RecursionError):
-        run_export(checked, "app.run", RuntimeHostBindings({}), depth)
+        run_export(checked, "@app.run", RuntimeHostBindings({}), depth)
 
 
 def test_runtime_quote_mediated_recursion_remains_unoptimized() -> None:
@@ -402,7 +465,7 @@ def test_runtime_quote_mediated_recursion_remains_unoptimized() -> None:
 
     depth = sys.getrecursionlimit() + 200
     with pytest.raises(RecursionError):
-        run_export(checked, "app.run", RuntimeHostBindings({}), depth)
+        run_export(checked, "@app.run", RuntimeHostBindings({}), depth)
 
 
 def test_runtime_self_call_followed_by_propagate_remains_unoptimized() -> None:
@@ -421,7 +484,7 @@ def test_runtime_self_call_followed_by_propagate_remains_unoptimized() -> None:
 
     depth = sys.getrecursionlimit() + 200
     with pytest.raises(RecursionError):
-        run_export(checked, "app.run", RuntimeHostBindings({}), depth)
+        run_export(checked, "@app.run", RuntimeHostBindings({}), depth)
 
 
 def test_runtime_multiple_host_words() -> None:
@@ -449,7 +512,7 @@ def test_runtime_multiple_host_words() -> None:
             "host.random-int": lambda: 42,
         }
     )
-    result = run_export(checked, "app.process", runtime, "hello")
+    result = run_export(checked, "@app.process", runtime, "hello")
 
     assert seen == ["hello"]
     assert result == 42
@@ -483,8 +546,8 @@ def test_runtime_scopes_with_same_nested_name_remain_distinct() -> None:
     )
 
     runtime = RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)})
-    run_export(checked, "app.alpha", runtime)
-    run_export(checked, "app.beta", runtime)
+    run_export(checked, "@app.alpha", runtime)
+    run_export(checked, "@app.beta", runtime)
 
     assert seen == ["alpha", "beta"]
 
@@ -500,7 +563,7 @@ def test_runtime_host_multi_output() -> None:
     )
 
     runtime = RuntimeHostBindings({"host.pair": lambda: (1, 2)})
-    result = run_export(checked, "app.pair", runtime)
+    result = run_export(checked, "@app.pair", runtime)
 
     assert result == (1, 2)
 
@@ -517,7 +580,7 @@ def test_runtime_host_multi_output_wrong_tuple_size() -> None:
 
     runtime = RuntimeHostBindings({"host.pair": lambda: (1,)})
     with pytest.raises(RuntimeError, match="wrong runtime signature"):
-        run_export(checked, "app.pair", runtime)
+        run_export(checked, "@app.pair", runtime)
 
 
 def test_runtime_host_multi_output_wrong_element_type() -> None:
@@ -532,7 +595,7 @@ def test_runtime_host_multi_output_wrong_element_type() -> None:
 
     runtime = RuntimeHostBindings({"host.pair": lambda: (1, "bad")})
     with pytest.raises(RuntimeError, match="host output 'b'"):
-        run_export(checked, "app.pair", runtime)
+        run_export(checked, "@app.pair", runtime)
 
 
 def test_runtime_unit_input_and_output_accept_unit_sentinel() -> None:
@@ -542,7 +605,7 @@ def test_runtime_unit_input_and_output_accept_unit_sentinel() -> None:
         ";\n"
     )
 
-    result = run_export(checked, "app.echo-unit", RuntimeHostBindings({}), UNIT)
+    result = run_export(checked, "@app.echo-unit", RuntimeHostBindings({}), UNIT)
     assert result is UNIT
 
 
@@ -554,13 +617,13 @@ def test_runtime_unit_input_rejects_non_unit_values() -> None:
     )
 
     with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
-        run_export(checked, "app.echo-unit", RuntimeHostBindings({}), 123)
+        run_export(checked, "@app.echo-unit", RuntimeHostBindings({}), 123)
     with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
-        run_export(checked, "app.echo-unit", RuntimeHostBindings({}), "abc")
+        run_export(checked, "@app.echo-unit", RuntimeHostBindings({}), "abc")
     with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
-        run_export(checked, "app.echo-unit", RuntimeHostBindings({}), True)
+        run_export(checked, "@app.echo-unit", RuntimeHostBindings({}), True)
     with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
-        run_export(checked, "app.echo-unit", RuntimeHostBindings({}), None)
+        run_export(checked, "@app.echo-unit", RuntimeHostBindings({}), None)
 
 
 def test_runtime_zero_output_and_unit_output_are_distinct() -> None:
@@ -576,8 +639,8 @@ def test_runtime_zero_output_and_unit_output_are_distinct() -> None:
     )
 
     runtime = RuntimeHostBindings({"host.produce-unit": lambda: UNIT})
-    assert run_export(checked, "app.no-output", runtime) is None
-    assert run_export(checked, "app.unit-output", runtime) is UNIT
+    assert run_export(checked, "@app.no-output", runtime) is None
+    assert run_export(checked, "@app.unit-output", runtime) is UNIT
 
 
 def test_runtime_host_unit_boundaries() -> None:
@@ -607,8 +670,8 @@ def test_runtime_host_unit_boundaries() -> None:
             "host.consume-unit": lambda u: 7,
         }
     )
-    assert run_export(checked, "app.consume", runtime_ok) == 7
-    assert run_export(checked, "app.direct-consume", runtime_ok, UNIT) == 7
+    assert run_export(checked, "@app.consume", runtime_ok) == 7
+    assert run_export(checked, "@app.direct-consume", runtime_ok, UNIT) == 7
 
     runtime_bad_output = RuntimeHostBindings(
         {
@@ -617,7 +680,7 @@ def test_runtime_host_unit_boundaries() -> None:
         }
     )
     with pytest.raises(RuntimeError, match="host output 'u': expected Unit"):
-        run_export(checked, "app.consume", runtime_bad_output)
+        run_export(checked, "@app.consume", runtime_bad_output)
 
     runtime_bad_output_2 = RuntimeHostBindings(
         {
@@ -626,7 +689,7 @@ def test_runtime_host_unit_boundaries() -> None:
         }
     )
     with pytest.raises(RuntimeError, match="host output 'u': expected Unit"):
-        run_export(checked, "app.consume", runtime_bad_output_2)
+        run_export(checked, "@app.consume", runtime_bad_output_2)
 
     runtime_bad_input = RuntimeHostBindings(
         {
@@ -635,9 +698,9 @@ def test_runtime_host_unit_boundaries() -> None:
         }
     )
     with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
-        run_export(checked, "app.direct-consume", runtime_bad_input, 123)
+        run_export(checked, "@app.direct-consume", runtime_bad_input, 123)
     with pytest.raises(RuntimeError, match="input 'u': expected Unit"):
-        run_export(checked, "app.direct-consume", runtime_bad_input, None)
+        run_export(checked, "@app.direct-consume", runtime_bad_input, None)
 
 
 def test_runtime_accepts_valid_nested_list_result_input() -> None:
@@ -648,7 +711,7 @@ def test_runtime_accepts_valid_nested_list_result_input() -> None:
     )
 
     payload = (Ok(1), Err(True), Ok(2))
-    assert run_export(checked, "app.echo", RuntimeHostBindings({}), payload) == payload
+    assert run_export(checked, "@app.echo", RuntimeHostBindings({}), payload) == payload
 
 
 def test_runtime_rejects_invalid_nested_list_result_input() -> None:
@@ -659,7 +722,7 @@ def test_runtime_rejects_invalid_nested_list_result_input() -> None:
     )
 
     with pytest.raises(RuntimeError, match="input 'xs': expected List<Result<Int, Bool>>"):
-        run_export(checked, "app.echo", RuntimeHostBindings({}), (Ok("x"), Err(True)))
+        run_export(checked, "@app.echo", RuntimeHostBindings({}), (Ok("x"), Err(True)))
 
 
 def test_runtime_accepts_valid_nested_map_result_host_output() -> None:
@@ -673,7 +736,7 @@ def test_runtime_accepts_valid_nested_map_result_host_output() -> None:
     )
 
     value = {"a": Ok(1), "b": Err(True)}
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: value})) == value
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: value})) == value
 
 
 def test_runtime_rejects_invalid_nested_map_result_host_output() -> None:
@@ -687,7 +750,7 @@ def test_runtime_rejects_invalid_nested_map_result_host_output() -> None:
     )
 
     with pytest.raises(RuntimeError, match="host output 'm': expected Map<String, Result<Int, Bool>>"):
-        run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"a": "wrong"}}))
+        run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {"a": "wrong"}}))
 
 
 def test_runtime_accepts_valid_nested_result_host_output() -> None:
@@ -700,8 +763,8 @@ def test_runtime_accepts_valid_nested_result_host_output() -> None:
         host_contract=host_contract,
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.result": lambda: Ok(1)})) == Ok(1)
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.result": lambda: Err(True)})) == Err(True)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.result": lambda: Ok(1)})) == Ok(1)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.result": lambda: Err(True)})) == Err(True)
 
 
 def test_runtime_rejects_invalid_nested_result_host_output() -> None:
@@ -715,9 +778,9 @@ def test_runtime_rejects_invalid_nested_result_host_output() -> None:
     )
 
     with pytest.raises(RuntimeError, match="host output 'r': expected Result<Int, Bool>"):
-        run_export(checked, "app.run", RuntimeHostBindings({"host.result": lambda: Ok("x")}))
+        run_export(checked, "@app.run", RuntimeHostBindings({"host.result": lambda: Ok("x")}))
     with pytest.raises(RuntimeError, match="host output 'r': expected Result<Int, Bool>"):
-        run_export(checked, "app.run", RuntimeHostBindings({"host.result": lambda: Err(123)}))
+        run_export(checked, "@app.run", RuntimeHostBindings({"host.result": lambda: Err(123)}))
 
 
 def test_runtime_deep_nested_recursive_validation() -> None:
@@ -731,11 +794,11 @@ def test_runtime_deep_nested_recursive_validation() -> None:
     )
 
     good = (Ok({"a": (1, 2)}), Err(True))
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.deep": lambda: good})) == good
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.deep": lambda: good})) == good
 
     bad = (Ok({"a": (1, "x")}), Err(True))
     with pytest.raises(RuntimeError, match="host output 'xs': expected List<Result<Map<String, List<Int>>, Bool>>"):
-        run_export(checked, "app.run", RuntimeHostBindings({"host.deep": lambda: bad}))
+        run_export(checked, "@app.run", RuntimeHostBindings({"host.deep": lambda: bad}))
 
 
 def test_runtime_if_true_executes_then_branch() -> None:
@@ -754,7 +817,7 @@ def test_runtime_if_true_executes_then_branch() -> None:
     )
 
     seen: list[str] = []
-    run_export(checked, "app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}))
+    run_export(checked, "@app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}))
     assert seen == ["yes"]
 
 
@@ -773,7 +836,7 @@ def test_runtime_nested_if_in_nested_word() -> None:
         ";"
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}))
     assert result == 1
 
 
@@ -788,8 +851,8 @@ def test_runtime_case_bool_true_false_branches() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 1
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 2
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), True) == 1
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), False) == 2
 
 
 def test_runtime_case_produces_stack_output() -> None:
@@ -803,8 +866,8 @@ def test_runtime_case_produces_stack_output() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 1
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 2
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), True) == 1
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), False) == 2
 
 
 def test_runtime_case_can_call_nicole_word() -> None:
@@ -826,7 +889,7 @@ def test_runtime_case_can_call_nicole_word() -> None:
     )
 
     seen: list[str] = []
-    run_export(checked, "app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}), True)
+    run_export(checked, "@app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}), True)
 
     assert seen == ["yes"]
 
@@ -847,8 +910,8 @@ def test_runtime_nested_case() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({}), True) == 2
-    assert run_export(checked, "app.run", RuntimeHostBindings({}), False) == 3
+    assert run_export(checked, "@app.run", RuntimeHostBindings({}), True) == 2
+    assert run_export(checked, "@app.run", RuntimeHostBindings({}), False) == 3
 
 
 def test_runtime_case_result_ok_binding() -> None:
@@ -862,7 +925,7 @@ def test_runtime_case_result_ok_binding() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.unwrap", RuntimeHostBindings({}), Ok(42)) == 42
+    assert run_export(checked, "@app.unwrap", RuntimeHostBindings({}), Ok(42)) == 42
 
 
 def test_runtime_case_result_err_missing_key_variant() -> None:
@@ -876,7 +939,7 @@ def test_runtime_case_result_err_missing_key_variant() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.unwrap", RuntimeHostBindings({}), Err("MissingKey")) == 0
+    assert run_export(checked, "@app.unwrap", RuntimeHostBindings({}), Err("MissingKey")) == 0
 
 
 def test_runtime_case_result_err_out_of_bounds_variant() -> None:
@@ -890,7 +953,7 @@ def test_runtime_case_result_err_out_of_bounds_variant() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.unwrap", RuntimeHostBindings({}), Err("OutOfBounds")) == 0
+    assert run_export(checked, "@app.unwrap", RuntimeHostBindings({}), Err("OutOfBounds")) == 0
 
 
 def test_runtime_case_result_other_error_no_match() -> None:
@@ -905,7 +968,7 @@ def test_runtime_case_result_other_error_no_match() -> None:
     )
 
     with pytest.raises(RuntimeError, match="input 'r': expected Result<Int, MapError>"):
-        run_export(checked, "app.unwrap", RuntimeHostBindings({}), Err("Other"))
+        run_export(checked, "@app.unwrap", RuntimeHostBindings({}), Err("Other"))
 
 
 def test_runtime_propagate_ok_continues_execution() -> None:
@@ -920,7 +983,7 @@ def test_runtime_propagate_ok_continues_execution() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok(42)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(42)
 
 
 def test_runtime_propagate_err_returns_immediately() -> None:
@@ -934,7 +997,7 @@ def test_runtime_propagate_err_returns_immediately() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("MissingKey")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("MissingKey")
 
 
 def test_runtime_propagate_is_frame_local_inside_quotation() -> None:
@@ -952,7 +1015,7 @@ def test_runtime_propagate_is_frame_local_inside_quotation() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 9
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 9
 
 
 def test_runtime_propagate_multiple_in_one_frame() -> None:
@@ -971,7 +1034,7 @@ def test_runtime_propagate_multiple_in_one_frame() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("MissingKey")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("MissingKey")
 
 
 def test_runtime_case_branch_local_binding_does_not_escape_branch_scope() -> None:
@@ -1018,7 +1081,7 @@ def test_runtime_case_err_binding_returns_runtime_error_value() -> None:
             "host.fallback-error": lambda: "MissingKey",
         }
     )
-    assert run_export(checked, "app.run", runtime) == "MissingKey"
+    assert run_export(checked, "@app.run", runtime) == "MissingKey"
 
 
 def test_runtime_case_first_matching_branch_wins() -> None:
@@ -1034,7 +1097,7 @@ def test_runtime_case_first_matching_branch_wins() -> None:
     )
 
     # Wildcard comes first in source/AST order, so it must win.
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 10
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), True) == 10
 
 
 def test_runtime_case_guard_true_selects_branch() -> None:
@@ -1048,7 +1111,7 @@ def test_runtime_case_guard_true_selects_branch() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 42) == 1
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 42) == 1
 
 
 def test_runtime_case_guard_false_falls_through() -> None:
@@ -1062,7 +1125,7 @@ def test_runtime_case_guard_false_falls_through() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 42) == 2
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 42) == 2
 
 
 def test_runtime_case_pattern_mismatch_does_not_evaluate_guard() -> None:
@@ -1077,7 +1140,7 @@ def test_runtime_case_pattern_mismatch_does_not_evaluate_guard() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 2
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), False) == 2
 
 
 def test_runtime_case_guard_can_use_pattern_binding() -> None:
@@ -1092,8 +1155,8 @@ def test_runtime_case_guard_can_use_pattern_binding() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), Ok(4)) == 1
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), Ok(-4)) == 0
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), Ok(4)) == 1
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), Ok(-4)) == 0
 
 
 def test_runtime_case_first_eligible_guarded_branch_wins() -> None:
@@ -1108,7 +1171,7 @@ def test_runtime_case_first_eligible_guarded_branch_wins() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 7) == 10
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 7) == 10
 
 
 def test_runtime_case_unguarded_branch_still_works_with_guarded_branch_present() -> None:
@@ -1123,8 +1186,8 @@ def test_runtime_case_unguarded_branch_still_works_with_guarded_branch_present()
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 2
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 3
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), True) == 2
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), False) == 3
 
 
 def test_runtime_case_wildcard_guard_is_conditional() -> None:
@@ -1138,8 +1201,8 @@ def test_runtime_case_wildcard_guard_is_conditional() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 9) == 1
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), -9) == 2
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 9) == 1
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), -9) == 2
 
 
 def test_runtime_case_wildcard_guard_false_falls_through_to_unguarded_wildcard() -> None:
@@ -1153,7 +1216,7 @@ def test_runtime_case_wildcard_guard_false_falls_through_to_unguarded_wildcard()
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 0) == 2
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 0) == 2
 
 
 def test_runtime_case_no_branch_match_behavior_unchanged() -> None:
@@ -1167,7 +1230,7 @@ def test_runtime_case_no_branch_match_behavior_unchanged() -> None:
     )
 
     with pytest.raises(RuntimeError, match="runtime case match failure"):
-        run_export(checked, "app.choose", RuntimeHostBindings({}), 1)
+        run_export(checked, "@app.choose", RuntimeHostBindings({}), 1)
 
 
 def test_runtime_case_guard_does_not_leak_stack_values() -> None:
@@ -1181,8 +1244,8 @@ def test_runtime_case_guard_does_not_leak_stack_values() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), 1) == 100
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), -1) == 200
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), 1) == 100
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), -1) == 200
 
 
 def test_runtime_quote_literal_returns_runtime_quote_value() -> None:
@@ -1202,7 +1265,7 @@ def test_runtime_call_returns_literal() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 7
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 7
 
 
 def test_runtime_call_executes_arithmetic() -> None:
@@ -1213,7 +1276,7 @@ def test_runtime_call_executes_arithmetic() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 3
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 3
 
 
 def test_runtime_call_with_one_input() -> None:
@@ -1225,7 +1288,7 @@ def test_runtime_call_with_one_input() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 6
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 6
 
 
 def test_runtime_call_with_multiple_inputs() -> None:
@@ -1237,7 +1300,7 @@ def test_runtime_call_with_multiple_inputs() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 3
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 3
 
 
 def test_runtime_call_non_commutative_input_order() -> None:
@@ -1249,7 +1312,7 @@ def test_runtime_call_non_commutative_input_order() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 4
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 4
 
 
 def test_runtime_call_with_capture_end_to_end() -> None:
@@ -1262,7 +1325,7 @@ def test_runtime_call_with_capture_end_to_end() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 15
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 15
 
 
 def test_runtime_call_capture_and_input_interaction() -> None:
@@ -1275,7 +1338,7 @@ def test_runtime_call_capture_and_input_interaction() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 12
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 12
 
 
 def test_runtime_call_multiple_output_order() -> None:
@@ -1287,7 +1350,7 @@ def test_runtime_call_multiple_output_order() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (2, 1)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (2, 1)
 
 
 def test_runtime_call_can_call_nicole_word() -> None:
@@ -1302,7 +1365,7 @@ def test_runtime_call_can_call_nicole_word() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 6
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 6
 
 
 def test_runtime_call_can_call_host_word() -> None:
@@ -1317,7 +1380,7 @@ def test_runtime_call_can_call_host_word() -> None:
         host_contract=host_contract,
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.inc": lambda n: n + 1})) == 6
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.inc": lambda n: n + 1})) == 6
 
 
 def test_runtime_call_on_non_quote_is_controlled_error() -> None:
@@ -1347,7 +1410,7 @@ def test_runtime_nested_quote_executes_only_with_explicit_second_call() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 1
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 1
 
 
 def test_runtime_typed_empty_list_returns_empty_tuple() -> None:
@@ -1357,7 +1420,7 @@ def test_runtime_typed_empty_list_returns_empty_tuple() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == ()
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == ()
 
 
 def test_runtime_list_literal_returns_tuple_in_source_order() -> None:
@@ -1367,7 +1430,7 @@ def test_runtime_list_literal_returns_tuple_in_source_order() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (1, 2, 3)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (1, 2, 3)
 
 
 def test_runtime_list_literal_elements_evaluate_left_to_right() -> None:
@@ -1386,7 +1449,7 @@ def test_runtime_list_literal_elements_evaluate_left_to_right() -> None:
         counter["value"] += 1
         return counter["value"]
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.next": next_value})) == (1, 2, 3)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.next": next_value})) == (1, 2, 3)
 
 
 def test_runtime_nested_list_literal_returns_nested_tuple() -> None:
@@ -1396,7 +1459,7 @@ def test_runtime_nested_list_literal_returns_nested_tuple() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == ((1, 2), (3, 4))
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == ((1, 2), (3, 4))
 
 
 def test_runtime_quotation_inside_list_is_preserved_not_executed() -> None:
@@ -1418,7 +1481,7 @@ def test_runtime_host_result_can_be_packed_into_list_literal() -> None:
         host_contract=host_contract,
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.num": lambda: 1})) == (1, 2)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.num": lambda: 1})) == (1, 2)
 
 
 def test_runtime_list_literal_error_in_element_aborts_construction() -> None:
@@ -1435,7 +1498,7 @@ def test_runtime_list_literal_error_in_element_aborts_construction() -> None:
         raise ValueError("boom")
 
     with pytest.raises(RuntimeError, match="runtime host error: host.fail"):
-        run_export(checked, "app.run", RuntimeHostBindings({"host.fail": fail}))
+        run_export(checked, "@app.run", RuntimeHostBindings({"host.fail": fail}))
 
 
 def test_runtime_list_len_typed_empty_list_is_zero() -> None:
@@ -1446,7 +1509,7 @@ def test_runtime_list_len_typed_empty_list_is_zero() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 0
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 0
 
 
 def test_runtime_list_len_non_empty_list_literal() -> None:
@@ -1457,7 +1520,7 @@ def test_runtime_list_len_non_empty_list_literal() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 3
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 3
 
 
 def test_runtime_list_len_nested_list_counts_top_level_only() -> None:
@@ -1468,7 +1531,7 @@ def test_runtime_list_len_nested_list_counts_top_level_only() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 3
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 3
 
 
 def test_runtime_list_len_quotation_inside_list_counts_as_one() -> None:
@@ -1479,7 +1542,7 @@ def test_runtime_list_len_quotation_inside_list_counts_as_one() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 2
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 2
 
 
 def test_runtime_list_len_malformed_runtime_value_is_controlled_error() -> None:
@@ -1507,8 +1570,8 @@ def test_runtime_list_is_empty_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.empty", RuntimeHostBindings({})) is True
-    assert run_export(checked, "app.non-empty", RuntimeHostBindings({})) is False
+    assert run_export(checked, "@app.empty", RuntimeHostBindings({})) is True
+    assert run_export(checked, "@app.non-empty", RuntimeHostBindings({})) is False
 
 
 def test_runtime_list_first_and_last_execute() -> None:
@@ -1521,8 +1584,8 @@ def test_runtime_list_first_and_last_execute() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.first", RuntimeHostBindings({})) == Ok(10)
-    assert run_export(checked, "app.last", RuntimeHostBindings({})) == Ok(30)
+    assert run_export(checked, "@app.first", RuntimeHostBindings({})) == Ok(10)
+    assert run_export(checked, "@app.last", RuntimeHostBindings({})) == Ok(30)
 
 
 def test_runtime_list_first_and_last_empty_return_out_of_bounds_error() -> None:
@@ -1535,8 +1598,8 @@ def test_runtime_list_first_and_last_empty_return_out_of_bounds_error() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.first-empty", RuntimeHostBindings({})) == Err("OutOfBounds")
-    assert run_export(checked, "app.last-empty", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.first-empty", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.last-empty", RuntimeHostBindings({})) == Err("OutOfBounds")
 
 
 def test_runtime_list_append_and_reverse_execute() -> None:
@@ -1549,8 +1612,8 @@ def test_runtime_list_append_and_reverse_execute() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.append", RuntimeHostBindings({})) == (1, 2, 3)
-    assert run_export(checked, "app.reverse", RuntimeHostBindings({})) == (3, 2, 1)
+    assert run_export(checked, "@app.append", RuntimeHostBindings({})) == (1, 2, 3)
+    assert run_export(checked, "@app.reverse", RuntimeHostBindings({})) == (3, 2, 1)
 
 
 def test_runtime_list_push_is_not_available_in_v1_surface() -> None:
@@ -1574,7 +1637,7 @@ def test_runtime_list_set_valid_replacement_returns_ok() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok((99, 20, 30))
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok((99, 20, 30))
 
 
 def test_runtime_list_set_replacement_in_middle_position() -> None:
@@ -1587,7 +1650,7 @@ def test_runtime_list_set_replacement_in_middle_position() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok((10, 99, 30))
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok((10, 99, 30))
 
 
 def test_runtime_list_set_replacement_in_last_position() -> None:
@@ -1600,7 +1663,7 @@ def test_runtime_list_set_replacement_in_last_position() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok((10, 20, 99))
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok((10, 20, 99))
 
 
 def test_runtime_list_set_empty_list_returns_out_of_bounds() -> None:
@@ -1613,7 +1676,7 @@ def test_runtime_list_set_empty_list_returns_out_of_bounds() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
 
 
 def test_runtime_list_set_negative_index_returns_out_of_bounds() -> None:
@@ -1626,7 +1689,7 @@ def test_runtime_list_set_negative_index_returns_out_of_bounds() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
 
 
 def test_runtime_list_set_index_equal_to_length_returns_out_of_bounds() -> None:
@@ -1639,7 +1702,7 @@ def test_runtime_list_set_index_equal_to_length_returns_out_of_bounds() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
 
 
 def test_runtime_list_set_index_greater_than_length_returns_out_of_bounds() -> None:
@@ -1652,7 +1715,7 @@ def test_runtime_list_set_index_greater_than_length_returns_out_of_bounds() -> N
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
 
 
 def test_runtime_list_set_nested_tuple_is_preserved() -> None:
@@ -1665,7 +1728,7 @@ def test_runtime_list_set_nested_tuple_is_preserved() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok(((1,), (9,), (3,)))
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(((1,), (9,), (3,)))
 
 
 def test_runtime_list_set_runtime_quote_is_preserved() -> None:
@@ -1694,7 +1757,7 @@ def test_runtime_list_set_preserves_stored_ok_value() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.ok": lambda: stored_ok}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.ok": lambda: stored_ok}))
     assert isinstance(result, Ok)
     assert result.value == (stored_ok,)
     assert result.value[0] is stored_ok
@@ -1714,7 +1777,7 @@ def test_runtime_list_set_preserves_stored_err_value() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.err": lambda: stored_err}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.err": lambda: stored_err}))
     assert isinstance(result, Ok)
     assert result.value == (stored_err,)
     assert result.value[0] is stored_err
@@ -1790,7 +1853,7 @@ def test_runtime_list_get_valid_index_zero_returns_ok() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok(10)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(10)
 
 
 def test_runtime_list_get_valid_middle_index_returns_ok() -> None:
@@ -1802,7 +1865,7 @@ def test_runtime_list_get_valid_middle_index_returns_ok() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok(20)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(20)
 
 
 def test_runtime_list_get_valid_last_index_returns_ok() -> None:
@@ -1814,7 +1877,7 @@ def test_runtime_list_get_valid_last_index_returns_ok() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Ok(30)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Ok(30)
 
 
 def test_runtime_list_get_empty_list_access_returns_out_of_bounds() -> None:
@@ -1826,7 +1889,7 @@ def test_runtime_list_get_empty_list_access_returns_out_of_bounds() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
 
 
 def test_runtime_list_get_index_equal_to_length_returns_out_of_bounds() -> None:
@@ -1838,7 +1901,7 @@ def test_runtime_list_get_index_equal_to_length_returns_out_of_bounds() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
 
 
 def test_runtime_list_get_index_greater_than_length_returns_out_of_bounds() -> None:
@@ -1850,7 +1913,7 @@ def test_runtime_list_get_index_greater_than_length_returns_out_of_bounds() -> N
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
 
 
 def test_runtime_list_get_negative_index_returns_out_of_bounds() -> None:
@@ -1862,7 +1925,7 @@ def test_runtime_list_get_negative_index_returns_out_of_bounds() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("OutOfBounds")
 
 
 def test_runtime_list_get_nested_tuple_returned_unchanged() -> None:
@@ -1941,7 +2004,7 @@ def test_runtime_list_get_preserves_stored_ok_value() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.ok": lambda: stored_ok}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.ok": lambda: stored_ok}))
     assert isinstance(result, Ok)
     assert result.value is stored_ok
     assert result.value == stored_ok
@@ -1960,7 +2023,7 @@ def test_runtime_list_get_preserves_stored_err_value() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.err": lambda: stored_err}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.err": lambda: stored_err}))
     assert isinstance(result, Ok)
     assert result.value is stored_err
     assert result.value == stored_err
@@ -1979,7 +2042,7 @@ def test_runtime_list_get_preserves_stored_tuple_identity() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.tuple": lambda: stored_tuple}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.tuple": lambda: stored_tuple}))
     assert isinstance(result, Ok)
     assert result.value is stored_tuple
     assert result.value == stored_tuple
@@ -1992,7 +2055,7 @@ def test_runtime_map_empty_returns_empty_dict() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == {}
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == {}
 
 
 def test_runtime_map_get_int_key_returns_ok() -> None:
@@ -2007,7 +2070,7 @@ def test_runtime_map_get_int_key_returns_ok() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {1: "one"}}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {1: "one"}}))
     assert result == Ok("one")
 
 
@@ -2023,7 +2086,7 @@ def test_runtime_map_get_string_key_returns_ok() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"hello": 7}}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {"hello": 7}}))
     assert result == Ok(7)
 
 
@@ -2039,7 +2102,7 @@ def test_runtime_map_get_bool_key_returns_ok() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {True: 7}}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {True: 7}}))
     assert result == Ok(7)
 
 
@@ -2052,7 +2115,7 @@ def test_runtime_map_get_missing_key_returns_missing_key() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("MissingKey")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("MissingKey")
 
 
 def test_runtime_map_get_nested_tuple_is_preserved() -> None:
@@ -2068,7 +2131,7 @@ def test_runtime_map_get_nested_tuple_is_preserved() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"pair": stored_tuple}}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {"pair": stored_tuple}}))
     assert isinstance(result, Ok)
     assert result.value is stored_tuple
     assert result.value == stored_tuple
@@ -2094,7 +2157,7 @@ def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
         host_contract=host_contract,
     )
 
-    result_ok = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"ok": stored_ok, "err": stored_err}}))
+    result_ok = run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {"ok": stored_ok, "err": stored_err}}))
     assert isinstance(result_ok, Ok)
     assert result_ok.value is stored_ok
     assert result_ok.value == stored_ok
@@ -2107,7 +2170,7 @@ def test_runtime_map_get_stored_ok_and_err_values_are_preserved() -> None:
         ";\n",
         host_contract=host_contract,
     )
-    result_err = run_export(checked_err, "app.run", RuntimeHostBindings({"host.map": lambda: {"ok": stored_ok, "err": stored_err}}))
+    result_err = run_export(checked_err, "@app.run", RuntimeHostBindings({"host.map": lambda: {"ok": stored_ok, "err": stored_err}}))
     assert isinstance(result_err, Ok)
     assert result_err.value is stored_err
     assert result_err.value == stored_err
@@ -2150,7 +2213,7 @@ def test_runtime_map_contains_existing_key_returns_true() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"hello": 7}}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {"hello": 7}}))
     assert result is True
 
 
@@ -2163,7 +2226,7 @@ def test_runtime_map_contains_missing_key_returns_false() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) is False
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) is False
 
 
 def test_runtime_map_contains_bool_key_returns_true() -> None:
@@ -2178,7 +2241,7 @@ def test_runtime_map_contains_bool_key_returns_true() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {True: 7}}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {True: 7}}))
     assert result is True
 
 
@@ -2237,7 +2300,7 @@ def test_runtime_map_set_inserts_new_int_key() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == {1: "one"}
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == {1: "one"}
 
 
 def test_runtime_map_set_updates_existing_int_key() -> None:
@@ -2253,7 +2316,7 @@ def test_runtime_map_set_updates_existing_int_key() -> None:
         host_contract=host_contract,
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {1: "one"}})) == {1: "uno"}
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {1: "one"}})) == {1: "uno"}
 
 
 def test_runtime_map_set_string_key() -> None:
@@ -2266,7 +2329,7 @@ def test_runtime_map_set_string_key() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == {"hello": 7}
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == {"hello": 7}
 
 
 def test_runtime_map_set_bool_key() -> None:
@@ -2279,7 +2342,7 @@ def test_runtime_map_set_bool_key() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == {True: 7}
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == {True: 7}
 
 
 def test_runtime_map_set_returns_new_dict_and_preserves_original() -> None:
@@ -2296,7 +2359,7 @@ def test_runtime_map_set_returns_new_dict_and_preserves_original() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: host_map}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: host_map}))
     assert result == {1: "one", 2: "two"}
     assert result is not host_map
     assert host_map == {1: "one"}
@@ -2315,7 +2378,7 @@ def test_runtime_map_set_preserves_nested_tuple_value() -> None:
         ";\n"
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}))
     assert result == Ok(stored_tuple)
 
 
@@ -2350,7 +2413,7 @@ def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
     )
     result_ok = run_export(
         checked_ok,
-        "app.run",
+            "@app.run",
         RuntimeHostBindings({"host.ok": lambda: stored_ok, "host.err": lambda: stored_err}),
     )
     assert isinstance(result_ok, Ok)
@@ -2369,7 +2432,7 @@ def test_runtime_map_set_preserves_stored_ok_and_err_values() -> None:
     )
     result_err = run_export(
         checked_err,
-        "app.run",
+            "@app.run",
         RuntimeHostBindings({"host.ok": lambda: stored_ok, "host.err": lambda: stored_err}),
     )
     assert isinstance(result_err, Ok)
@@ -2419,7 +2482,7 @@ def test_runtime_map_remove_existing_key_returns_ok_new_dict() -> None:
         host_contract=host_contract,
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {1: "one", 2: "two"}})) == Ok({2: "two"})
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {1: "one", 2: "two"}})) == Ok({2: "two"})
 
 
 def test_runtime_map_remove_missing_key_returns_missing_key() -> None:
@@ -2431,7 +2494,7 @@ def test_runtime_map_remove_missing_key_returns_missing_key() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == Err("MissingKey")
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == Err("MissingKey")
 
 
 def test_runtime_map_remove_returns_new_dict_and_preserves_original() -> None:
@@ -2447,7 +2510,7 @@ def test_runtime_map_remove_returns_new_dict_and_preserves_original() -> None:
         host_contract=host_contract,
     )
 
-    result = run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: host_map}))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: host_map}))
     assert result == Ok({2: "two"})
     assert isinstance(result, Ok)
     assert result.value is not host_map
@@ -2466,7 +2529,7 @@ def test_runtime_map_remove_string_key() -> None:
         host_contract=host_contract,
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {"hello": 7, "bye": 9}})) == Ok({"bye": 9})
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {"hello": 7, "bye": 9}})) == Ok({"bye": 9})
 
 
 def test_runtime_map_remove_bool_key() -> None:
@@ -2481,7 +2544,7 @@ def test_runtime_map_remove_bool_key() -> None:
         host_contract=host_contract,
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({"host.map": lambda: {True: 7, False: 9}})) == Ok({False: 9})
+    assert run_export(checked, "@app.run", RuntimeHostBindings({"host.map": lambda: {True: 7, False: 9}})) == Ok({False: 9})
 
 
 def test_runtime_map_remove_preserves_remaining_nested_values() -> None:
@@ -2499,7 +2562,7 @@ def test_runtime_map_remove_preserves_remaining_nested_values() -> None:
 
     result = run_export(
         checked,
-        "app.run",
+        "@app.run",
         RuntimeHostBindings({"host.map": lambda: {"drop": (9,), "keep": stored_tuple}}),
     )
     assert isinstance(result, Ok)
@@ -2550,7 +2613,7 @@ def test_runtime_list_map_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (2, 3)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (2, 3)
 
 
 def test_runtime_list_map_inside_quote_executes() -> None:
@@ -2565,7 +2628,7 @@ def test_runtime_list_map_inside_quote_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (2, 3)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (2, 3)
 
 
 def test_runtime_list_filter_executes() -> None:
@@ -2577,7 +2640,7 @@ def test_runtime_list_filter_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (1, 2, 3, 4)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (1, 2, 3, 4)
 
 
 def test_runtime_list_fold_executes() -> None:
@@ -2590,7 +2653,7 @@ def test_runtime_list_fold_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 16
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 16
 
 
 def test_runtime_list_reduce_executes() -> None:
@@ -2602,7 +2665,7 @@ def test_runtime_list_reduce_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 9
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 9
 
 
 def test_runtime_list_reduce_empty_from_host_is_runtime_error() -> None:
@@ -2620,7 +2683,7 @@ def test_runtime_list_reduce_empty_from_host_is_runtime_error() -> None:
     )
 
     with pytest.raises(RuntimeError, match="list.reduce cannot be applied to empty list at runtime"):
-        run_export(checked, "app.run", RuntimeHostBindings({"host.list": lambda: ()}))
+        run_export(checked, "@app.run", RuntimeHostBindings({"host.list": lambda: ()}))
 
 
 def test_runtime_list_map_with_nested_quote_executes() -> None:
@@ -2636,7 +2699,7 @@ def test_runtime_list_map_with_nested_quote_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == (11, 12)
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == (11, 12)
 
 
 def test_runtime_result_is_ok_executes() -> None:
@@ -2647,7 +2710,7 @@ def test_runtime_result_is_ok_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) is True
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) is True
 
 
 def test_runtime_result_is_err_executes() -> None:
@@ -2658,7 +2721,7 @@ def test_runtime_result_is_err_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) is True
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) is True
 
 
 def test_runtime_err_constructor_preserves_generic_error_values() -> None:
@@ -2682,11 +2745,11 @@ def test_runtime_err_constructor_preserves_generic_error_values() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.err-string", RuntimeHostBindings({})) == Err("abc")
-    assert run_export(checked, "app.err-int", RuntimeHostBindings({})) == Err(123)
-    assert run_export(checked, "app.err-bool", RuntimeHostBindings({})) == Err(True)
-    assert run_export(checked, "app.err-list", RuntimeHostBindings({})) == Err(("x", "y"))
-    assert run_export(checked, "app.err-map", RuntimeHostBindings({})) == Err({"k": 7})
+    assert run_export(checked, "@app.err-string", RuntimeHostBindings({})) == Err("abc")
+    assert run_export(checked, "@app.err-int", RuntimeHostBindings({})) == Err(123)
+    assert run_export(checked, "@app.err-bool", RuntimeHostBindings({})) == Err(True)
+    assert run_export(checked, "@app.err-list", RuntimeHostBindings({})) == Err(("x", "y"))
+    assert run_export(checked, "@app.err-map", RuntimeHostBindings({})) == Err({"k": 7})
 
 
 def test_runtime_result_unwrap_or_executes() -> None:
@@ -2707,8 +2770,8 @@ def test_runtime_result_unwrap_or_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.ok", RuntimeHostBindings({})) == 7
-    assert run_export(checked, "app.err", RuntimeHostBindings({})) == 9
+    assert run_export(checked, "@app.ok", RuntimeHostBindings({})) == 7
+    assert run_export(checked, "@app.err", RuntimeHostBindings({})) == 9
 
 
 def test_runtime_map_len_executes() -> None:
@@ -2721,7 +2784,7 @@ def test_runtime_map_len_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({})) == 2
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 2
 
 
 def test_runtime_map_is_empty_executes() -> None:
@@ -2734,8 +2797,8 @@ def test_runtime_map_is_empty_executes() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.empty", RuntimeHostBindings({})) is True
-    assert run_export(checked, "app.non-empty", RuntimeHostBindings({})) is False
+    assert run_export(checked, "@app.empty", RuntimeHostBindings({})) is True
+    assert run_export(checked, "@app.non-empty", RuntimeHostBindings({})) is False
 
 
 def test_runtime_map_keys_and_values_preserve_insertion_order() -> None:
@@ -2754,8 +2817,8 @@ def test_runtime_map_keys_and_values_preserve_insertion_order() -> None:
         ";\n"
     )
 
-    assert run_export(checked, "app.keys", RuntimeHostBindings({})) == ("a", "b")
-    assert run_export(checked, "app.values", RuntimeHostBindings({})) == (1, 2)
+    assert run_export(checked, "@app.keys", RuntimeHostBindings({})) == ("a", "b")
+    assert run_export(checked, "@app.values", RuntimeHostBindings({})) == (1, 2)
 
 
 def test_runtime_if_false_executes_else_branch() -> None:
@@ -2774,7 +2837,7 @@ def test_runtime_if_false_executes_else_branch() -> None:
     )
 
     seen: list[str] = []
-    run_export(checked, "app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}))
+    run_export(checked, "@app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}))
 
     assert seen == ["no"]
 
@@ -2798,7 +2861,7 @@ def test_runtime_if_can_call_nicole_word() -> None:
     )
 
     seen: list[str] = []
-    run_export(checked, "app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}), True)
+    run_export(checked, "@app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}), True)
 
     assert seen == ["yes"]
 
@@ -2814,8 +2877,8 @@ def test_runtime_if_can_produce_stack_output() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), True) == 1
-    assert run_export(checked, "app.choose", RuntimeHostBindings({}), False) == 2
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), True) == 1
+    assert run_export(checked, "@app.choose", RuntimeHostBindings({}), False) == 2
 
 
 def test_runtime_nested_if_simple() -> None:
@@ -2833,5 +2896,5 @@ def test_runtime_nested_if_simple() -> None:
         ";"
     )
 
-    assert run_export(checked, "app.run", RuntimeHostBindings({}), True) == 1
-    assert run_export(checked, "app.run", RuntimeHostBindings({}), False) == 3
+    assert run_export(checked, "@app.run", RuntimeHostBindings({}), True) == 1
+    assert run_export(checked, "@app.run", RuntimeHostBindings({}), False) == 3

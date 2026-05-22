@@ -12,9 +12,11 @@ from .ast_nodes import (
     IfNode,
     ListLiteralNode,
     LiteralNode,
+    ModuleDeclaration,
     OperatorNode,
     PatternKind,
     PatternNode,
+    ProgramNode,
     PropagateNode,
     QuoteNode,
     ResultErrNode,
@@ -128,7 +130,7 @@ def run_export(
     if export_word is None:
         raise RuntimeError(f"missing export: {export_name}")
 
-    word_index = _index_words(checked.program.words)
+    word_index = _index_words(checked.program)
     export_def = word_index.get(export_word.internal_name)
     if export_def is None:
         raise RuntimeError(f"missing export definition: {export_word.internal_name}")
@@ -142,13 +144,34 @@ def run_export(
     )
 
 
-def _index_words(words: tuple[WordDefNode, ...], owner: str | None = None) -> dict[str, WordDefNode]:
+def _index_words(program: ProgramNode) -> dict[str, WordDefNode]:
     index: dict[str, WordDefNode] = {}
-    for word in words:
-        qualified = word.name if owner is None else f"{owner}.{word.name}"
-        index[qualified] = word
-        index.update(_index_words(word.nested_words, owner=qualified))
+
+    for declaration in program.declarations:
+        if not isinstance(declaration, ModuleDeclaration):
+            continue
+        module_name = ".".join(declaration.name.parts)
+        for item in declaration.items:
+            if isinstance(item, WordDefNode):
+                _index_module_words(index, item, module_name=module_name, owner=None)
     return index
+
+
+def _index_module_words(
+    index: dict[str, WordDefNode],
+    word: WordDefNode,
+    *,
+    module_name: str,
+    owner: str | None,
+) -> None:
+    qualified = (
+        f"@{module_name}.{word.name}"
+        if owner is None
+        else f"{owner}.{word.name}"
+    )
+    index[qualified] = word
+    for nested in word.nested_words:
+        _index_module_words(index, nested, module_name=module_name, owner=qualified)
 
 
 def _invoke_word(
@@ -561,9 +584,10 @@ def _execute_identifier(
     if isinstance(symbol, WordSymbol) and symbol.source is SymbolSource.BUILTIN:
         raise RuntimeError(f"runtime feature not supported: builtin {node.name}")
 
-    word = word_index.get(symbol.qualified_name)
+    runtime_name = _runtime_symbol_name(symbol)
+    word = word_index.get(runtime_name)
     if word is None:
-        raise RuntimeError(f"missing Nicole word definition at runtime: {symbol.qualified_name}")
+        raise RuntimeError(f"missing Nicole word definition at runtime: {runtime_name}")
 
     input_values: list[object] = []
     for _ in word.signature.inputs:
@@ -573,7 +597,7 @@ def _execute_identifier(
     if (
         node.resolution.is_self_tail_call
         and current_word_name is not None
-        and symbol.qualified_name == current_word_name
+        and runtime_name == current_word_name
     ):
         raise _SelfTailCallSignal(next_args)
 
@@ -582,7 +606,7 @@ def _execute_identifier(
         word_index,
         runtime_bindings,
         next_args,
-        current_word_name=symbol.qualified_name,
+        current_word_name=runtime_name,
     )
 
     if len(word.signature.outputs) == 0:
@@ -594,6 +618,12 @@ def _execute_identifier(
         raise RuntimeError(f"wrong runtime signature for {word.name}: expected tuple outputs")
     for value in result:
         stack.push(value)
+
+
+def _runtime_symbol_name(symbol: WordSymbol) -> str:
+    if symbol.module is None:
+        raise RuntimeError(f"runtime symbol missing module ownership: {symbol.name}")
+    return f"@{symbol.module}.{symbol.qualified_name}"
 
 
 def _execute_host_call(node: IdentifierNode, stack: RuntimeStack, runtime_bindings: RuntimeHostBindings) -> None:

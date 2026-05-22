@@ -7,11 +7,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.ast_nodes import IdentifierNode, ModuleDeclaration, WordDefNode
 from nicole.checker import CheckerError
-from nicole.host_abi import HostEffect, HostWord, host_contract_from_words
+from nicole.host_abi import HostABIError, HostEffect, HostWord, host_contract_from_words
 from nicole.pipeline import CheckedProgram, analyze_program
 from nicole.resolver import ResolutionError
 from nicole.parser import Parser
 from nicole.lexer import lex
+from nicole.symbols import SymbolError
 
 
 def _parse_source(source: str):
@@ -290,3 +291,87 @@ def test_pipeline_does_not_mark_cross_module_same_name_tail_call_as_self() -> No
     assert call.resolution.is_self_tail_call is False
     assert call.resolution.resolved_symbol is not None
     assert call.resolution.resolved_symbol.module == "b"
+
+
+def test_pipeline_exposes_canonical_export_contract() -> None:
+    result = analyze_program(
+        "module @app\n"
+        "  : run { -- n:Int }\n"
+        "    42\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n"
+    )
+
+    assert "@app.run" in result.export_contract.words
+    export_word = result.export_contract.words["@app.run"]
+    assert export_word.export_name == "@app.run"
+    assert export_word.internal_name == "@app.run"
+
+
+def test_pipeline_export_survives_full_collection_and_abi_path() -> None:
+    result = analyze_program(
+        "module @app\n"
+        "  : run { msg:String -- }\n"
+        "    msg drop\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n"
+    )
+
+    assert list(result.export_contract.words.keys()) == ["@app.run"]
+    assert result.export_contract.words["@app.run"].signature is result.symbols.words["run"][0].signature
+
+
+def test_pipeline_valid_export_coexists_with_import_aliases() -> None:
+    result = analyze_program(
+        "module @core\n"
+        "  : run { -- n:Int }\n"
+        "    7\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n"
+        "import @core as c\n"
+        "module @app\n"
+        "  : run { -- n:Int }\n"
+        "    c.run\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n"
+    )
+
+    assert set(result.export_contract.words.keys()) == {"@core.run", "@app.run"}
+
+
+def test_pipeline_invalid_export_target_is_compile_time_error() -> None:
+    with pytest.raises(SymbolError, match="export target does not exist"):
+        analyze_program(
+            "module @app\n"
+            "  export : missing\n"
+            "end-module\n"
+        )
+
+
+def test_pipeline_rejects_export_of_subword() -> None:
+    with pytest.raises(SymbolError, match="module-level"):
+        analyze_program(
+            "module @app\n"
+            "  : parent { -- }\n"
+            "    : child { -- }\n"
+            "    ;\n"
+            "  ;\n"
+            "  export : child\n"
+            "end-module\n"
+        )
+
+
+def test_pipeline_export_abi_validation_is_preserved() -> None:
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        analyze_program(
+            "module @app\n"
+            "  : run { -- q:Quote<{ | -- }> }\n"
+            "    :[ | -- | ;]\n"
+            "  ;\n"
+            "  export : run\n"
+            "end-module\n"
+        )

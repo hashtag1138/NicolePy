@@ -519,7 +519,7 @@ Residual gaps:
 
 ## Phase 3 — Export declarations and canonical ABI
 
-Status: `pending`
+Status: `complete`
 
 Goal:
 - Implement export declaration semantics and canonical ABI publication using `@module.word`.
@@ -558,17 +558,32 @@ Exit criteria:
 Notes:
 - Runtime changes should remain minimal normalization only.
 
+Implementation decisions:
+- Treat `export : word` as a declaration-only module item in signature collection by resolving it to an existing same-module module-level `WordSymbol` and marking that symbol as `Visibility.EXPORT`.
+- Keep parser, resolver, and checker semantics unchanged; enforce export-target validation in signature collection and canonical export publication in host ABI collection.
+- Publish canonical host-visible names with preserved `@` prefix (`@module.word`) and keep runtime export lookup normalized to canonical/module-qualified identities.
+
 Modified files:
-- none
+- `src/nicole/signature_collector.py`
+- `src/nicole/host_abi.py`
+- `src/nicole/runtime.py`
+- `tests/test_host_abi.py`
+- `tests/test_pipeline.py`
+- `tests/test_runtime.py`
+- `IMPLEMENTATION_PLAN_MODULES.md`
 
 Validation results:
-- none
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_host_abi.py tests/test_pipeline.py tests/test_runtime.py -q`
+- `32 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_signature_collector.py tests/test_resolver.py tests/test_checker.py tests/test_pipeline.py tests/test_host_abi.py tests/test_runtime.py -q`
+- `292 passed`
+- Phase 3 export/canonical-ABI/runtime-lookup validation executed
 
 Blockers:
 - none
 
 Residual gaps:
-- none
+- Runtime/ABI/export tests were migrated for strict module-local exports, but broader legacy-syntax cleanup across remaining docs/tests stays in Phase 4 scope.
 
 ---
 
@@ -682,8 +697,8 @@ Residual gaps:
 | Phase 2A | complete |
 | Phase 2B | complete |
 | Phase 2C | complete |
-| Phase 2D | pending |
-| Phase 3 | pending |
+| Phase 2D | complete |
+| Phase 3 | complete |
 | Phase 4 | pending |
 | Phase 5 | pending |
 
@@ -714,3 +729,5 @@ Residual gaps:
 - Phase 2C completed with checker-local module-aware identity for effect graph and tail-call analysis, plus checker test migration to module-contained fixtures.
 - Corrected Phase 2D boundary to allow `src/nicole/standard_symbols.py` strictly for metadata preservation across standard-symbol augmentation (`modules`, `imports`, `aliases`, and module ownership metadata).
 - Phase 2D completed: preserved metadata through `with_standard_symbols()` and migrated pipeline tests to module-aware end-to-end integration scenarios without expanding into Phase 3 export ABI work.
+- Phase 3 completed with module-local export declaration validation, canonical `@module.word` host ABI publication, runtime canonical export lookup normalization, and module-aware ABI/pipeline/runtime export tests.
+- Corrected Phase 3 tracking table after audit recovery.
