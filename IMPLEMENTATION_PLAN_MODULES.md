@@ -105,7 +105,7 @@ Residual gaps:
 
 ## Phase 1B — Parser module syntax
 
-Status: `pending`
+Status: `complete`
 
 Goal:
 - Implement parser support for module/import/include/export declarations with strict public syntax aligned to spec.
@@ -147,16 +147,23 @@ Notes:
 - Any temporary compatibility aid must stay internal to tests and must not alter public parser behavior.
 
 Modified files:
-- none
+- `src/nicole/parser.py`
+- `src/nicole/ast_nodes.py`
+- `tests/test_parser.py`
 
 Validation results:
-- none
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_parser.py -q`
+- `84 passed`
+- Phase 1B audit passed
 
 Blockers:
 - none
 
 Residual gaps:
-- none
+- Import/alias semantics deferred to Phase 2
+- Collision checks deferred to Phase 2
+- Cycle checks deferred to Phase 2
+- Checker/resolver/runtime/ABI integration unchanged
 
 ---
 
@@ -425,7 +432,7 @@ Residual gaps:
 | Phase | Status |
 |---|---|
 | Phase 1A | complete |
-| Phase 1B | pending |
+| Phase 1B | complete |
 | Phase 1C | pending |
 | Phase 2 | pending |
 | Phase 3 | pending |
@@ -444,3 +451,5 @@ Residual gaps:
 - Corrected lexer handling for identifier grammar compatibility with spec.
 - Phase 1A completed and passed audit.
 - Consolidated duplicate Phase 1A tracking entries.
+- Phase 1B moved to in-progress with module/import/include/export declaration parsing.
+- Phase 1B completed and passed audit.

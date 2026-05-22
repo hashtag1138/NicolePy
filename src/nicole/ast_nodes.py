@@ -100,6 +100,7 @@ class AtomNode(ASTNode):
 @dataclass(slots=True)
 class ProgramNode(ASTNode):
     words: tuple[WordDefNode, ...] = field(default_factory=tuple)
+    declarations: tuple[ASTNode, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True)
@@ -110,6 +111,7 @@ class QualifiedModuleName(ASTNode):
 @dataclass(slots=True)
 class ModuleDeclaration(ASTNode):
     name: QualifiedModuleName
+    items: tuple[ASTNode, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True)

@@ -9,17 +9,22 @@ from .ast_nodes import (
     BlockNode,
     CaseBranchNode,
     CaseNode,
+    ExportDeclaration,
     IdentifierNode,
+    ImportDeclaration,
+    IncludeDeclaration,
     IfNode,
     LiteralKind,
     LiteralNode,
     ListLiteralNode,
+    ModuleDeclaration,
     OperatorNode,
     ParameterNode,
     PatternKind,
     PatternNode,
     PropagateNode,
     ProgramNode,
+    QualifiedModuleName,
     QuoteEffect,
     QuoteNode,
     ResultErrNode,
@@ -84,15 +89,91 @@ class Parser:
         self._index = 0
 
     def parse(self) -> ProgramNode:
+        declarations: list[ASTNode] = []
         words: list[WordDefNode] = []
         span = self._current().span
 
         while not self._check(TokenKind.EOF):
-            if not self._is_word_def_start():
-                self._raise_error("unexpected token")
-            words.append(self._parse_word_def(is_top_level=True))
+            declaration = self._parse_top_level_declaration()
+            declarations.append(declaration)
+            if isinstance(declaration, ModuleDeclaration):
+                words.extend(
+                    item for item in declaration.items if isinstance(item, WordDefNode)
+                )
 
-        return ProgramNode(span=span, words=tuple(words))
+        return ProgramNode(
+            span=span,
+            words=tuple(words),
+            declarations=tuple(declarations),
+        )
+
+    def _parse_top_level_declaration(self) -> ASTNode:
+        if self._check(TokenKind.MODULE):
+            return self._parse_module_declaration()
+        if self._check(TokenKind.IMPORT):
+            return self._parse_import_declaration()
+        if self._check(TokenKind.INCLUDE):
+            return self._parse_include_declaration()
+        if self._check(TokenKind.EXPORT):
+            self._raise_error("export declaration is only allowed inside module")
+        if self._is_word_def_start():
+            self._raise_error("top-level word definition is not allowed")
+        self._raise_error("unexpected token")
+
+    def _parse_module_declaration(self) -> ModuleDeclaration:
+        start = self._expect(TokenKind.MODULE, "expected 'module'")
+        module_name = self._parse_qualified_module_name("expected module name")
+        items: list[ASTNode] = []
+
+        while not self._check(TokenKind.END_MODULE):
+            if self._check(TokenKind.EOF):
+                self._raise_error("missing 'end-module'")
+            if self._check(TokenKind.MODULE):
+                self._raise_error("nested module declaration is not allowed")
+            if self._check(TokenKind.IMPORT) or self._check(TokenKind.INCLUDE):
+                self._raise_error("unexpected token")
+            if self._check(TokenKind.EXPORT):
+                items.append(self._parse_export_declaration())
+                continue
+            if self._is_word_def_start():
+                items.append(self._parse_word_def(is_top_level=False))
+                continue
+            self._raise_error("unexpected token")
+
+        self._expect(TokenKind.END_MODULE, "missing 'end-module'")
+        return ModuleDeclaration(
+            span=start.span,
+            name=module_name,
+            items=tuple(items),
+        )
+
+    def _parse_import_declaration(self) -> ImportDeclaration:
+        start = self._expect(TokenKind.IMPORT, "expected 'import'")
+        target = self._parse_qualified_module_name("expected import target")
+        alias: str | None = None
+        if self._check(TokenKind.IDENTIFIER) and self._current().lexeme == "as":
+            self._advance()
+            alias_token = self._expect(TokenKind.IDENTIFIER, "expected alias after 'as'")
+            alias = alias_token.lexeme
+        return ImportDeclaration(span=start.span, target=target, alias=alias)
+
+    def _parse_include_declaration(self) -> IncludeDeclaration:
+        start = self._expect(TokenKind.INCLUDE, "expected 'include'")
+        path_token = self._expect(TokenKind.STRING_LITERAL, "expected include path string")
+        return IncludeDeclaration(span=start.span, path=path_token.lexeme)
+
+    def _parse_export_declaration(self) -> ExportDeclaration:
+        start = self._expect(TokenKind.EXPORT, "expected 'export'")
+        self._expect(TokenKind.COLON, "expected ':' after export")
+        word_token = self._expect_definition_identifier("expected exported word name")
+        if "." in word_token.lexeme:
+            self._raise_error("export declaration expects local word name")
+        return ExportDeclaration(span=start.span, word_name=word_token.lexeme)
+
+    def _parse_qualified_module_name(self, message: str) -> QualifiedModuleName:
+        token = self._expect(TokenKind.QUALIFIED_MODULE_NAME, message)
+        parts = tuple(token.lexeme[1:].split("."))
+        return QualifiedModuleName(span=token.span, parts=parts)
 
     def _parse_word_def(self, *, is_top_level: bool) -> WordDefNode:
         start = self._current().span
@@ -104,13 +185,6 @@ class Parser:
             if self._match(TokenKind.DIRTY):
                 is_dirty_annotation = True
             self._expect(TokenKind.COLON, "expected ':' after pub")
-        elif self._match(TokenKind.EXPORT):
-            if not is_top_level:
-                self._raise_error("export is only allowed for top-level words")
-            visibility = Visibility.EXPORT
-            if self._match(TokenKind.DIRTY):
-                is_dirty_annotation = True
-            self._expect(TokenKind.COLON, "expected ':' after export")
         elif self._match(TokenKind.DIRTY):
             is_dirty_annotation = True
             self._expect(TokenKind.COLON, "expected ':' after dirty")
@@ -258,6 +332,10 @@ class Parser:
 
     def _parse_atom(self, *, nested_words: list[WordDefNode] | None) -> AtomNode:
         token = self._current()
+
+        if token.kind is TokenKind.QUALIFIED_MODULE_NAME:
+            self._advance()
+            return IdentifierNode(span=token.span, name=token.lexeme)
 
         if token.kind is TokenKind.IDENTIFIER:
             if token.lexeme == "map.empty":
@@ -563,7 +641,7 @@ class Parser:
 
     def _is_word_def_start(self) -> bool:
         token = self._current()
-        if token.kind in {TokenKind.PUB, TokenKind.EXPORT, TokenKind.DIRTY}:
+        if token.kind in {TokenKind.PUB, TokenKind.DIRTY}:
             return True
         return token.kind is TokenKind.COLON
 
@@ -625,3 +703,9 @@ class Parser:
                     line=token.span.line,
                     column=token.span.column,
                 )
+        if "." in lexeme:
+            raise ParseError(
+                message=f"cannot define qualified word name: {lexeme}",
+                line=token.span.line,
+                column=token.span.column,
+            )

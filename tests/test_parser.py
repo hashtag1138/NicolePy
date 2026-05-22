@@ -7,11 +7,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.ast_nodes import (
     CaseNode,
+    ExportDeclaration,
     IdentifierNode,
+    ImportDeclaration,
+    IncludeDeclaration,
     IfNode,
     ListLiteralNode,
     LiteralKind,
     LiteralNode,
+    ModuleDeclaration,
     OperatorNode,
     PatternKind,
     PropagateNode,
@@ -27,8 +31,147 @@ from nicole.lexer import lex
 from nicole.parser import ParseError, Parser
 
 
-def parse_source(source: str):
+def parse_source_raw(source: str):
     return Parser(lex(source)).parse()
+
+
+def _wrap_in_module(source: str) -> str:
+    lines = source.strip("\n").splitlines()
+    indented = "\n".join(f"  {line}" if line else "" for line in lines)
+    return f"module @test.phase1b\n{indented}\nend-module\n"
+
+
+def parse_source(source: str):
+    stripped = source.lstrip()
+    if (
+        stripped.startswith("module ")
+        or stripped.startswith("import ")
+        or stripped.startswith("include ")
+    ):
+        return parse_source_raw(source)
+    return parse_source_raw(_wrap_in_module(source))
+
+
+def test_parser_parses_module_declaration_with_export_declaration():
+    program = parse_source_raw(
+        "module @app\n"
+        "  : run { -- n:Int }\n"
+        "    0\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n"
+    )
+
+    assert len(program.declarations) == 1
+    module_decl = program.declarations[0]
+    assert isinstance(module_decl, ModuleDeclaration)
+    assert module_decl.name.parts == ("app",)
+    assert isinstance(module_decl.items[0], type(program.words[0]))
+    assert isinstance(module_decl.items[1], ExportDeclaration)
+    assert module_decl.items[1].word_name == "run"
+
+
+def test_parser_parses_import_declaration_forms():
+    program = parse_source_raw(
+        "import @math\n"
+        "import @math as m\n"
+        "import @math.utils\n"
+        "import @math.utils as u\n"
+    )
+
+    assert len(program.declarations) == 4
+    assert isinstance(program.declarations[0], ImportDeclaration)
+    assert program.declarations[0].target.parts == ("math",)
+    assert program.declarations[0].alias is None
+    assert isinstance(program.declarations[1], ImportDeclaration)
+    assert program.declarations[1].target.parts == ("math",)
+    assert program.declarations[1].alias == "m"
+    assert isinstance(program.declarations[2], ImportDeclaration)
+    assert program.declarations[2].target.parts == ("math", "utils")
+    assert program.declarations[2].alias is None
+    assert isinstance(program.declarations[3], ImportDeclaration)
+    assert program.declarations[3].target.parts == ("math", "utils")
+    assert program.declarations[3].alias == "u"
+
+
+def test_parser_parses_include_declaration():
+    program = parse_source_raw('include "path.nic"\n')
+    assert len(program.declarations) == 1
+    include_decl = program.declarations[0]
+    assert isinstance(include_decl, IncludeDeclaration)
+    assert include_decl.path == "path.nic"
+
+
+def test_parser_rejects_top_level_word_definition():
+    with pytest.raises(ParseError, match="top-level word definition is not allowed"):
+        parse_source_raw(": run { -- n:Int } 0 ;")
+
+
+def test_parser_rejects_export_outside_module():
+    with pytest.raises(ParseError, match="export declaration is only allowed inside module"):
+        parse_source_raw("export : run")
+
+
+def test_parser_rejects_nested_module():
+    with pytest.raises(ParseError, match="nested module declaration is not allowed"):
+        parse_source_raw(
+            "module @outer\n"
+            "  module @inner\n"
+            "  end-module\n"
+            "end-module\n"
+        )
+
+
+def test_parser_rejects_legacy_export_definition_form():
+    with pytest.raises(ParseError):
+        parse_source_raw(
+            "module @app\n"
+            "  : run { -- n:Int }\n"
+            "    0\n"
+            "  ;\n"
+            "  export : run { -- n:Int }\n"
+            "    0\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+
+def test_parser_rejects_export_dirty_form():
+    with pytest.raises(ParseError):
+        parse_source_raw(
+            "module @app\n"
+            "  : run { -- n:Int }\n"
+            "    0\n"
+            "  ;\n"
+            "  export dirty : run\n"
+            "end-module\n"
+        )
+
+
+def test_parser_rejects_dotted_user_word_definition():
+    with pytest.raises(ParseError, match="cannot define qualified word name"):
+        parse_source_raw(
+            "module @app\n"
+            "  : app.run { -- n:Int }\n"
+            "    0\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+
+def test_parser_accepts_qualified_reference_atom():
+    program = parse_source_raw(
+        "module @app\n"
+        "  : run { -- n:Int }\n"
+        "    @math.utils drop\n"
+        "    0\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n"
+    )
+    run_word = program.words[0]
+    assert isinstance(run_word.body.items[0], IdentifierNode)
+    assert run_word.body.items[0].name == "@math.utils"
 
 
 def test_parser_simple_word():
@@ -282,13 +425,19 @@ def test_parser_rejects_bare_empty_map():
 
 
 def test_parser_pub_and_export():
-    program = parse_source(
-        "pub : foo { -- } 1 ;\n"
-        "export : bar { -- } 2 ;"
+    program = parse_source_raw(
+        "module @app\n"
+        "  pub : foo { -- }\n"
+        "    1\n"
+        "  ;\n"
+        "  export : foo\n"
+        "end-module\n"
     )
-
+    module_decl = program.declarations[0]
+    assert isinstance(module_decl, ModuleDeclaration)
     assert program.words[0].visibility is Visibility.PUB
-    assert program.words[1].visibility is Visibility.EXPORT
+    assert isinstance(module_decl.items[1], ExportDeclaration)
+    assert module_decl.items[1].word_name == "foo"
 
 
 def test_parser_accepts_dirty_word_definition():
@@ -307,19 +456,10 @@ def test_parser_accepts_pub_dirty_word_definition():
     assert program.words[0].is_dirty_annotation is True
 
 
-def test_parser_accepts_export_dirty_word_definition():
-    program = parse_source("export dirty : foo { -- } ;")
-
-    assert program.words[0].name == "foo"
-    assert program.words[0].visibility is Visibility.EXPORT
-    assert program.words[0].is_dirty_annotation is True
-
-
 @pytest.mark.parametrize(
     "source",
     [
         "dirty pub : foo { -- } ;",
-        "dirty export : foo { -- } ;",
         ": dirty foo { -- } ;",
     ],
 )
@@ -329,11 +469,10 @@ def test_parser_rejects_invalid_dirty_modifier_ordering(source):
 
 
 def test_parser_rejects_export_inside_subword():
-    with pytest.raises(ParseError, match="export is only allowed for top-level words"):
+    with pytest.raises(ParseError):
         parse_source(
             ": outer { -- }\n"
-            "  export : inner { -- }\n"
-            "  ;\n"
+            "  export : inner\n"
             ";"
         )
 
@@ -536,12 +675,22 @@ def test_parser_rejects_result_constructor_call_syntax(source):
     [
         ": host.log { -- } ;",
         "pub : host.log { -- } ;",
-        "export : host.log { -- } ;",
     ],
 )
 def test_parser_rejects_host_word_definitions(source):
     with pytest.raises(ParseError, match=r"cannot define reserved namespace word"):
         parse_source(source)
+
+
+def test_parser_rejects_export_declaration_with_qualified_name():
+    with pytest.raises(ParseError, match="export declaration expects local word name"):
+        parse_source_raw(
+            "module @app\n"
+            "  : run { -- }\n"
+            "  ;\n"
+            "  export : host.log\n"
+            "end-module\n"
+        )
 
 
 @pytest.mark.parametrize(
@@ -619,13 +768,16 @@ def test_parser_accepts_dirty_prefixed_non_reserved_names():
 def test_parser_accepts_additional_non_exact_dirty_identifiers():
     program = parse_source(
         ": dirty_log { -- } ;\n"
-        ": is-dirty { -- } ;\n"
-        ": dirty.value { -- } ;"
+        ": is-dirty { -- } ;"
     )
 
     assert program.words[0].name == "dirty_log"
     assert program.words[1].name == "is-dirty"
-    assert program.words[2].name == "dirty.value"
+
+
+def test_parser_rejects_definition_name_with_dot():
+    with pytest.raises(ParseError, match="cannot define qualified word name"):
+        parse_source(": dirty.value { -- } ;")
 
 
 def test_parser_accepts_host_word_usage():
