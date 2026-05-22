@@ -21,12 +21,17 @@ __all__ = [
     "PatternKind",
     "PatternNode",
     "PropagateNode",
+    "QualifiedModuleName",
     "ProgramNode",
     "QuoteEffect",
     "QuoteNode",
     "QuoteTypeNode",
     "ResolutionInfo",
     "SignatureNode",
+    "ModuleDeclaration",
+    "ImportDeclaration",
+    "IncludeDeclaration",
+    "ExportDeclaration",
     "TypedEmptyListNode",
     "TypedEmptyMapNode",
     "TypeNode",
@@ -95,6 +100,32 @@ class AtomNode(ASTNode):
 @dataclass(slots=True)
 class ProgramNode(ASTNode):
     words: tuple[WordDefNode, ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True)
+class QualifiedModuleName(ASTNode):
+    parts: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True)
+class ModuleDeclaration(ASTNode):
+    name: QualifiedModuleName
+
+
+@dataclass(slots=True)
+class ImportDeclaration(ASTNode):
+    target: QualifiedModuleName
+    alias: str | None = None
+
+
+@dataclass(slots=True)
+class IncludeDeclaration(ASTNode):
+    path: str
+
+
+@dataclass(slots=True)
+class ExportDeclaration(ASTNode):
+    word_name: str
 
 
 @dataclass(slots=True)

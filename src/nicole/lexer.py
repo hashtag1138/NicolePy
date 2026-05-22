@@ -87,6 +87,10 @@ class Lexer:
                 self._emit(TokenKind.PROPAGATE, "?", 1)
                 continue
 
+            if ch == "@":
+                self._lex_qualified_module_name()
+                continue
+
             if _is_identifier_start(ch):
                 self._lex_identifier_or_keyword()
                 continue
@@ -214,6 +218,40 @@ class Lexer:
         self._tokens.append(
             Token(kind=kind, lexeme=lexeme, span=start.span)
         )
+
+    def _lex_qualified_module_name(self) -> None:
+        start = self._mark()
+        self._advance()
+
+        if self._at_end() or not _is_identifier_start(self._peek()):
+            self._raise_error("invalid module reference")
+        self._lex_module_name_segment()
+
+        while not self._at_end() and self._peek() == ".":
+            if self._peek_next() is None or not _is_identifier_start(self._peek_next()):
+                self._raise_error("invalid module reference")
+            self._advance()
+            self._lex_module_name_segment()
+
+        lexeme = self.source[start.index : self._index]
+        self._tokens.append(
+            Token(kind=TokenKind.QUALIFIED_MODULE_NAME, lexeme=lexeme, span=start.span)
+        )
+
+    def _lex_module_name_segment(self) -> None:
+        self._advance()
+        while not self._at_end():
+            ch = self._peek()
+            if _is_identifier_continuation(ch):
+                self._advance()
+                continue
+            if ch == "-":
+                if self._peek_next() and _is_identifier_continuation(self._peek_next()):
+                    self._advance()
+                    continue
+                self._advance()
+                continue
+            break
 
     def _lex_number(self) -> None:
         start = self._mark()
@@ -349,6 +387,10 @@ def _keyword_kind(lexeme: str) -> TokenKind | None:
     keywords = {
         "pub": TokenKind.PUB,
         "export": TokenKind.EXPORT,
+        "module": TokenKind.MODULE,
+        "end-module": TokenKind.END_MODULE,
+        "import": TokenKind.IMPORT,
+        "include": TokenKind.INCLUDE,
         "dirty": TokenKind.DIRTY,
         "if": TokenKind.IF,
         "else": TokenKind.ELSE,

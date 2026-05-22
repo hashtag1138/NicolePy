@@ -66,6 +66,40 @@ def test_dirty_keyword_recognized():
     assert tokens[0].lexeme == "dirty"
 
 
+def test_module_keywords_recognized():
+    tokens = lex("module end-module import include")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.MODULE,
+        TokenKind.END_MODULE,
+        TokenKind.IMPORT,
+        TokenKind.INCLUDE,
+        TokenKind.EOF,
+    ]
+
+
+def test_qualified_module_name_tokenized():
+    tokens = lex("@app @app.run @app-")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.QUALIFIED_MODULE_NAME,
+        TokenKind.QUALIFIED_MODULE_NAME,
+        TokenKind.QUALIFIED_MODULE_NAME,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == [
+        "@app",
+        "@app.run",
+        "@app-",
+    ]
+
+
+@pytest.mark.parametrize("source", ["@", "@app.", "@app..run"])
+def test_invalid_qualified_module_name_raises(source):
+    with pytest.raises(LexError, match="invalid module reference"):
+        lex(source)
+
+
 def test_result_constructors_and_propagation_recognized():
     tokens = lex("1 Ok! MissingKey Err! ?")
 

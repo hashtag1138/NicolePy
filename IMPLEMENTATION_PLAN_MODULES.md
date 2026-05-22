@@ -1,0 +1,446 @@
+# IMPLEMENTATION_PLAN_MODULES.md
+
+## Plan maintenance rule
+
+After each completed phase or audit:
+
+- update phase status;
+- append a Change log entry;
+- record modified files;
+- record validation results;
+- record blockers;
+- record residual gaps;
+- record decisions taken during implementation.
+
+This file is the authoritative implementation tracking document and must remain synchronized with repository state.
+
+## Goal
+
+Track implementation work for NicolePy to converge on the Nicole specification module/import/export model.
+
+- Spec target tag: `v0.1.0-modules-freeze`
+- Canonical ABI target: `@module.word`
+- Legacy flat syntax (for example `export : app.run { -- n:Int } 0 ;`) is not supported public behavior.
+
+## Baseline
+
+- Implementation repository: `/data/data/com.termux/files/home/Sources/nicole/nicole_python_implementation`
+- Baseline HEAD: `a0dc5a5eff740caa43ff8a1580cbb10ea3a22ad6`
+- Baseline tag: `v0.17.0-case-guards-implementation`
+
+## Source Of Truth
+
+Nicole specification repository and tag:
+
+- `/data/data/com.termux/files/home/Sources/nicole/nicole_language_docs_seed`
+- `v0.1.0-modules-freeze`
+
+---
+
+## Phase 1A — Tokens, lexer, and AST
+
+Status: `complete`
+
+Goal:
+- Introduce token/lexer/AST primitives for module/import/include/export declaration syntax and canonical qualified module references.
+
+Allowed files:
+- `src/nicole/tokens.py`
+- `src/nicole/lexer.py`
+- `src/nicole/ast_nodes.py`
+- `tests/test_tokens.py`
+- `tests/test_lexer.py`
+- `tests/test_ast_nodes.py`
+
+Forbidden files:
+- `src/nicole/parser.py`
+- `src/nicole/signature_collector.py`
+- `src/nicole/resolver.py`
+- `src/nicole/checker.py`
+- `src/nicole/host_abi.py`
+- `src/nicole/runtime.py`
+
+Required behavior:
+- Recognize module/import/include keywords and `@`-qualified module forms.
+- Add AST nodes needed by module/import/include/export declarations.
+
+Non-goals:
+- No parser behavior change.
+- No resolution/checker/runtime/ABI change.
+
+Tests:
+- Add/update tokenization and lexer tests for module/import/include and `@module.word`.
+- Add/update AST structure tests for new declaration nodes.
+
+Validation:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_tokens.py tests/test_lexer.py tests/test_ast_nodes.py -q`
+
+Exit criteria:
+- New syntax primitives exist and related tests pass.
+
+Notes:
+- Keep changes frontend-only and avoid semantic assumptions.
+
+Modified files:
+- `src/nicole/tokens.py`
+- `src/nicole/lexer.py`
+- `src/nicole/ast_nodes.py`
+- `tests/test_tokens.py`
+- `tests/test_lexer.py`
+- `tests/test_ast_nodes.py`
+
+Validation results:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_tokens.py tests/test_lexer.py tests/test_ast_nodes.py -q`
+- `65 passed`
+- Phase 1A correction validation executed
+- Phase 1A audit passed
+
+Blockers:
+- none
+
+Residual gaps:
+- Parser work still deferred to Phase 1B
+
+---
+
+## Phase 1B — Parser module syntax
+
+Status: `pending`
+
+Goal:
+- Implement parser support for module/import/include/export declarations with strict public syntax aligned to spec.
+
+Allowed files:
+- `src/nicole/parser.py`
+- `src/nicole/ast_nodes.py`
+- `tests/test_parser.py`
+
+Forbidden files:
+- `src/nicole/signature_collector.py`
+- `src/nicole/resolver.py`
+- `src/nicole/checker.py`
+- `src/nicole/host_abi.py`
+- `src/nicole/runtime.py`
+
+Required behavior:
+- Parse `module @name ... end-module`.
+- Parse import forms and include declarations.
+- Parse `export : word` as declaration-only inside module.
+- Reject top-level user word definitions.
+- Reject dotted user word definitions and legacy export modifier forms as public syntax.
+
+Non-goals:
+- No symbol resolution semantics.
+- No runtime/ABI behavior change.
+
+Tests:
+- Add parser positive tests for module/import/include/export declarations.
+- Add parser negative tests for legacy flat forms and invalid placements.
+
+Validation:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_parser.py -q`
+
+Exit criteria:
+- Parser public surface reflects strict module syntax and rejects legacy public forms.
+
+Notes:
+- Any temporary compatibility aid must stay internal to tests and must not alter public parser behavior.
+
+Modified files:
+- none
+
+Validation results:
+- none
+
+Blockers:
+- none
+
+Residual gaps:
+- none
+
+---
+
+## Phase 1C — Syntax audit
+
+Status: `pending`
+
+Goal:
+- Audit syntax implementation after Phase 1A/1B against spec requirements before symbol/resolution work.
+
+Allowed files:
+- Audit only; no edits expected.
+
+Forbidden files:
+- All source and test modifications during this phase.
+
+Required behavior:
+- Confirm token/lexer/AST/parser alignment with module/import/include/export declaration grammar.
+- Confirm legacy flat export syntax is rejected publicly.
+
+Non-goals:
+- No resolver/checker/runtime/ABI implementation work.
+
+Tests:
+- Re-run syntax-focused tests to verify consistency.
+
+Validation:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_tokens.py tests/test_lexer.py tests/test_ast_nodes.py tests/test_parser.py -q`
+
+Exit criteria:
+- Syntax audit reports no blocking contradictions with `v0.1.0-modules-freeze`.
+
+Notes:
+- Record any mismatch as an explicit blocker before Phase 2.
+
+Modified files:
+- none
+
+Validation results:
+- none
+
+Blockers:
+- none
+
+Residual gaps:
+- none
+
+---
+
+## Phase 2 — Module-aware symbols and resolution
+
+Status: `pending`
+
+Goal:
+- Extend symbol collection and resolution for module-local scope, imports, aliases, collisions, and import-cycle checks.
+
+Allowed files:
+- `src/nicole/symbols.py`
+- `src/nicole/signature_collector.py`
+- `src/nicole/resolver.py`
+- `src/nicole/checker.py`
+- `src/nicole/pipeline.py`
+- `tests/test_signature_collector.py`
+- `tests/test_resolver.py`
+- `tests/test_checker.py`
+- `tests/test_pipeline.py`
+
+Forbidden files:
+- `src/nicole/runtime.py`
+- `src/nicole/host_abi.py`
+
+Required behavior:
+- User words resolve within module-aware scope.
+- External user references require proper import declarations.
+- Import aliases resolve with defined visibility rules.
+- Reserved roots and collisions follow spec constraints.
+- Import cycles are rejected.
+
+Non-goals:
+- No canonical ABI export-name publication yet.
+- No runtime dispatch restructuring.
+
+Tests:
+- Add/update resolution and checker tests for module-aware naming and import behavior.
+
+Validation:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_signature_collector.py tests/test_resolver.py tests/test_checker.py tests/test_pipeline.py -q`
+
+Exit criteria:
+- Module-aware symbol and resolution behavior is stable and spec-aligned for supported forms.
+
+Notes:
+- Preserve unrelated checker/runtime semantics while migrating fixtures to module form.
+
+Modified files:
+- none
+
+Validation results:
+- none
+
+Blockers:
+- none
+
+Residual gaps:
+- none
+
+---
+
+## Phase 3 — Export declarations and canonical ABI
+
+Status: `pending`
+
+Goal:
+- Implement export declaration semantics and canonical ABI publication using `@module.word`.
+
+Allowed files:
+- `src/nicole/signature_collector.py`
+- `src/nicole/checker.py`
+- `src/nicole/host_abi.py`
+- `src/nicole/pipeline.py`
+- `src/nicole/runtime.py`
+- `tests/test_host_abi.py`
+- `tests/test_pipeline.py`
+- `tests/test_runtime.py`
+
+Forbidden files:
+- Broad runtime architecture rewrites outside export-name normalization and lookup alignment.
+
+Required behavior:
+- `export : word` binds only to existing same-module words.
+- Export contract publishes canonical names only (`@module.word`).
+- Duplicate canonical exports are rejected.
+- Runtime export entry selection aligns to canonical names.
+
+Non-goals:
+- No public legacy alias support in final behavior.
+
+Tests:
+- Add/update ABI, pipeline, and runtime tests for canonical export naming and declaration semantics.
+
+Validation:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_host_abi.py tests/test_pipeline.py tests/test_runtime.py -q`
+
+Exit criteria:
+- Canonical export ABI behavior is implemented and covered by tests.
+
+Notes:
+- Runtime changes should remain minimal normalization only.
+
+Modified files:
+- none
+
+Validation results:
+- none
+
+Blockers:
+- none
+
+Residual gaps:
+- none
+
+---
+
+## Phase 4 — Legacy rejection, tests, docs, and SPEC_TARGET
+
+Status: `pending`
+
+Goal:
+- Finalize public legacy rejection, complete test migration, update docs, and update `SPEC_TARGET.md` to modules-freeze target.
+
+Allowed files:
+- `README.md`
+- `SPEC_TARGET.md`
+- `docs/*`
+- `tests/*`
+- Any production files needed to remove temporary transitional scaffolding.
+
+Forbidden files:
+- Unrelated feature additions or refactors.
+
+Required behavior:
+- Legacy flat syntax is not documented or accepted as public behavior.
+- Canonical ABI naming is documented as `@module.word`.
+- Test suite reflects strict-spec module/import/export surface.
+
+Non-goals:
+- No new language features outside migration scope.
+
+Tests:
+- Rewrite/remove legacy flat-syntax tests.
+- Add explicit rejection tests for top-level/dotted legacy forms.
+
+Validation:
+- `PYTHONPATH=src .venv/bin/python -m pytest -q`
+- `grep -RIn "export : [A-Za-z0-9_-]*\\." README.md SPEC_TARGET.md docs tests src/nicole || true`
+
+Exit criteria:
+- Public docs/tests/spec-target metadata align with strict-spec behavior.
+
+Notes:
+- Transitional internal-only test scaffolding must be removed or disabled by phase end.
+
+Modified files:
+- none
+
+Validation results:
+- none
+
+Blockers:
+- none
+
+Residual gaps:
+- none
+
+---
+
+## Phase 5 — Final audit and release readiness
+
+Status: `pending`
+
+Goal:
+- Perform final end-to-end audit against `v0.1.0-modules-freeze` and verify release readiness.
+
+Allowed files:
+- Audit only; no edits expected.
+
+Forbidden files:
+- No code/document modifications in this phase.
+
+Required behavior:
+- Verify parser/checker/resolver/runtime/ABI/docs/tests all align with target spec and strict compatibility decision.
+
+Non-goals:
+- No implementation additions.
+
+Tests:
+- Full suite and targeted grep audits for legacy patterns.
+
+Validation:
+- `git status --short`
+- `PYTHONPATH=src .venv/bin/python -m pytest -q`
+- `grep -RIn "\"app\\.run\"" README.md SPEC_TARGET.md docs tests src/nicole || true`
+
+Exit criteria:
+- Final audit reports release-ready state with no public legacy flat compatibility.
+
+Notes:
+- Any remaining gaps must be documented as explicit blockers.
+
+Modified files:
+- none
+
+Validation results:
+- none
+
+Blockers:
+- none
+
+Residual gaps:
+- none
+
+---
+
+## Current phase state
+
+| Phase | Status |
+|---|---|
+| Phase 1A | complete |
+| Phase 1B | pending |
+| Phase 1C | pending |
+| Phase 2 | pending |
+| Phase 3 | pending |
+| Phase 4 | pending |
+| Phase 5 | pending |
+
+---
+
+## Change log
+
+- Created plan from audit and strict-spec decision.
+- Added plan maintenance rules.
+- Added phase state tracking table.
+- Added per-phase tracking sections.
+- Phase 1A moved to in-progress with frontend-only token, lexer, and AST primitives plus focused test coverage.
+- Corrected lexer handling for identifier grammar compatibility with spec.
+- Phase 1A completed and passed audit.
+- Consolidated duplicate Phase 1A tracking entries.

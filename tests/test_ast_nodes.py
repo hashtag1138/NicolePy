@@ -11,16 +11,21 @@ from nicole.ast_nodes import (
     BlockNode,
     CaseBranchNode,
     CaseNode,
+    ExportDeclaration,
     IdentifierNode,
+    ImportDeclaration,
+    IncludeDeclaration,
     IfNode,
     LiteralKind,
     LiteralNode,
     ListLiteralNode,
+    ModuleDeclaration,
     OperatorNode,
     ParameterNode,
     PatternNode,
     PatternKind,
     ProgramNode,
+    QualifiedModuleName,
     QuoteEffect,
     QuoteNode,
     QuoteTypeNode,
@@ -92,6 +97,26 @@ def test_word_def_node_can_store_dirty_annotation_metadata():
     assert node.is_dirty_annotation is True
 
 
+def test_qualified_module_name_node_creation():
+    node = QualifiedModuleName(parts=("app", "run"), span=make_span())
+
+    assert node.parts == ("app", "run")
+
+
+def test_module_import_include_export_nodes_creation():
+    qualified = QualifiedModuleName(parts=("app",), span=make_span())
+    module_node = ModuleDeclaration(name=qualified, span=make_span())
+    import_node = ImportDeclaration(target=qualified, alias="a", span=make_span())
+    include_node = IncludeDeclaration(path="feature.nic", span=make_span())
+    export_node = ExportDeclaration(word_name="run", span=make_span())
+
+    assert module_node.name.parts == ("app",)
+    assert import_node.target.parts == ("app",)
+    assert import_node.alias == "a"
+    assert include_node.path == "feature.nic"
+    assert export_node.word_name == "run"
+
+
 def test_if_node_has_no_condition_field():
     field_names = {field.name for field in IfNode.__dataclass_fields__.values()}
     assert "condition" not in field_names
@@ -121,6 +146,33 @@ def test_case_branch_node_has_optional_guard_field():
         (
             SignatureNode,
             {"inputs": (), "outputs": (), "span": make_span()},
+        ),
+        (
+            QualifiedModuleName,
+            {"parts": ("app",), "span": make_span()},
+        ),
+        (
+            ModuleDeclaration,
+            {
+                "name": QualifiedModuleName(parts=("app",), span=make_span()),
+                "span": make_span(),
+            },
+        ),
+        (
+            ImportDeclaration,
+            {
+                "target": QualifiedModuleName(parts=("app", "run"), span=make_span()),
+                "alias": "runner",
+                "span": make_span(),
+            },
+        ),
+        (
+            IncludeDeclaration,
+            {"path": "core.nic", "span": make_span()},
+        ),
+        (
+            ExportDeclaration,
+            {"word_name": "run", "span": make_span()},
         ),
         (
             ParameterNode,
