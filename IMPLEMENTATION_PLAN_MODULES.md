@@ -218,7 +218,7 @@ Residual gaps:
 
 ## Phase 2A — Symbol model and signature collection
 
-Status: `pending`
+Status: `complete`
 
 Goal:
 - Introduce a module-aware symbol model and collect user words/import declarations from top-level declarations instead of flat top-level word assumptions.
@@ -264,16 +264,26 @@ Risks:
 - Symbol data model drift may break resolver/checker assumptions if not staged carefully.
 
 Modified files:
-- none
+- `src/nicole/symbols.py`
+- `src/nicole/signature_collector.py`
+- `tests/test_signature_collector.py`
+- `IMPLEMENTATION_PLAN_MODULES.md`
 
 Validation results:
-- none
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_signature_collector.py -q`
+- `18 passed`
+- Phase 2A correction validation executed
+- Phase 2A duplicate-scope correction validation executed
+- Phase 2A audit passed
 
 Blockers:
 - none
 
 Residual gaps:
-- none
+- resolver semantics deferred to Phase 2B
+- checker integration deferred to Phase 2C
+- pipeline end-to-end integration deferred to Phase 2D
+- with_standard_symbols() metadata preservation deferred to Phase 2D
 
 ---
 
@@ -622,7 +632,7 @@ Residual gaps:
 | Phase 1A | complete |
 | Phase 1B | complete |
 | Phase 1C | complete |
-| Phase 2A | pending |
+| Phase 2A | complete |
 | Phase 2B | pending |
 | Phase 2C | pending |
 | Phase 2D | pending |
@@ -647,3 +657,7 @@ Residual gaps:
 - Corrected expression-level qualified module syntax acceptance.
 - Split Phase 2 into Phase 2A/2B/2C/2D for staged module-aware implementation.
 - Phase 1C completed and passed audit.
+- Phase 2A moved to in-progress with module-aware signature collection.
+- Removed legacy program.words fallback from Phase 2A signature collection.
+- Corrected Phase 2A duplicate detection from module-wide scope to owner scope.
+- Phase 2A completed and passed audit.

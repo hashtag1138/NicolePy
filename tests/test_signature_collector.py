@@ -5,180 +5,202 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from nicole.ast_nodes import BlockNode, ProgramNode, SignatureNode, WordDefNode
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.signature_collector import collect_signatures
-from nicole.symbols import SymbolError, WordSymbol
-from nicole.ast_nodes import Visibility
+from nicole.symbols import ImportMetadata, SymbolError, WordSymbol
+from nicole.tokens import SourceSpan
 
 
 def parse_source(source: str):
     return Parser(lex(source)).parse()
 
 
-def test_collect_simple_signature():
-    program = parse_source(": add { a:Int b:Int -- r:Int } ;")
+def _span() -> SourceSpan:
+    return SourceSpan(line=1, column=1, offset=0)
+
+
+def test_does_not_collect_legacy_top_level_words_when_declarations_are_empty() -> None:
+    legacy_word = WordDefNode(
+        span=_span(),
+        name="legacy",
+        signature=SignatureNode(span=_span()),
+        body=BlockNode(span=_span()),
+    )
+    program = ProgramNode(span=_span(), words=(legacy_word,), declarations=())
+
     table = collect_signatures(program)
 
-    assert "add" in table.words
-    symbol = table.words["add"][0]
-    assert isinstance(symbol, WordSymbol)
-    assert symbol.signature.inputs[0].name == "a"
-    assert symbol.signature.outputs[0].name == "r"
+    assert "legacy" not in table.words
+    assert table.words == {}
 
 
-def test_collect_mutual_recursion_support():
+def test_collects_words_from_module_items() -> None:
     program = parse_source(
-        ": a { -- } b ;\n"
-        ": b { -- } a ;"
-    )
-    table = collect_signatures(program)
-
-    assert "a" in table.words
-    assert "b" in table.words
-
-
-def test_collect_rejects_same_name_with_different_input_types():
-    program = parse_source(
-        ": id { x:Int -- y:Int } ;\n"
-        ": id { x:String -- y:String } ;"
-    )
-
-    with pytest.raises(SymbolError, match="duplicate visible name"):
-        collect_signatures(program)
-
-
-def test_collect_rejects_same_name_with_different_arities():
-    program = parse_source(
-        ": foo { a:Int b:Int -- r:Int } ;\n"
-        ": foo { a:Int b:Int c:Int -- r:Int } ;"
-    )
-
-    with pytest.raises(SymbolError, match="duplicate visible name"):
-        collect_signatures(program)
-
-
-def test_collect_nested_subword_with_qualified_owner():
-    program = parse_source(
-        ": invoice { -- }\n"
-        "  : subtotal { -- }\n"
+        "module @app\n"
+        "  : run { -- }\n"
         "  ;\n"
-        ";"
+        "end-module\n"
     )
     table = collect_signatures(program)
 
-    assert "invoice" in table.words
-    assert "subtotal" in table.words
-    symbol = table.words["subtotal"][0]
-    assert symbol.owner == "invoice"
-    assert symbol.name == "subtotal"
-    assert symbol.qualified_name == "invoice.subtotal"
+    assert "run" in table.words
+    symbol = table.words["run"][0]
+    assert isinstance(symbol, WordSymbol)
+    assert symbol.module == "app"
+    assert symbol.owner is None
 
 
-def test_collect_rejects_duplicate_sibling_subword_names():
+def test_nested_subword_collection_preserves_module_ownership() -> None:
     program = parse_source(
-        ": parent { -- }\n"
-        "  : child { -- n:Int } 1 ;\n"
-        '  : child { -- text:String } "x" ;\n'
-        ";"
+        "module @app\n"
+        "  : parent { -- }\n"
+        "    : child { -- }\n"
+        "    ;\n"
+        "  ;\n"
+        "end-module\n"
     )
+    table = collect_signatures(program)
 
-    with pytest.raises(SymbolError, match="duplicate visible name"):
+    assert "parent" in table.words
+    assert "child" in table.words
+    child_symbol = table.words["child"][0]
+    assert child_symbol.module == "app"
+    assert child_symbol.owner == "parent"
+    assert child_symbol.qualified_name == "parent.child"
+
+
+def test_same_subword_name_is_allowed_under_different_parents_in_same_module() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  : invoice { -- }\n"
+        "    : total { -- }\n"
+        "    ;\n"
+        "  ;\n"
+        "  : report { -- }\n"
+        "    : total { -- }\n"
+        "    ;\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    table = collect_signatures(program)
+
+    assert "total" in table.words
+    assert len(table.words["total"]) == 2
+    assert {symbol.owner for symbol in table.words["total"]} == {"invoice", "report"}
+    assert {symbol.module for symbol in table.words["total"]} == {"app"}
+
+
+def test_duplicate_subword_name_is_rejected_under_same_parent() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  : invoice { -- }\n"
+        "    : total { -- }\n"
+        "    ;\n"
+        "    : total { -- }\n"
+        "    ;\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(SymbolError, match="duplicate visible name: total"):
         collect_signatures(program)
 
 
-def test_collect_rejects_pub_export_name_collision():
+def test_same_short_word_is_allowed_in_different_modules() -> None:
     program = parse_source(
-        "pub : foo { -- n:Int } 1 ;\n"
-        "export : foo { -- n:Int } 2 ;"
+        "module @app\n"
+        "  : run { -- }\n"
+        "  ;\n"
+        "end-module\n"
+        "module @tools\n"
+        "  : run { -- }\n"
+        "  ;\n"
+        "end-module\n"
     )
+    table = collect_signatures(program)
 
-    with pytest.raises(SymbolError, match="duplicate visible name"):
+    assert "run" in table.words
+    assert len(table.words["run"]) == 2
+    assert {symbol.module for symbol in table.words["run"]} == {"app", "tools"}
+
+
+def test_duplicate_short_word_is_rejected_in_same_module() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  : run { -- }\n"
+        "  ;\n"
+        "  : run { -- }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(SymbolError, match="duplicate visible name: run"):
         collect_signatures(program)
 
 
-def test_collect_rejects_duplicate_export_names():
+def test_duplicate_module_declaration_is_rejected() -> None:
     program = parse_source(
-        "export : entry { -- n:Int } 1 ;\n"
-        'export : entry { -- text:String } "hello" ;'
+        "module @app\n"
+        "end-module\n"
+        "module @app\n"
+        "end-module\n"
     )
-
-    with pytest.raises(SymbolError, match="duplicate visible name"):
+    with pytest.raises(SymbolError, match="duplicate module declaration: app"):
         collect_signatures(program)
 
 
-def test_collect_export_visibility_preserved():
-    program = parse_source("export : entry { -- } ;")
-    table = collect_signatures(program)
-
-    symbol = table.words["entry"][0]
-    assert symbol.visibility is Visibility.EXPORT
-    assert symbol.declared_dirty is False
-
-
-def test_collect_preserves_declared_dirty_for_top_level_word():
-    program = parse_source("dirty : effectful { -- } ;")
-    table = collect_signatures(program)
-
-    symbol = table.words["effectful"][0]
-    assert symbol.declared_dirty is True
-
-
-def test_collect_preserves_declared_dirty_for_subword():
+def test_import_declaration_metadata_is_recorded() -> None:
     program = parse_source(
-        ": parent { -- }\n"
-        "  dirty : child { -- } ;\n"
-        ";"
+        "import @math\n"
+        "module @app\n"
+        "end-module\n"
     )
     table = collect_signatures(program)
 
-    symbol = table.words["child"][0]
-    assert symbol.owner == "parent"
-    assert symbol.qualified_name == "parent.child"
-    assert symbol.declared_dirty is True
+    assert len(table.imports) == 1
+    metadata = table.imports[0]
+    assert isinstance(metadata, ImportMetadata)
+    assert metadata.target == "math"
+    assert metadata.alias is None
 
 
-def test_collect_preserves_visibility_with_declared_dirty():
-    program = parse_source("export dirty : entry { -- } ;")
+def test_import_alias_metadata_is_recorded() -> None:
+    program = parse_source(
+        "import @math.utils as u\n"
+        "module @app\n"
+        "end-module\n"
+    )
     table = collect_signatures(program)
 
-    symbol = table.words["entry"][0]
-    assert symbol.visibility is Visibility.EXPORT
-    assert symbol.declared_dirty is True
+    assert len(table.imports) == 1
+    metadata = table.imports[0]
+    assert metadata.target == "math.utils"
+    assert metadata.alias == "u"
+    assert table.aliases["u"] is metadata
 
 
-def test_collect_rejects_top_level_then_subword_same_name():
+@pytest.mark.parametrize("reserved_root", ["host", "list", "map", "result"])
+def test_reserved_root_module_name_is_rejected(reserved_root: str) -> None:
     program = parse_source(
-        ": print { -- } ;\n"
-        ": outer { -- }\n"
-        "  : print { -- } ;\n"
-        ";"
+        f"module @{reserved_root}\n"
+        "end-module\n"
     )
-
-    with pytest.raises(SymbolError, match="duplicate visible name"):
+    with pytest.raises(
+        SymbolError,
+        match=rf"cannot use reserved root as module name: @{reserved_root}",
+    ):
         collect_signatures(program)
 
 
-def test_collect_rejects_subword_then_top_level_same_name():
+@pytest.mark.parametrize("reserved_root", ["host", "list", "map", "result"])
+def test_reserved_root_alias_is_rejected(reserved_root: str) -> None:
     program = parse_source(
-        ": outer { -- }\n"
-        "  : helper { -- } ;\n"
-        ";\n"
-        ": helper { -- } ;"
+        f"import @math as {reserved_root}\n"
+        "module @app\n"
+        "end-module\n"
     )
-
-    with pytest.raises(SymbolError, match="duplicate visible name"):
+    with pytest.raises(
+        SymbolError,
+        match=rf"cannot use reserved root as import alias: {reserved_root}",
+    ):
         collect_signatures(program)
-
-
-def test_collect_accepts_unique_private_subword_name():
-    program = parse_source(
-        ": helper { -- } ;\n"
-        ": outer { -- }\n"
-        "  : inner-helper { -- } ;\n"
-        ";"
-    )
-    table = collect_signatures(program)
-
-    assert "helper" in table.words
-    assert "inner-helper" in table.words
