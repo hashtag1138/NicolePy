@@ -163,7 +163,9 @@ def test_parser_accepts_qualified_reference_atom():
     program = parse_source_raw(
         "module @app\n"
         "  : run { -- n:Int }\n"
-        "    @math.utils drop\n"
+        "    @math.sqrt drop\n"
+        "    @app.run drop\n"
+        "    @a.b.c drop\n"
         "    0\n"
         "  ;\n"
         "  export : run\n"
@@ -171,7 +173,27 @@ def test_parser_accepts_qualified_reference_atom():
     )
     run_word = program.words[0]
     assert isinstance(run_word.body.items[0], IdentifierNode)
-    assert run_word.body.items[0].name == "@math.utils"
+    assert run_word.body.items[0].name == "@math.sqrt"
+    assert isinstance(run_word.body.items[2], IdentifierNode)
+    assert run_word.body.items[2].name == "@app.run"
+    assert isinstance(run_word.body.items[4], IdentifierNode)
+    assert run_word.body.items[4].name == "@a.b.c"
+
+
+def test_parser_rejects_bare_module_reference_atom():
+    with pytest.raises(
+        ParseError,
+        match="qualified module reference in expression requires a word segment",
+    ):
+        parse_source_raw(
+            "module @app\n"
+            "  : run { -- n:Int }\n"
+            "    @math drop\n"
+            "    0\n"
+            "  ;\n"
+            "  export : run\n"
+            "end-module\n"
+        )
 
 
 def test_parser_simple_word():

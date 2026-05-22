@@ -204,12 +204,13 @@ Modified files:
 
 Validation results:
 - none
+- Phase 1C correction validation executed
 
 Blockers:
 - none
 
 Residual gaps:
-- none
+- Qualified module atom syntax corrected; Phase 2 semantic work still deferred
 
 ---
 
@@ -453,3 +454,4 @@ Residual gaps:
 - Consolidated duplicate Phase 1A tracking entries.
 - Phase 1B moved to in-progress with module/import/include/export declaration parsing.
 - Phase 1B completed and passed audit.
+- Corrected expression-level qualified module syntax acceptance.

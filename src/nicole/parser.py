@@ -334,6 +334,10 @@ class Parser:
         token = self._current()
 
         if token.kind is TokenKind.QUALIFIED_MODULE_NAME:
+            if "." not in token.lexeme:
+                self._raise_error(
+                    "qualified module reference in expression requires a word segment"
+                )
             self._advance()
             return IdentifierNode(span=token.span, name=token.lexeme)
 
