@@ -5,8 +5,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from nicole.ast_nodes import CaseNode, IdentifierNode, IfNode, QuoteNode
-from nicole.checker import CheckerError, check_program
+from nicole.ast_nodes import CaseNode, IdentifierNode, IfNode, ModuleDeclaration, QuoteNode, WordDefNode
+from nicole.checker import Checker, CheckerError, check_program
 from nicole.host_abi import HostEffect, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
@@ -15,8 +15,32 @@ from nicole.signature_collector import collect_signatures
 from nicole.standard_symbols import with_standard_symbols
 
 
+def _normalize_source(source: str) -> str:
+    normalized = source.strip()
+    if "module @" in normalized or "import @" in normalized or "include " in normalized:
+        return normalized
+    lines = [f"  {line}" if line else "" for line in normalized.splitlines()]
+    return "\n".join(["module @app", *lines, "end-module"]) + "\n"
+
+
+def _parse_source(source: str):
+    return Parser(lex(_normalize_source(source))).parse()
+
+
+def get_module_word(program, *, module_name: str, word_name: str) -> WordDefNode:
+    for declaration in program.declarations:
+        if not isinstance(declaration, ModuleDeclaration):
+            continue
+        if ".".join(declaration.name.parts) != module_name:
+            continue
+        for item in declaration.items:
+            if isinstance(item, WordDefNode) and item.name == word_name:
+                return item
+    raise AssertionError(f"word '{word_name}' not found in module '@{module_name}'")
+
+
 def check_source(source: str):
-    program = Parser(lex(source)).parse()
+    program = _parse_source(source)
     symbols = collect_signatures(program)
     symbols = with_standard_symbols(symbols)
     resolved = resolve(program, symbols)
@@ -24,13 +48,29 @@ def check_source(source: str):
 
 
 def signature_from_source(source: str):
-    return Parser(lex(source)).parse().words[0].signature
+    program = _parse_source(source)
+    return program.words[0].signature
 
 
 def check_source_with_host_contract(source: str, host_words):
-    program = Parser(lex(source)).parse()
+    program = _parse_source(source)
     symbols = collect_signatures(program)
     symbols = with_standard_symbols(symbols)
+    contract = host_contract_from_words(host_words)
+    resolved = resolve(program, symbols, host_contract=contract)
+    return check_program(resolved, symbols)
+
+
+def check_source_without_builtins(source: str):
+    program = _parse_source(source)
+    symbols = collect_signatures(program)
+    resolved = resolve(program, symbols)
+    return check_program(resolved, symbols)
+
+
+def check_source_with_host_contract_without_builtins(source: str, host_words):
+    program = _parse_source(source)
+    symbols = collect_signatures(program)
     contract = host_contract_from_words(host_words)
     resolved = resolve(program, symbols, host_contract=contract)
     return check_program(resolved, symbols)
@@ -62,6 +102,16 @@ def test_checker_accepts_simple_add():
         ": add { x:Int y:Int -- z:Int }\n"
         "  x y +\n"
         ";"
+    )
+
+
+def test_checker_accepts_explicit_module_program() -> None:
+    check_source(
+        "module @calc\n"
+        "  : add { x:Int y:Int -- z:Int }\n"
+        "    x y +\n"
+        "  ;\n"
+        "end-module\n"
     )
 
 
@@ -1949,6 +1999,75 @@ def test_checker_does_not_mark_self_call_inside_case_guard_as_tail() -> None:
     assert _marked_calls(program.words[0].body) == []
 
 
+def test_checker_effect_analysis_distinguishes_same_name_words_across_modules() -> None:
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    source = (
+        "module @a\n"
+        "  : run { -- n:Int }\n"
+        "    1\n"
+        "  ;\n"
+        "end-module\n"
+        "module @b\n"
+        "  dirty : run { msg:String -- }\n"
+        "    msg host.log\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    program = _parse_source(source)
+    symbols = collect_signatures(program)
+    contract = host_contract_from_words(
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)]
+    )
+    resolved = resolve(program, symbols, host_contract=contract)
+    analysis = Checker(symbols)._analyze_effects(resolved)
+    assert len(set(analysis.word_order)) == 2
+    assert "@a.run" in analysis.effects
+    assert "@b.run" in analysis.effects
+    assert analysis.effects["@a.run"].inferred_dirty is False
+    assert analysis.effects["@b.run"].inferred_dirty is True
+
+
+def test_checker_rejects_pure_cross_module_call_to_dirty_same_name_word() -> None:
+    host_signature = signature_from_source(": hostsig { msg:String -- } ;")
+    with pytest.raises(CheckerError, match=r"inferred dirty.*missing dirty annotation"):
+        check_source_with_host_contract_without_builtins(
+            "module @b\n"
+            "  dirty : run { msg:String -- }\n"
+            "    msg host.log\n"
+            "  ;\n"
+            "end-module\n"
+            "import @b\n"
+            "module @a\n"
+            "  : run { msg:String -- }\n"
+            "    msg @b.run\n"
+            "  ;\n"
+            "end-module\n",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+
+
+def test_checker_does_not_mark_cross_module_same_name_tail_call_as_self() -> None:
+    program = check_source_without_builtins(
+        "module @b\n"
+        "  : loop { n:Int -- n2:Int }\n"
+        "    n\n"
+        "  ;\n"
+        "end-module\n"
+        "import @b\n"
+        "module @a\n"
+        "  : loop { n:Int -- n2:Int }\n"
+        "    n @b.loop\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    a_loop = get_module_word(program, module_name="a", word_name="loop")
+    call = a_loop.body.items[1]
+    assert isinstance(call, IdentifierNode)
+    assert call.name == "@b.loop"
+    assert call.resolution.is_self_tail_call is False
+    assert _marked_calls(a_loop.body) == []
+
+
 def test_checker_phase4_scc_dirty_propagation_passes_with_annotations():
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
     check_source_with_host_contract(
@@ -1977,10 +2096,10 @@ def test_checker_phase4_rejects_pure_to_dirty_direct_call():
         )
 
 
-def test_checker_phase4_export_effect_preservation():
+def test_checker_phase4_module_effect_preservation():
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
     check_source_with_host_contract(
-        "export dirty : send { msg:String -- }\n"
+        "dirty : send { msg:String -- }\n"
         "  msg host.log\n"
         ";",
         [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
@@ -2209,7 +2328,7 @@ def test_checker_phase5_quote_body_effect_from_called_words(source: str, host_wo
 
 def test_checker_phase5_graph_case1_unannotated_dirty_callee_in_quote_marks_quote_dirty() -> None:
     host_signature = signature_from_source(": hostsig { msg:String -- } ;")
-    with pytest.raises(CheckerError, match=r"word 'b' inferred dirty.*missing dirty annotation"):
+    with pytest.raises(CheckerError, match=r"inferred dirty.*missing dirty annotation"):
         check_source_with_host_contract(
             ": b { -- }\n"
             '  "x" host.log\n'

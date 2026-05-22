@@ -364,7 +364,7 @@ Residual gaps:
 
 ## Phase 2C — Checker module integration
 
-Status: `pending`
+Status: `complete`
 
 Goal:
 - Adapt checker traversal and effect analysis to module-aware resolved symbols while preserving existing stack/type/effect rules.
@@ -408,16 +408,27 @@ Risks:
 - Effect-analysis naming/ownership mismatches can cause subtle regressions in dirty-call and tail-call checks.
 
 Modified files:
-- none
+- `src/nicole/checker.py`
+- `tests/test_checker.py`
+- `IMPLEMENTATION_PLAN_MODULES.md`
 
 Validation results:
-- none
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_checker.py -q`
+- `228 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_resolver.py -q`
+- `14 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_signature_collector.py -q`
+- `18 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_parser.py tests/test_resolver.py tests/test_signature_collector.py tests/test_checker.py -q`
+- `345 passed`
+- Phase 2C checker/module-identity validation executed
+- Phase 2C completed and ready for audit
 
 Blockers:
 - none
 
 Residual gaps:
-- none
+- `with_standard_symbols()` metadata preservation remains deferred to Phase 2D; checker tests that require import metadata avoid builtins augmentation until that deferred work is completed.
 
 ---
 
@@ -648,7 +659,7 @@ Residual gaps:
 | Phase 1C | complete |
 | Phase 2A | complete |
 | Phase 2B | complete |
-| Phase 2C | pending |
+| Phase 2C | complete |
 | Phase 2D | pending |
 | Phase 3 | pending |
 | Phase 4 | pending |
@@ -678,3 +689,4 @@ Residual gaps:
 - Corrected Phase 2B cycle scope: enforce cycle rejection only with complete import graph; defer full graph-cycle rejection until compilation-unit/module-loading assembly exists.
 - Implemented Phase 2B module-aware resolver behavior for same-module, qualified import, and alias-based resolution paths.
 - Phase 2B completed and passed audit with module-aware resolver/import/alias behavior.
+- Phase 2C completed with checker-local module-aware identity for effect graph and tail-call analysis, plus checker test migration to module-contained fixtures.

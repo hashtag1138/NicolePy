@@ -8,6 +8,7 @@ from .ast_nodes import (
     CaseNode,
     IdentifierNode,
     IfNode,
+    ModuleDeclaration,
     ListLiteralNode,
     LiteralKind,
     LiteralNode,
@@ -86,7 +87,7 @@ class Checker:
 
     def check(self, program: ProgramNode) -> ProgramNode:
         self._validate_program_types(program)
-        for word in program.words:
+        for word in self._iter_top_level_words(program):
             self._check_word(word)
         self._mark_direct_self_tail_calls(program)
         effect_analysis = self._analyze_effects(program)
@@ -97,7 +98,7 @@ class Checker:
         return program
 
     def _validate_program_types(self, program: ProgramNode) -> None:
-        for word in program.words:
+        for word in self._iter_top_level_words(program):
             self._validate_word_types(word)
 
     def _validate_word_types(self, word: WordDefNode) -> None:
@@ -1065,7 +1066,9 @@ class Checker:
                 return
             if symbol.source is not SymbolSource.USER:
                 return
-            callee_name = symbol.qualified_name
+            callee_name = _symbol_word_identity(symbol)
+            if callee_name is None:
+                return
             if callee_name not in known_words:
                 return
             add_edge(source_node, word_node_by_name[callee_name])
@@ -1283,21 +1286,37 @@ class Checker:
 
     def _collect_words(self, program: ProgramNode) -> list[tuple[str, WordDefNode]]:
         collected: list[tuple[str, WordDefNode]] = []
-        for word in program.words:
-            self._collect_nested_words(word, owner=None, out=collected)
+        for declaration in program.declarations:
+            if not isinstance(declaration, ModuleDeclaration):
+                continue
+            module_name = ".".join(declaration.name.parts)
+            for item in declaration.items:
+                if isinstance(item, WordDefNode):
+                    self._collect_nested_words(
+                        item,
+                        module_name=module_name,
+                        owner=None,
+                        out=collected,
+                    )
         return collected
 
     def _collect_nested_words(
         self,
         word: WordDefNode,
         *,
+        module_name: str,
         owner: str | None,
         out: list[tuple[str, WordDefNode]],
     ) -> None:
-        qualified_name = _qualified_name(owner, word.name)
-        out.append((qualified_name, word))
+        owner_qualified_name = _qualified_name(owner, word.name)
+        out.append((_word_identity(module_name, owner_qualified_name), word))
         for nested_word in word.nested_words:
-            self._collect_nested_words(nested_word, owner=qualified_name, out=out)
+            self._collect_nested_words(
+                nested_word,
+                module_name=module_name,
+                owner=owner_qualified_name,
+                out=out,
+            )
 
     def _mark_direct_self_tail_calls(self, program: ProgramNode) -> None:
         for qualified_name, word in self._collect_words(program):
@@ -1395,10 +1414,11 @@ class Checker:
 
     def _is_direct_self_call(self, node: IdentifierNode, current_word_name: str) -> bool:
         symbol = node.resolution.resolved_symbol
+        symbol_name = _symbol_word_identity(symbol) if isinstance(symbol, WordSymbol) else None
         return (
             isinstance(symbol, WordSymbol)
             and symbol.source is SymbolSource.USER
-            and symbol.qualified_name == current_word_name
+            and symbol_name == current_word_name
         )
 
     def _validate_quote_effect_restrictions(self, program: ProgramNode, analysis: EffectAnalysisResult) -> None:
@@ -1483,7 +1503,10 @@ class Checker:
                     return ("case guard cannot call dirty code", item.span.line, item.span.column)
                 symbol = item.resolution.resolved_symbol
                 if isinstance(symbol, WordSymbol) and symbol.source is SymbolSource.USER:
-                    callee_effect = analysis.effects.get(symbol.qualified_name)
+                    callee_name = _symbol_word_identity(symbol)
+                    if callee_name is None:
+                        continue
+                    callee_effect = analysis.effects.get(callee_name)
                     if callee_effect is not None and callee_effect.inferred_dirty:
                         return ("case guard cannot call dirty code", item.span.line, item.span.column)
                 continue
@@ -1611,6 +1634,16 @@ class Checker:
                     line,
                     column,
                 )
+
+    def _iter_top_level_words(self, program: ProgramNode) -> list[WordDefNode]:
+        words: list[WordDefNode] = []
+        for declaration in program.declarations:
+            if not isinstance(declaration, ModuleDeclaration):
+                continue
+            for item in declaration.items:
+                if isinstance(item, WordDefNode):
+                    words.append(item)
+        return words
 
 
 def check(program: ProgramNode, symbols: SymbolTable) -> ProgramNode:
@@ -1886,6 +1919,16 @@ def _qualified_name(owner: str | None, name: str) -> str:
     if owner is None:
         return name
     return f"{owner}.{name}"
+
+
+def _word_identity(module_name: str, qualified_name: str) -> str:
+    return f"@{module_name}.{qualified_name}"
+
+
+def _symbol_word_identity(symbol: WordSymbol) -> str | None:
+    if symbol.module is None:
+        return None
+    return _word_identity(symbol.module, symbol.qualified_name)
 
 
 def _compute_sccs(
