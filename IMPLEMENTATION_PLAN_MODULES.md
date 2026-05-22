@@ -700,16 +700,22 @@ Notes:
 - Any remaining gaps must be documented as explicit blockers.
 
 Modified files:
-- none
+- `tests/test_checker.py`
+- `IMPLEMENTATION_PLAN_MODULES.md`
 
 Validation results:
-- none
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_checker.py -q`
+- `228 passed`
+- `PYTHONPATH=src .venv/bin/python -m pytest -q`
+- `635 passed`
+- `grep -RIn "_normalize_source\\|_LEGACY_EXPORT_RE\\|_to_module_source" tests || true`
+- no hits
 
 Blockers:
-- none
+- Final audit blocker about checker test compatibility scaffolding is resolved.
 
 Residual gaps:
-- none
+- Final release-readiness audit must be rerun after this recovery before Phase 5 can be marked complete.
 
 ---
 
@@ -758,3 +764,4 @@ Residual gaps:
 - Phase 3 completed with module-local export declaration validation, canonical `@module.word` host ABI publication, runtime canonical export lookup normalization, and module-aware ABI/pipeline/runtime export tests.
 - Corrected Phase 3 tracking table after audit recovery.
 - Phase 4 completed with modules-freeze target metadata refresh, public doc cleanup, runtime-doc canonical export examples, runtime test fixture migration away from legacy flat export scaffolding, and preserved full-suite green status.
+- Phase 5 recovery removed the remaining checker test compatibility scaffold by deleting implicit source wrapping from `tests/test_checker.py` and rewriting fixtures as explicit module-contained programs.
