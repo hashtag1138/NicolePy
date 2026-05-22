@@ -445,6 +445,7 @@ Allowed files:
 - `src/nicole/signature_collector.py`
 - `src/nicole/resolver.py`
 - `src/nicole/checker.py`
+- `src/nicole/standard_symbols.py` (metadata preservation only during standard-symbol augmentation)
 - `tests/test_signature_collector.py`
 - `tests/test_resolver.py`
 - `tests/test_checker.py`
@@ -460,6 +461,8 @@ Forbidden files:
 
 Required behavior:
 - Pipeline runs parser -> symbol collection -> standard symbols -> resolver -> checker with module-aware semantics.
+- Preserve metadata through standard-symbol augmentation: `modules`, `imports`, `aliases`, and module ownership metadata.
+- Correct the deferred integration defect: `with_standard_symbols()` currently rebuilds `SymbolTable` and preserves `words` only, dropping `modules`/`imports`/`aliases`.
 - Phase 2 tests are green with module/import/alias/reserved-root/cycle behavior covered.
 - No runtime/ABI functional changes introduced.
 
@@ -467,6 +470,7 @@ Non-goals:
 - No canonical export ABI work (Phase 3).
 - No runtime dispatch restructuring.
 - No host ABI redesign.
+- No unrelated builtin redesign outside metadata preservation needed for pipeline integration.
 
 Tests:
 - Update pipeline integration tests to module-aware fixtures.
@@ -690,3 +694,4 @@ Residual gaps:
 - Implemented Phase 2B module-aware resolver behavior for same-module, qualified import, and alias-based resolution paths.
 - Phase 2B completed and passed audit with module-aware resolver/import/alias behavior.
 - Phase 2C completed with checker-local module-aware identity for effect graph and tail-call analysis, plus checker test migration to module-contained fixtures.
+- Corrected Phase 2D boundary to allow `src/nicole/standard_symbols.py` strictly for metadata preservation across standard-symbol augmentation (`modules`, `imports`, `aliases`, and module ownership metadata).
