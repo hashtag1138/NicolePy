@@ -169,7 +169,7 @@ Residual gaps:
 
 ## Phase 1C — Syntax audit
 
-Status: `pending`
+Status: `complete`
 
 Goal:
 - Audit syntax implementation after Phase 1A/1B against spec requirements before symbol/resolution work.
@@ -203,8 +203,10 @@ Modified files:
 - none
 
 Validation results:
-- none
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_tokens.py tests/test_lexer.py tests/test_ast_nodes.py tests/test_parser.py -q`
+- `150 passed`
 - Phase 1C correction validation executed
+- Phase 1C audit passed
 
 Blockers:
 - none
@@ -214,19 +216,200 @@ Residual gaps:
 
 ---
 
-## Phase 2 — Module-aware symbols and resolution
+## Phase 2A — Symbol model and signature collection
 
 Status: `pending`
 
 Goal:
-- Extend symbol collection and resolution for module-local scope, imports, aliases, collisions, and import-cycle checks.
+- Introduce a module-aware symbol model and collect user words/import declarations from top-level declarations instead of flat top-level word assumptions.
 
 Allowed files:
 - `src/nicole/symbols.py`
 - `src/nicole/signature_collector.py`
+- `src/nicole/pipeline.py`
+- `tests/test_signature_collector.py`
+
+Forbidden files:
 - `src/nicole/resolver.py`
 - `src/nicole/checker.py`
+- `src/nicole/runtime.py`
+- `src/nicole/host_abi.py`
+- `tests/test_resolver.py`
+- `tests/test_checker.py`
+- `tests/test_pipeline.py`
+
+Required behavior:
+- Collect user words from module declarations and module items.
+- Preserve nested subword collection inside module-owned words.
+- Represent module ownership explicitly in collected symbols.
+- Capture top-level import and alias declarations for downstream resolution.
+- Reject reserved-root module names and reserved-root import aliases.
+
+Non-goals:
+- No identifier resolution changes.
+- No import graph cycle checks yet.
+- No checker behavior changes.
+- No ABI/runtime behavior changes.
+
+Tests:
+- Add/update collector tests for module-owned words, duplicate detection in-module, duplicate module declarations, reserved-root constraints, and import metadata capture.
+
+Validation:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_signature_collector.py -q`
+
+Exit criteria:
+- Collected symbol model is module-aware and no longer depends on flat top-level user-word collection as source of truth.
+
+Risks:
+- Symbol data model drift may break resolver/checker assumptions if not staged carefully.
+
+Modified files:
+- none
+
+Validation results:
+- none
+
+Blockers:
+- none
+
+Residual gaps:
+- none
+
+---
+
+## Phase 2B — Resolver imports and aliases
+
+Status: `pending`
+
+Goal:
+- Implement module-aware resolution with import requirements, alias visibility, reserved-root protections, and import-cycle rejection.
+
+Allowed files:
+- `src/nicole/symbols.py`
+- `src/nicole/resolver.py`
+- `tests/test_resolver.py`
+
+Forbidden files:
+- `src/nicole/signature_collector.py`
+- `src/nicole/checker.py`
 - `src/nicole/pipeline.py`
+- `src/nicole/runtime.py`
+- `src/nicole/host_abi.py`
+- `tests/test_signature_collector.py`
+- `tests/test_checker.py`
+- `tests/test_pipeline.py`
+
+Required behavior:
+- Resolve same-module short names in module scope.
+- Resolve `@module.word` only when allowed by current-module or matching import declaration.
+- Resolve alias-qualified names only when alias is introduced by import.
+- Reject unresolved external qualified references without required import.
+- Enforce reserved-root protections for alias and visible-root collisions.
+- Reject import cycles.
+
+Non-goals:
+- No checker stack/effect semantics changes.
+- No export ABI naming changes.
+- No runtime behavior changes.
+
+Tests:
+- Add/update resolver tests for module-local short names, `@module.word`, alias-qualified references, missing imports, alias collisions, reserved-root violations, and import-cycle rejection.
+
+Validation:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_resolver.py -q`
+
+Exit criteria:
+- Resolver behavior matches module-aware import and alias rules without flat global-user-word fallback.
+
+Risks:
+- Resolver metadata changes may impact checker effect analysis and diagnostics.
+
+Modified files:
+- none
+
+Validation results:
+- none
+
+Blockers:
+- none
+
+Residual gaps:
+- none
+
+---
+
+## Phase 2C — Checker module integration
+
+Status: `pending`
+
+Goal:
+- Adapt checker traversal and effect analysis to module-aware resolved symbols while preserving existing stack/type/effect rules.
+
+Allowed files:
+- `src/nicole/checker.py`
+- `tests/test_checker.py`
+
+Forbidden files:
+- `src/nicole/symbols.py`
+- `src/nicole/signature_collector.py`
+- `src/nicole/resolver.py`
+- `src/nicole/pipeline.py`
+- `src/nicole/runtime.py`
+- `src/nicole/host_abi.py`
+- `tests/test_signature_collector.py`
+- `tests/test_resolver.py`
+- `tests/test_pipeline.py`
+
+Required behavior:
+- Consume module-aware resolution metadata without reintroducing flat naming assumptions.
+- Keep local/builtin/host call checking behavior stable.
+- Keep tail self-call marking and effect graph analysis correct under module-qualified ownership.
+
+Non-goals:
+- No new resolution rules.
+- No pipeline orchestration changes.
+- No ABI/runtime behavior changes.
+
+Tests:
+- Update checker fixtures to module-contained programs where needed.
+- Preserve existing semantic assertions for type checking, control flow, effects, and tail-call marking.
+
+Validation:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_checker.py -q`
+
+Exit criteria:
+- Checker remains semantically stable with module-aware symbol ownership and resolver annotations.
+
+Risks:
+- Effect-analysis naming/ownership mismatches can cause subtle regressions in dirty-call and tail-call checks.
+
+Modified files:
+- none
+
+Validation results:
+- none
+
+Blockers:
+- none
+
+Residual gaps:
+- none
+
+---
+
+## Phase 2D — Pipeline integration and Phase 2 audit
+
+Status: `pending`
+
+Goal:
+- Integrate Phase 2A/2B/2C behaviors in pipeline, migrate Phase 2 tests coherently, and complete Phase 2 module-aware audit readiness.
+
+Allowed files:
+- `src/nicole/pipeline.py`
+- `src/nicole/symbols.py`
+- `src/nicole/signature_collector.py`
+- `src/nicole/resolver.py`
+- `src/nicole/checker.py`
 - `tests/test_signature_collector.py`
 - `tests/test_resolver.py`
 - `tests/test_checker.py`
@@ -235,29 +418,33 @@ Allowed files:
 Forbidden files:
 - `src/nicole/runtime.py`
 - `src/nicole/host_abi.py`
+- `tests/test_tokens.py`
+- `tests/test_lexer.py`
+- `tests/test_ast_nodes.py`
+- `tests/test_parser.py`
 
 Required behavior:
-- User words resolve within module-aware scope.
-- External user references require proper import declarations.
-- Import aliases resolve with defined visibility rules.
-- Reserved roots and collisions follow spec constraints.
-- Import cycles are rejected.
+- Pipeline runs parser -> symbol collection -> standard symbols -> resolver -> checker with module-aware semantics.
+- Phase 2 tests are green with module/import/alias/reserved-root/cycle behavior covered.
+- No runtime/ABI functional changes introduced.
 
 Non-goals:
-- No canonical ABI export-name publication yet.
+- No canonical export ABI work (Phase 3).
 - No runtime dispatch restructuring.
+- No host ABI redesign.
 
 Tests:
-- Add/update resolution and checker tests for module-aware naming and import behavior.
+- Update pipeline integration tests to module-aware fixtures.
+- Ensure resolver/checker test updates are reflected in full Phase 2 validation.
 
 Validation:
 - `PYTHONPATH=src .venv/bin/python -m pytest tests/test_signature_collector.py tests/test_resolver.py tests/test_checker.py tests/test_pipeline.py -q`
 
 Exit criteria:
-- Module-aware symbol and resolution behavior is stable and spec-aligned for supported forms.
+- Phase 2A/2B/2C behavior is integrated and validated end-to-end without scope leak into Phase 3.
 
-Notes:
-- Preserve unrelated checker/runtime semantics while migrating fixtures to module form.
+Risks:
+- Integration-step domino effects across symbols/resolver/checker can surface late if prior phase boundaries were not strict.
 
 Modified files:
 - none
@@ -434,8 +621,11 @@ Residual gaps:
 |---|---|
 | Phase 1A | complete |
 | Phase 1B | complete |
-| Phase 1C | pending |
-| Phase 2 | pending |
+| Phase 1C | complete |
+| Phase 2A | pending |
+| Phase 2B | pending |
+| Phase 2C | pending |
+| Phase 2D | pending |
 | Phase 3 | pending |
 | Phase 4 | pending |
 | Phase 5 | pending |
@@ -455,3 +645,5 @@ Residual gaps:
 - Phase 1B moved to in-progress with module/import/include/export declaration parsing.
 - Phase 1B completed and passed audit.
 - Corrected expression-level qualified module syntax acceptance.
+- Split Phase 2 into Phase 2A/2B/2C/2D for staged module-aware implementation.
+- Phase 1C completed and passed audit.
