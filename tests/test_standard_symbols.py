@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.lexer import lex
 from nicole.parser import ParseError, Parser
+from nicole.source import BUILTIN_SOURCE_PATH, HOST_CONTRACT_SOURCE_PATH
 from nicole.signature_collector import collect_signatures
 from nicole.standard_symbols import StandardSymbolError, load_standard_symbols, with_standard_symbols
 from nicole.symbols import SymbolSource, WordSymbol
@@ -60,6 +61,33 @@ def test_every_standard_builtin_is_word_symbol_with_builtin_source():
     assert builtins
     assert all(isinstance(symbol, WordSymbol) for symbol in builtins)
     assert all(symbol.source is SymbolSource.BUILTIN for symbol in builtins)
+
+
+def test_standard_builtin_word_spans_use_builtin_source_path() -> None:
+    builtins = load_standard_symbols()
+
+    assert builtins
+    assert all(symbol.span.source.path == BUILTIN_SOURCE_PATH for symbol in builtins)
+
+
+def test_standard_builtin_signature_parameter_and_type_spans_use_builtin_source_path() -> None:
+    builtins = load_standard_symbols()
+
+    for symbol in builtins:
+        assert symbol.signature.span.source.path == BUILTIN_SOURCE_PATH
+        for parameter in symbol.signature.inputs:
+            assert parameter.span.source.path == BUILTIN_SOURCE_PATH
+            assert parameter.type_node.span.source.path == BUILTIN_SOURCE_PATH
+        for parameter in symbol.signature.outputs:
+            assert parameter.span.source.path == BUILTIN_SOURCE_PATH
+            assert parameter.type_node.span.source.path == BUILTIN_SOURCE_PATH
+
+
+def test_standard_builtins_do_not_use_host_contract_source_path() -> None:
+    builtins = load_standard_symbols()
+
+    assert builtins
+    assert all(symbol.span.source.path != HOST_CONTRACT_SOURCE_PATH for symbol in builtins)
 
 
 def test_list_get_signature_shape():

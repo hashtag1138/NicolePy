@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .ast_nodes import ParameterNode, QuoteTypeNode, SignatureNode, TypeNode, Visibility
+from .source import SourceFile, SourceLocation
 from .symbols import SymbolSource, SymbolTable, WordSymbol
 from .tokens import SourceSpan
 
@@ -12,7 +13,13 @@ __all__ = [
     "with_standard_symbols",
 ]
 
-_SYNTHETIC_SPAN = SourceSpan(line=0, column=0, offset=0)
+_BUILTIN_SOURCE = SourceFile.builtin()
+_BUILTIN_LOCATION = SourceLocation(line=0, column=0, offset=0)
+_BUILTIN_SPAN = SourceSpan(
+    source=_BUILTIN_SOURCE,
+    start=_BUILTIN_LOCATION,
+    end=_BUILTIN_LOCATION,
+)
 _BUILTIN_OWNER = "std"
 
 
@@ -224,9 +231,9 @@ def _builtin(
 ) -> WordSymbol:
     return WordSymbol(
         name=name,
-        signature=SignatureNode(span=_SYNTHETIC_SPAN, inputs=inputs, outputs=outputs),
+        signature=SignatureNode(span=_BUILTIN_SPAN, inputs=inputs, outputs=outputs),
         visibility=Visibility.PUB,
-        span=_SYNTHETIC_SPAN,
+        span=_BUILTIN_SPAN,
         owner=_BUILTIN_OWNER,
         source=SymbolSource.BUILTIN,
         quote_callable_only=quote_callable_only,
@@ -234,27 +241,27 @@ def _builtin(
 
 
 def _param(name: str, type_node: TypeNode) -> ParameterNode:
-    return ParameterNode(span=_SYNTHETIC_SPAN, name=name, type_node=type_node)
+    return ParameterNode(span=_BUILTIN_SPAN, name=name, type_node=type_node)
 
 
 def _named_type(name: str) -> TypeNode:
-    return TypeNode(span=_SYNTHETIC_SPAN, name=name)
+    return TypeNode(span=_BUILTIN_SPAN, name=name)
 
 
 def _list_of(item_name: str) -> TypeNode:
-    return TypeNode(span=_SYNTHETIC_SPAN, name="List", args=(_named_type(item_name),))
+    return TypeNode(span=_BUILTIN_SPAN, name="List", args=(_named_type(item_name),))
 
 
 def _map_of(key_name: str, value_name: str) -> TypeNode:
     return TypeNode(
-        span=_SYNTHETIC_SPAN,
+        span=_BUILTIN_SPAN,
         name="Map",
         args=(_named_type(key_name), _named_type(value_name)),
     )
 
 
 def _result_of(value_type: TypeNode, error_type: TypeNode) -> TypeNode:
-    return TypeNode(span=_SYNTHETIC_SPAN, name="Result", args=(value_type, error_type))
+    return TypeNode(span=_BUILTIN_SPAN, name="Result", args=(value_type, error_type))
 
 
 def _quote_type(
@@ -263,11 +270,11 @@ def _quote_type(
     outputs: tuple[tuple[str, str], ...],
 ) -> TypeNode:
     return TypeNode(
-        span=_SYNTHETIC_SPAN,
+        span=_BUILTIN_SPAN,
         name="Quote",
         args=(
             QuoteTypeNode(
-                span=_SYNTHETIC_SPAN,
+                span=_BUILTIN_SPAN,
                 captures=tuple(_param(name, _named_type(type_name)) for name, type_name in captures),
                 inputs=tuple(_param(name, _named_type(type_name)) for name, type_name in inputs),
                 outputs=tuple(_param(name, _named_type(type_name)) for name, type_name in outputs),

@@ -211,7 +211,7 @@ Possible phase states:
 |---|---|---|---|---|---|
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
-| 2. Tokens + AST spans | in_progress | pending commit | Phase 2B/2C.5 implemented: case, branch and pattern range propagation | 743 passed | Post-patch audit passed; awaiting commit |
+| 2. Tokens + AST spans | in_progress | pending commit | Phase 2D implemented: builtin provenance uses `<builtin>` spans | 746 passed | Post-patch audit passed; awaiting commit |
 | 3. Structured compilation diagnostics | pending | - | Introduce structured diagnostics model and formatting | - | Depends on phase 2 |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
@@ -374,6 +374,19 @@ Known deferred work:
 - Symbol provenance work remains deferred.
 - The branch boundary rule remains coupled to `_looks_like_case_branch_start_at_current()` and should be revisited only if case grammar changes.
 
+## Phase 2D post-audit notes
+
+- Phase 2D implementation passed post-audit.
+- No fixes are required before commit.
+- Builtin `WordSymbol`, `SignatureNode`, `ParameterNode`, `TypeNode`, and `QuoteTypeNode` helper spans now use `<builtin>` provenance.
+- `SymbolSource.BUILTIN` behavior remains unchanged.
+- Builtin names, signatures, effects and visibility remain unchanged.
+- Host provenance remains resolver/contract-owned and deferred.
+- `<host-contract>` is not used by builtins.
+- Checker-local synthetic helper spans remain deferred.
+- Parser semantics, resolver behavior, checker behavior, runtime behavior and public APIs remain unchanged.
+- Builtin span positions remain conventionally zero-based at `(line=0, column=0, offset=0)`.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -434,3 +447,4 @@ Before Phase 8:
 | 2026-05-23 | pending | Phase 2B/2C.3 implementation prepared: BlockNode range propagation | 729 passed | Post-audit found no blocking issues |
 | 2026-05-23 | pending | Phase 2B/2C.4 implementation prepared: IfNode range propagation | 733 passed | Post-audit found no blocking issues; existing required-else grammar preserved |
 | 2026-05-23 | pending | Phase 2B/2C.5 implementation prepared: CaseNode, CaseBranchNode and constructor PatternNode range propagation | 743 passed | Post-audit found no blocking issues; pattern grammar preserved |
+| 2026-05-23 | pending | Phase 2D implementation prepared: builtin symbols and helpers use `<builtin>` provenance | 746 passed | Post-audit found no blocking issues; host provenance remains deferred |
