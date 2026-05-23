@@ -175,7 +175,11 @@ Blocks:
 Case branches:
 
 - `CaseBranchNode` starts at pattern start.
-- `CaseBranchNode` ends at branch body boundary.
+- `CaseBranchNode` ends at boundary token start.
+- For a branch followed by another branch, boundary token is the next branch pattern start.
+- For the final branch, boundary token is the enclosing `end` token.
+- `CaseBranchNode` span must not require changes to `_parse_block` stop logic.
+- `CaseBranchNode` span must not change supported pattern grammar.
 
 Provenance:
 
@@ -183,6 +187,7 @@ Provenance:
 - host provenance behavior must be explicit
 - synthetic AST nodes preserve synthetic provenance
 - no node may silently downgrade provenance precision
+- Case/pattern range propagation must not introduce nested or multi-argument constructor pattern support.
 
 ## Allowed phase states
 
