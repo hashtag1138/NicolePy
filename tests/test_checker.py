@@ -4,7 +4,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from nicole.ast_nodes import CaseNode, IdentifierNode, IfNode, ModuleDeclaration, QuoteNode, WordDefNode
 from nicole.checker import Checker, CheckerError, check_program
-from nicole.host_abi import HostEffect, HostWord, host_contract_from_words
+from nicole.host_abi import HostEffect, HostOpaqueType, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.resolver import resolve
@@ -36,13 +36,24 @@ def signature_from_source(source: str):
     program = _parse_source(source)
     return program.words[0].signature
 
-def check_source_with_host_contract(source: str, host_words):
+def _opaque_types(type_names):
+    return [HostOpaqueType(name=type_name) for type_name in type_names]
+
+
+def check_source_with_host_contract(source: str, host_words, *, opaque_type_names=()):
     program = _parse_source(source)
     symbols = collect_signatures(program)
     symbols = with_standard_symbols(symbols)
-    contract = host_contract_from_words(host_words)
+    contract = host_contract_from_words(
+        host_words,
+        opaque_types=_opaque_types(opaque_type_names),
+    )
     resolved = resolve(program, symbols, host_contract=contract)
-    return check_program(resolved, symbols)
+    return check_program(
+        resolved,
+        symbols,
+        declared_opaque_type_names=frozenset(contract.opaque_types),
+    )
 
 def check_source_without_builtins(source: str):
     program = _parse_source(source)
@@ -50,12 +61,19 @@ def check_source_without_builtins(source: str):
     resolved = resolve(program, symbols)
     return check_program(resolved, symbols)
 
-def check_source_with_host_contract_without_builtins(source: str, host_words):
+def check_source_with_host_contract_without_builtins(source: str, host_words, *, opaque_type_names=()):
     program = _parse_source(source)
     symbols = collect_signatures(program)
-    contract = host_contract_from_words(host_words)
+    contract = host_contract_from_words(
+        host_words,
+        opaque_types=_opaque_types(opaque_type_names),
+    )
     resolved = resolve(program, symbols, host_contract=contract)
-    return check_program(resolved, symbols)
+    return check_program(
+        resolved,
+        symbols,
+        declared_opaque_type_names=frozenset(contract.opaque_types),
+    )
 
 def _marked_calls(block) -> list[IdentifierNode]:
     marked: list[IdentifierNode] = []
@@ -96,6 +114,114 @@ def test_checker_rejects_unknown_nominal_type_in_signature() -> None:
 def test_checker_rejects_nested_unknown_nominal_type() -> None:
     with pytest.raises(CheckerError, match='type is not supported in v1: CustomError'):
         check_source('module @app\n  : bad { x:Result<Int,CustomError> -- }\n    x drop\n  ;\nend-module\n')
+
+def test_checker_accepts_declared_opaque_type_in_word_signature() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : id { fh:host.io.FileHandle -- out:host.io.FileHandle }\n    fh\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_opaque_type_in_local_declaration() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : local-use { fh:host.io.FileHandle -- out:host.io.FileHandle }\n    fh\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_opaque_type_stack_flow() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : flow { fh:host.io.FileHandle -- out:host.io.FileHandle }\n    fh dup drop\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_opaque_type_in_list() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : keep { xs:List<host.io.FileHandle> -- ys:List<host.io.FileHandle> }\n    xs\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_opaque_type_in_result_value() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : keep { r:Result<host.io.FileHandle,String> -- out:Result<host.io.FileHandle,String> }\n    r\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_opaque_type_in_result_error() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : keep { r:Result<String,host.io.FileHandle> -- out:Result<String,host.io.FileHandle> }\n    r\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_opaque_type_in_quotation_signature() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : make-q { fh:host.io.FileHandle -- q:Quote<{ captured:host.io.FileHandle | x:host.io.FileHandle -- y:host.io.FileHandle }> }\n    fh\n    :[ captured:host.io.FileHandle | x:host.io.FileHandle -- y:host.io.FileHandle |\n      x\n    ;]\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_opaque_type_in_map_string_value() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : keep { m:Map<String,host.io.FileHandle> -- out:Map<String,host.io.FileHandle> }\n    m\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_opaque_type_in_map_int_value() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : keep { m:Map<Int,host.io.FileHandle> -- out:Map<Int,host.io.FileHandle> }\n    m\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_opaque_type_in_map_bool_value() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : keep { m:Map<Bool,host.io.FileHandle> -- out:Map<Bool,host.io.FileHandle> }\n    m\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_rejects_undeclared_host_opaque_type() -> None:
+    with pytest.raises(CheckerError, match='undeclared host opaque type in checker: host.io.FileHandle'):
+        check_source_with_host_contract(
+            'module @app\n  : bad { -- fh:host.io.FileHandle }\n  ;\nend-module\n',
+            [],
+            opaque_type_names=('host.net.TcpSocket',),
+        )
+
+
+def test_checker_rejects_declared_opaque_type_as_map_key() -> None:
+    with pytest.raises(CheckerError, match='Map<K,V> key type must be Int, String, or Bool in v1'):
+        check_source_with_host_contract(
+            'module @app\n  : bad { -- m:Map<host.io.FileHandle,String> }\n    map.empty:Map<host.io.FileHandle,String>\n  ;\nend-module\n',
+            [],
+            opaque_type_names=('host.io.FileHandle',),
+        )
+
+
+@pytest.mark.parametrize('operator', ['=', '!='])
+def test_checker_rejects_equality_on_declared_opaque_type(operator: str) -> None:
+    with pytest.raises(CheckerError, match='equality is not supported for host opaque types'):
+        check_source_with_host_contract(
+            f'module @app\n  : bad {{ x:host.io.FileHandle y:host.io.FileHandle -- b:Bool }}\n    x y {operator}\n  ;\nend-module\n',
+            [],
+            opaque_type_names=('host.io.FileHandle',),
+        )
+
 
 def test_checker_accepts_host_word_with_matching_signature():
     host_signature = signature_from_source('module @app\n  : hostsig { msg:String -- } ;\nend-module\n')

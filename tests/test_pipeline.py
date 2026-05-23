@@ -225,18 +225,30 @@ def test_pipeline_accepts_host_contract_with_declared_opaque_types_in_phase1() -
     assert "host.io.FileHandle" in result.host_contract.opaque_types
 
 
-def test_declared_opaque_registry_does_not_activate_checker_support() -> None:
+def test_pipeline_checker_accepts_declared_opaque_types_from_host_contract() -> None:
     host_contract = host_contract_from_words(
         [],
         opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
     )
-    with pytest.raises(CheckerError, match="type is not supported in v1"):
+    result = analyze_program(
+        "module @app\n"
+        "  : run { fh:host.io.FileHandle -- out:host.io.FileHandle }\n"
+        "    fh\n"
+        "  ;\n"
+        "end-module\n",
+        host_contract=host_contract,
+    )
+    assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_checker_rejects_undeclared_opaque_types() -> None:
+    with pytest.raises(CheckerError, match="undeclared host opaque type in checker: host.io.FileHandle"):
         analyze_program(
             "module @app\n"
             "  : run { -- fh:host.io.FileHandle }\n"
             "  ;\n"
             "end-module\n",
-            host_contract=host_contract,
+            host_contract=host_contract_from_words([]),
         )
 
 
@@ -418,7 +430,7 @@ def test_pipeline_export_abi_validation_is_preserved() -> None:
 
 
 def test_pipeline_wires_declared_opaque_types_into_export_collection(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _passthrough_check(program, symbols):
+    def _passthrough_check(program, symbols, **_kwargs):
         return program
 
     monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)
@@ -441,7 +453,7 @@ def test_pipeline_wires_declared_opaque_types_into_export_collection(monkeypatch
 def test_pipeline_export_rejects_undeclared_opaque_type_when_checker_is_bypassed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def _passthrough_check(program, symbols):
+    def _passthrough_check(program, symbols, **_kwargs):
         return program
 
     monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)

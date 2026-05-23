@@ -97,7 +97,7 @@ Do not freeze transitional behavior; assert final ABI invariants only.
 
 ## Phase 3 — Checker support
 
-Status: pending
+Status: completed
 
 Purpose:
 Add checker support for host opaque types, including static admission rules and static rejections.
@@ -354,3 +354,44 @@ Unexpected findings:
 
 Follow-up actions:
 Ready for post-correction audit
+
+### Update 2026-05-23 08:25
+
+Phase:
+Phase 3 — Checker support
+
+Changes:
+- Wired declared opaque type names into checker entrypoints (`check_program`/`check`) and pipeline analysis path.
+- Added checker-local host opaque type admission in `_validate_language_type_v1(...)` using declared membership only.
+- Added dedicated checker rejection for undeclared `host.*` types.
+- Preserved map key restriction and existing shared ABI validator behavior (`validate_type_v1(...)` unchanged).
+- Added static checker rejection for `=` and `!=` on declared opaque operands.
+- Kept runtime behavior unchanged.
+
+Tests added:
+- `tests/test_checker.py`
+- `test_checker_accepts_declared_opaque_type_in_word_signature`
+- `test_checker_accepts_declared_opaque_type_in_local_declaration`
+- `test_checker_accepts_declared_opaque_type_stack_flow`
+- `test_checker_accepts_declared_opaque_type_in_list`
+- `test_checker_accepts_declared_opaque_type_in_result_value`
+- `test_checker_accepts_declared_opaque_type_in_result_error`
+- `test_checker_accepts_declared_opaque_type_in_quotation_signature`
+- `test_checker_accepts_declared_opaque_type_in_map_string_value`
+- `test_checker_accepts_declared_opaque_type_in_map_int_value`
+- `test_checker_accepts_declared_opaque_type_in_map_bool_value`
+- `test_checker_rejects_undeclared_host_opaque_type`
+- `test_checker_rejects_declared_opaque_type_as_map_key`
+- `test_checker_rejects_equality_on_declared_opaque_type`
+- `tests/test_pipeline.py`
+- `test_pipeline_checker_accepts_declared_opaque_types_from_host_contract`
+- `test_pipeline_checker_rejects_undeclared_opaque_types`
+
+Tests passing:
+- `.venv/bin/python -m pytest -q` passed (`680 passed`)
+
+Unexpected findings:
+- None.
+
+Follow-up actions:
+Proceed to post-Phase 3 audit

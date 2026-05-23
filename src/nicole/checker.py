@@ -82,8 +82,14 @@ class EffectAnalysisResult:
 
 
 class Checker:
-    def __init__(self, symbols: SymbolTable) -> None:
+    def __init__(
+        self,
+        symbols: SymbolTable,
+        *,
+        declared_opaque_type_names: frozenset[str] = frozenset(),
+    ) -> None:
         self._symbols = symbols
+        self._declared_opaque_type_names = frozenset(declared_opaque_type_names)
 
     def check(self, program: ProgramNode) -> ProgramNode:
         self._validate_program_types(program)
@@ -157,10 +163,16 @@ class Checker:
 
     def _validate_type_node(self, type_node: TypeNode) -> None:
         try:
-            _validate_language_type_v1(type_node)
+            _validate_language_type_v1(
+                type_node,
+                declared_opaque_type_names=self._declared_opaque_type_names,
+            )
             validate_type_v1(type_node, forbid_quote=False)
         except HostABIError as error:
             self._raise_error(error.message, type_node.span.line, type_node.span.column)
+
+    def _is_declared_opaque_type(self, type_node: TypeNode) -> bool:
+        return type_node.name in self._declared_opaque_type_names and len(type_node.args) == 0
 
     def _check_word(self, word: WordDefNode) -> None:
         local_types = {parameter.name: parameter.type_node for parameter in word.signature.inputs}
@@ -674,6 +686,8 @@ class Checker:
             right = self._pop_type(stack, node.span.line, node.span.column)
             left = self._pop_type(stack, node.span.line, node.span.column)
             if _same_type(left, right):
+                if self._is_declared_opaque_type(left):
+                    self._raise_error("equality is not supported for host opaque types", node.span.line, node.span.column)
                 stack.append(StackValue(_builtin_type("Bool")))
                 return
             self._raise_error("invalid equality operand types", node.span.line, node.span.column)
@@ -1646,12 +1660,29 @@ class Checker:
         return words
 
 
-def check(program: ProgramNode, symbols: SymbolTable) -> ProgramNode:
-    return Checker(symbols).check(program)
+def check(
+    program: ProgramNode,
+    symbols: SymbolTable,
+    *,
+    declared_opaque_type_names: frozenset[str] = frozenset(),
+) -> ProgramNode:
+    return Checker(
+        symbols,
+        declared_opaque_type_names=declared_opaque_type_names,
+    ).check(program)
 
 
-def check_program(program: ProgramNode, symbols: SymbolTable) -> ProgramNode:
-    return check(program, symbols)
+def check_program(
+    program: ProgramNode,
+    symbols: SymbolTable,
+    *,
+    declared_opaque_type_names: frozenset[str] = frozenset(),
+) -> ProgramNode:
+    return check(
+        program,
+        symbols,
+        declared_opaque_type_names=declared_opaque_type_names,
+    )
 
 
 def _literal_type(node: LiteralNode) -> TypeNode:
@@ -1672,7 +1703,19 @@ def _builtin_type(name: str) -> TypeNode:
     return TypeNode(span=SourceSpan(line=0, column=0, offset=0), name=name)
 
 
-def _validate_language_type_v1(type_node: TypeNode) -> None:
+def _validate_language_type_v1(
+    type_node: TypeNode,
+    *,
+    declared_opaque_type_names: frozenset[str] = frozenset(),
+) -> None:
+    if type_node.name in declared_opaque_type_names:
+        if type_node.args:
+            raise HostABIError(f"type is not supported in v1: {type_node.name}")
+        return
+
+    if type_node.name.startswith("host."):
+        raise HostABIError(f"undeclared host opaque type in checker: {type_node.name}")
+
     if type_node.name in _LANGUAGE_SCALAR_TYPES_V1:
         if type_node.args:
             raise HostABIError(f"type is not supported in v1: {type_node.name}")
@@ -1681,7 +1724,10 @@ def _validate_language_type_v1(type_node: TypeNode) -> None:
     if type_node.name == "List":
         if len(type_node.args) != 1 or not isinstance(type_node.args[0], TypeNode):
             raise HostABIError("type is not supported in v1: List")
-        _validate_language_type_v1(type_node.args[0])
+        _validate_language_type_v1(
+            type_node.args[0],
+            declared_opaque_type_names=declared_opaque_type_names,
+        )
         return
 
     if type_node.name == "Map":
@@ -1693,8 +1739,14 @@ def _validate_language_type_v1(type_node: TypeNode) -> None:
             raise HostABIError("type is not supported in v1: Map")
         if key_type.name not in {"Int", "String", "Bool"}:
             raise HostABIError("Map<K,V> key type must be Int, String, or Bool in v1")
-        _validate_language_type_v1(key_type)
-        _validate_language_type_v1(value_type)
+        _validate_language_type_v1(
+            key_type,
+            declared_opaque_type_names=declared_opaque_type_names,
+        )
+        _validate_language_type_v1(
+            value_type,
+            declared_opaque_type_names=declared_opaque_type_names,
+        )
         return
 
     if type_node.name == "Result":
@@ -1704,8 +1756,14 @@ def _validate_language_type_v1(type_node: TypeNode) -> None:
         error_type = type_node.args[1]
         if not isinstance(value_type, TypeNode) or not isinstance(error_type, TypeNode):
             raise HostABIError("type is not supported in v1: Result")
-        _validate_language_type_v1(value_type)
-        _validate_language_type_v1(error_type)
+        _validate_language_type_v1(
+            value_type,
+            declared_opaque_type_names=declared_opaque_type_names,
+        )
+        _validate_language_type_v1(
+            error_type,
+            declared_opaque_type_names=declared_opaque_type_names,
+        )
         return
 
     if type_node.name in {"Quote", "DirtyQuote"}:
@@ -1713,11 +1771,20 @@ def _validate_language_type_v1(type_node: TypeNode) -> None:
             raise HostABIError(f"type is not supported in v1: {type_node.name}")
         quote_signature = type_node.args[0]
         for parameter in quote_signature.captures:
-            _validate_language_type_v1(parameter.type_node)
+            _validate_language_type_v1(
+                parameter.type_node,
+                declared_opaque_type_names=declared_opaque_type_names,
+            )
         for parameter in quote_signature.inputs:
-            _validate_language_type_v1(parameter.type_node)
+            _validate_language_type_v1(
+                parameter.type_node,
+                declared_opaque_type_names=declared_opaque_type_names,
+            )
         for parameter in quote_signature.outputs:
-            _validate_language_type_v1(parameter.type_node)
+            _validate_language_type_v1(
+                parameter.type_node,
+                declared_opaque_type_names=declared_opaque_type_names,
+            )
         return
 
     raise HostABIError(f"type is not supported in v1: {type_node.name}")

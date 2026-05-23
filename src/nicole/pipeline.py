@@ -27,7 +27,11 @@ def analyze_program(source: str, *, host_contract: HostContract | None = None) -
     symbols = collect_signatures(program)
     symbols = with_standard_symbols(symbols)
     resolved = resolve(program, symbols, host_contract=effective_host_contract)
-    checked = check_program(resolved, symbols)
+    checked = check_program(
+        resolved,
+        symbols,
+        declared_opaque_type_names=frozenset(effective_host_contract.opaque_types),
+    )
     export_contract = collect_exports(symbols, host_contract=effective_host_contract)
     return CheckedProgram(
         program=checked,
