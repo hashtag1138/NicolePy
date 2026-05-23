@@ -997,3 +997,102 @@ def test_parser_word_def_span_starts_at_earliest_modifier_when_pub_and_dirty():
     assert word.name == "run"
     assert word.span.start == pub_token.span.start
     assert word.span.end == semicolon_token.span.end
+
+
+def test_parser_signature_span_includes_delimiters():
+    source = "module @app\n  : run { a:Int -- b:Int }\n    a\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    signature = program.words[0].signature
+    lbrace_token = _token_by_kind(tokens, TokenKind.LBRACE, index=0)
+    rbrace_token = _token_by_kind(tokens, TokenKind.RBRACE, index=0)
+
+    assert signature.span.start == lbrace_token.span.start
+    assert signature.span.end == rbrace_token.span.end
+
+
+def test_parser_quote_type_span_includes_delimiters():
+    source = (
+        "module @app\n"
+        "  : typed { -- q:Quote<{ | x:Int -- y:Int }> }\n"
+        "    0 drop\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    quote_type = program.words[0].signature.outputs[0].type_node.args[0]
+    quote_type_lbrace = _token_by_kind(tokens, TokenKind.LBRACE, index=1)
+    quote_type_rbrace = _token_by_kind(tokens, TokenKind.RBRACE, index=0)
+
+    assert quote_type.span.start == quote_type_lbrace.span.start
+    assert quote_type.span.end == quote_type_rbrace.span.end
+
+
+def test_parser_non_empty_list_literal_span_includes_closing_bracket():
+    source = "module @app\n  : xs { -- ys:List<Int> }\n    [1, 2, 3]\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    list_node = program.words[0].body.items[0]
+    lbracket_token = _token_by_kind(tokens, TokenKind.LBRACKET)
+    rbracket_token = _token_by_kind(tokens, TokenKind.RBRACKET)
+
+    assert isinstance(list_node, ListLiteralNode)
+    assert list_node.span.start == lbracket_token.span.start
+    assert list_node.span.end == rbracket_token.span.end
+
+
+def test_parser_empty_list_literal_span_includes_closing_bracket():
+    source = "module @app\n  : xs { -- ys:List<Int> }\n    []:List<Int>\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    list_node = program.words[0].body.items[0]
+    lbracket_token = _token_by_kind(tokens, TokenKind.LBRACKET)
+    rbracket_token = _token_by_kind(tokens, TokenKind.RBRACKET)
+
+    assert isinstance(list_node, TypedEmptyListNode)
+    assert list_node.span.start == lbracket_token.span.start
+    assert list_node.span.end == rbracket_token.span.end
+
+
+def test_parser_quote_node_span_includes_closing_delimiter():
+    source = "module @app\n  : q { -- }\n    :[ | -- | 1 ;]\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    quote = program.words[0].body.items[0]
+    quote_start_token = _token_by_kind(tokens, TokenKind.QUOTE_START)
+    quote_end_token = _token_by_kind(tokens, TokenKind.QUOTE_END)
+
+    assert isinstance(quote, QuoteNode)
+    assert quote.span.start == quote_start_token.span.start
+    assert quote.span.end == quote_end_token.span.end
+
+
+def test_parser_nested_structures_preserve_outer_ranges():
+    source = (
+        "module @app\n"
+        "  : q { -- q:Quote<{ | -- }> }\n"
+        "    :[ | -- | [1, 2] drop ;]\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    word = program.words[0]
+    signature = word.signature
+    quote_type = signature.outputs[0].type_node.args[0]
+    quote_node = word.body.items[0]
+
+    signature_lbrace = _token_by_kind(tokens, TokenKind.LBRACE, index=0)
+    signature_rbrace = _token_by_kind(tokens, TokenKind.RBRACE, index=1)
+    quote_type_lbrace = _token_by_kind(tokens, TokenKind.LBRACE, index=1)
+    quote_type_rbrace = _token_by_kind(tokens, TokenKind.RBRACE, index=0)
+    quote_start_token = _token_by_kind(tokens, TokenKind.QUOTE_START)
+    quote_end_token = _token_by_kind(tokens, TokenKind.QUOTE_END)
+
+    assert signature.span.start == signature_lbrace.span.start
+    assert signature.span.end == signature_rbrace.span.end
+    assert quote_type.span.start == quote_type_lbrace.span.start
+    assert quote_type.span.end == quote_type_rbrace.span.end
+    assert quote_node.span.start == quote_start_token.span.start
+    assert quote_node.span.end == quote_end_token.span.end

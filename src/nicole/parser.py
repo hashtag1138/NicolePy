@@ -245,8 +245,8 @@ class Parser:
         self._ensure_unique_parameter_names(inputs, "duplicate local name in word frame")
         self._expect(TokenKind.STACK_ARROW, "expected '--' in signature")
         outputs = self._parse_parameters_until(TokenKind.RBRACE)
-        self._expect(TokenKind.RBRACE, "expected '}' to end signature")
-        return SignatureNode(span=start.span, inputs=tuple(inputs), outputs=tuple(outputs))
+        end = self._expect(TokenKind.RBRACE, "expected '}' to end signature")
+        return SignatureNode(span=self._span_from(start, end), inputs=tuple(inputs), outputs=tuple(outputs))
 
     def _parse_parameters_until(self, terminator: TokenKind) -> list[ParameterNode]:
         params: list[ParameterNode] = []
@@ -321,9 +321,9 @@ class Parser:
         )
         self._expect(TokenKind.STACK_ARROW, "malformed type")
         outputs = self._parse_parameters_until(TokenKind.RBRACE)
-        self._expect(TokenKind.RBRACE, "malformed type")
+        end = self._expect(TokenKind.RBRACE, "malformed type")
         return QuoteTypeNode(
-            span=start.span,
+            span=self._span_from(start, end),
             captures=tuple(captures),
             inputs=tuple(inputs),
             outputs=tuple(outputs),
@@ -455,19 +455,20 @@ class Parser:
     def _parse_list_literal(self, *, nested_words: list[WordDefNode] | None) -> AtomNode:
         start = self._expect(TokenKind.LBRACKET, "expected '['")
         elements: list[AtomNode] = []
-        if self._match(TokenKind.RBRACKET):
+        if self._check(TokenKind.RBRACKET):
+            end = self._expect(TokenKind.RBRACKET, "expected ']'")
             self._expect(TokenKind.COLON, "empty list requires explicit type annotation")
             type_node = self._parse_type()
             if type_node.name != "List":
                 self._raise_error("empty list requires List<T> annotation")
-            return TypedEmptyListNode(span=start.span, type_node=type_node)
+            return TypedEmptyListNode(span=self._span_from(start, end), type_node=type_node)
 
         while True:
             elements.append(self._parse_list_element(nested_words=nested_words))
             if self._match(TokenKind.COMMA):
                 continue
-            self._expect(TokenKind.RBRACKET, "expected ']'")
-            return ListLiteralNode(span=start.span, elements=tuple(elements))
+            end = self._expect(TokenKind.RBRACKET, "expected ']'")
+            return ListLiteralNode(span=self._span_from(start, end), elements=tuple(elements))
 
     def _parse_typed_empty_map(self) -> TypedEmptyMapNode:
         start = self._expect(TokenKind.IDENTIFIER, "expected 'map.empty'")
@@ -516,9 +517,9 @@ class Parser:
             nested_words=nested_words,
             allow_nested_defs=False,
         )
-        self._expect(TokenKind.QUOTE_END, "malformed quotation")
+        end = self._expect(TokenKind.QUOTE_END, "malformed quotation")
         return QuoteNode(
-            span=start.span,
+            span=self._span_from(start, end),
             body=body,
             captures=tuple(captures),
             inputs=tuple(inputs),
