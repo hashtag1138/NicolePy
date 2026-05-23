@@ -188,6 +188,11 @@ Provenance:
 - synthetic AST nodes preserve synthetic provenance
 - no node may silently downgrade provenance precision
 - Case/pattern range propagation must not introduce nested or multi-argument constructor pattern support.
+- Phase 2D must keep host provenance resolver/contract-owned.
+- Phase 2D must not introduce host words into `SymbolTable`.
+- Phase 2D must not introduce a host `SymbolSource`.
+- `<host-contract>` remains a reserved source convention for later host diagnostics or host binding phases.
+- Phase 2D implementation scope is builtin provenance plus explicit host deferral.
 
 ## Allowed phase states
 
@@ -297,6 +302,8 @@ Known deferred work:
 
 - checker synthetic helpers may still use synthetic spans
 - host symbol provenance may remain resolver-owned until later phases
+- host provenance remains resolver/contract-owned during Phase 2D
+- first-class host provenance is deferred to diagnostics or host-binding phases
 - builtin provenance wiring may require later cleanup
 - runtime-generated helper nodes remain outside Phase 2 scope
 
