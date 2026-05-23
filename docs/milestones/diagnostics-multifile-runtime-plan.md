@@ -217,7 +217,7 @@ Possible phase states:
 |---|---|---|---|---|---|
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
-| 2. Tokens + AST spans | in_progress | pending commit | Phase 2B/2C.6 implemented: parameter, type and typed-empty literal range propagation | 750 passed | Post-patch audit passed; awaiting commit |
+| 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
 | 3. Structured compilation diagnostics | pending | - | Introduce structured diagnostics model and formatting | - | Depends on phase 2 |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
@@ -228,15 +228,16 @@ Possible phase states:
 
 ## Audit findings summary
 
-- Current `SourceSpan` is point-only and file-less.
-- Tokens and AST are partially source-aware.
-- Diagnostics are currently exception/message based.
-- No structured `Diagnostic` model exists.
-- No `NicoleCompiler` exists.
-- No real `NicoleInterpreter` API exists.
-- Runtime errors lack span/operation/stack trace.
-- Tests are green at audit baseline.
-- Documentation target references are inconsistent and should be realigned later in a dedicated documentation cleanup patch, not during Phase 1A.
+- Source model is now file-bound and range-based.
+- Tokens carry file-bound end-exclusive spans.
+- AST nodes are range-aware according to Phase 2 frozen conventions.
+- Builtin symbols and builtin helper nodes use `<builtin>` provenance.
+- Host provenance remains resolver/contract-owned and deferred.
+- Diagnostics are still exception/message based and are the next milestone area.
+- No `NicoleCompiler` exists yet.
+- No real `NicoleInterpreter` API exists yet.
+- Runtime errors still lack structured span/operation/stack trace diagnostics.
+- Documentation target references remain inconsistent and should be realigned later in a dedicated documentation cleanup patch.
 
 ## Compatibility constraints already observed
 
@@ -257,19 +258,20 @@ Possible phase states:
 
 ## Next patch
 
-Phase 1A — lexer-origin source model.
+Phase 3A — diagnostic model freeze and structured diagnostics design.
 
 Scope:
-- introduce/extend source primitives
-- make spans file-bound and range-based
-- preserve compatibility accessors `line`, `column`, `offset`
-- keep tests green
+- freeze compile-time `Diagnostic` fields
+- freeze `DiagnosticError` raise/return policy
+- freeze compatibility policy for current exceptions and `__str__`
+- freeze diagnostic code naming scheme
+- freeze source excerpt/caret formatting ownership
 
 Non-goals:
-- no rich diagnostics yet
+- no runtime diagnostics yet
 - no multi-file compiler yet
-- no runtime changes yet
 - no interpreter API yet
+- no host method binding yet
 
 ## Phase 1A detailed sequence
 
@@ -405,6 +407,17 @@ Known deferred work:
 - Parser grammar and malformed type behavior remain unchanged.
 - Parser semantics, runtime behavior and public APIs remain unchanged.
 
+## Phase 2 completion notes
+
+- Phase 2 completion audit passed after final parser span patch.
+- Phase 2 is functionally complete in code.
+- Parser AST spans now follow the frozen Phase 2 range conventions.
+- Builtin provenance now uses `<builtin>` spans.
+- Host provenance remains explicitly deferred.
+- Checker-local synthetic spans remain deferred.
+- No diagnostics, runtime, compiler, interpreter or language semantic changes were introduced.
+- Phase 3 may start only after this tracking cleanup is committed.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -461,9 +474,9 @@ Before Phase 8:
 | 2026-05-23 | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A implementation prepared: source.py, SourceSpan compatibility, lexer range spans, Phase 1A tests | 707 passed | Post-audit found no blocking issues |
 | 2026-05-23 | - | Phase 2 propagation audit and convention freeze | 707 passed | Documentation-only refinement before implementation |
 | 2026-05-23 | `d4e3bc8cb661a17a54bc6ca3cdcc489fee8b2096` | Phase 2B/2C.1 implementation prepared: parser span helpers and declaration range propagation | 718 passed | Post-audit found no blocking issues |
-| 2026-05-23 | pending | Phase 2B/2C.2 implementation prepared: structured node range propagation | 724 passed | Post-audit found no blocking issues |
-| 2026-05-23 | pending | Phase 2B/2C.3 implementation prepared: BlockNode range propagation | 729 passed | Post-audit found no blocking issues |
-| 2026-05-23 | pending | Phase 2B/2C.4 implementation prepared: IfNode range propagation | 733 passed | Post-audit found no blocking issues; existing required-else grammar preserved |
-| 2026-05-23 | pending | Phase 2B/2C.5 implementation prepared: CaseNode, CaseBranchNode and constructor PatternNode range propagation | 743 passed | Post-audit found no blocking issues; pattern grammar preserved |
-| 2026-05-23 | pending | Phase 2D implementation prepared: builtin symbols and helpers use `<builtin>` provenance | 746 passed | Post-audit found no blocking issues; host provenance remains deferred |
-| 2026-05-23 | pending | Phase 2B/2C.6 implementation prepared: ParameterNode, TypeNode, TypedEmptyListNode and TypedEmptyMapNode range propagation | 750 passed | Post-audit found no blocking issues; grammar preserved |
+| 2026-05-23 | `f96f232ce737bfde3a730796908cec6fe6ada844` | Phase 2B/2C.2 implementation prepared: structured node range propagation | 724 passed | Post-audit found no blocking issues |
+| 2026-05-23 | `fa9490afd95b55f4010324a64faabec3dea2c2fd` | Phase 2B/2C.3 implementation prepared: BlockNode range propagation | 729 passed | Post-audit found no blocking issues |
+| 2026-05-23 | `ee39540a9f2c53a48c4fdd9a69407301c02db09f` | Phase 2B/2C.4 implementation prepared: IfNode range propagation | 733 passed | Post-audit found no blocking issues; existing required-else grammar preserved |
+| 2026-05-23 | `16605aca910b6a796c9bb7e2dbdcbf2a38963c6b` | Phase 2B/2C.5 implementation prepared: CaseNode, CaseBranchNode and constructor PatternNode range propagation | 743 passed | Post-audit found no blocking issues; pattern grammar preserved |
+| 2026-05-23 | `a84bfd0bfd47267afc2ef7e4573630b424b21e5c` | Phase 2D implementation prepared: builtin symbols and helpers use `<builtin>` provenance | 746 passed | Post-audit found no blocking issues; host provenance remains deferred |
+| 2026-05-23 | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2B/2C.6 implementation prepared: ParameterNode, TypeNode, TypedEmptyListNode and TypedEmptyMapNode range propagation | 750 passed | Post-audit found no blocking issues; grammar preserved |
