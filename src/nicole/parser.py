@@ -91,7 +91,6 @@ class Parser:
     def parse(self) -> ProgramNode:
         declarations: list[ASTNode] = []
         words: list[WordDefNode] = []
-        span = self._current().span
 
         while not self._check(TokenKind.EOF):
             declaration = self._parse_top_level_declaration()
@@ -100,6 +99,12 @@ class Parser:
                 words.extend(
                     item for item in declaration.items if isinstance(item, WordDefNode)
                 )
+
+        eof_token = self._current()
+        if declarations:
+            span = self._span_from(declarations[0], eof_token)
+        else:
+            span = eof_token.span
 
         return ProgramNode(
             span=span,
@@ -140,9 +145,9 @@ class Parser:
                 continue
             self._raise_error("unexpected token")
 
-        self._expect(TokenKind.END_MODULE, "missing 'end-module'")
+        end = self._expect(TokenKind.END_MODULE, "missing 'end-module'")
         return ModuleDeclaration(
-            span=start.span,
+            span=self._span_from(start, end),
             name=module_name,
             items=tuple(items),
         )
@@ -151,16 +156,18 @@ class Parser:
         start = self._expect(TokenKind.IMPORT, "expected 'import'")
         target = self._parse_qualified_module_name("expected import target")
         alias: str | None = None
+        end: Token | QualifiedModuleName = target
         if self._check(TokenKind.IDENTIFIER) and self._current().lexeme == "as":
             self._advance()
             alias_token = self._expect(TokenKind.IDENTIFIER, "expected alias after 'as'")
             alias = alias_token.lexeme
-        return ImportDeclaration(span=start.span, target=target, alias=alias)
+            end = alias_token
+        return ImportDeclaration(span=self._span_from(start, end), target=target, alias=alias)
 
     def _parse_include_declaration(self) -> IncludeDeclaration:
         start = self._expect(TokenKind.INCLUDE, "expected 'include'")
         path_token = self._expect(TokenKind.STRING_LITERAL, "expected include path string")
-        return IncludeDeclaration(span=start.span, path=path_token.lexeme)
+        return IncludeDeclaration(span=self._span_from(start, path_token), path=path_token.lexeme)
 
     def _parse_export_declaration(self) -> ExportDeclaration:
         start = self._expect(TokenKind.EXPORT, "expected 'export'")
@@ -168,7 +175,7 @@ class Parser:
         word_token = self._expect_definition_identifier("expected exported word name")
         if "." in word_token.lexeme:
             self._raise_error("export declaration expects local word name")
-        return ExportDeclaration(span=start.span, word_name=word_token.lexeme)
+        return ExportDeclaration(span=self._span_from(start, word_token), word_name=word_token.lexeme)
 
     def _parse_qualified_module_name(self, message: str) -> QualifiedModuleName:
         token = self._expect(TokenKind.QUALIFIED_MODULE_NAME, message)
@@ -176,7 +183,7 @@ class Parser:
         return QualifiedModuleName(span=token.span, parts=parts)
 
     def _parse_word_def(self, *, is_top_level: bool) -> WordDefNode:
-        start = self._current().span
+        start = self._current()
         visibility = Visibility.PRIVATE
         is_dirty_annotation = False
 
@@ -200,9 +207,9 @@ class Parser:
             nested_words=nested_words,
             allow_nested_defs=True,
         )
-        self._expect(TokenKind.SEMICOLON, "missing ';'")
+        end = self._expect(TokenKind.SEMICOLON, "missing ';'")
         return WordDefNode(
-            span=start,
+            span=self._span_from(start, end),
             name=name_token.lexeme,
             signature=signature,
             body=body,
@@ -210,6 +217,27 @@ class Parser:
             is_dirty_annotation=is_dirty_annotation,
             nested_words=tuple(nested_words),
         )
+
+    def _span_from(self, start: Token | ASTNode | SourceSpan, end: Token | ASTNode | SourceSpan) -> SourceSpan:
+        start_span = self._as_span(start)
+        end_span = self._as_span(end)
+        if start_span.source != end_span.source:
+            raise ValueError("cannot combine spans from different sources")
+        return SourceSpan(
+            source=start_span.source,
+            start=start_span.start,
+            end=end_span.end,
+        )
+
+    @staticmethod
+    def _as_span(value: Token | ASTNode | SourceSpan) -> SourceSpan:
+        if isinstance(value, SourceSpan):
+            return value
+        if isinstance(value, Token):
+            return value.span
+        if isinstance(value, ASTNode):
+            return value.span
+        raise TypeError("value must expose a span")
 
     def _parse_signature(self) -> SignatureNode:
         start = self._expect(TokenKind.LBRACE, "expected '{' to start signature")

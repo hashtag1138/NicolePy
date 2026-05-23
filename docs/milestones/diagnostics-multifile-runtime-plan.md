@@ -201,7 +201,7 @@ Possible phase states:
 |---|---|---|---|---|---|
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | in_progress | pending commit | Phase 1A implemented: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Post-Phase-1A audit passed; awaiting commit |
-| 2. Tokens + AST spans | pending | - | Propagate stable file-bound spans through tokens/AST/symbol provenance | - | Depends on phase 1 |
+| 2. Tokens + AST spans | in_progress | pending commit | Phase 2B/2C.1 implemented: parser span helpers and top-level declaration ranges | 718 passed | Post-patch audit passed; awaiting commit |
 | 3. Structured compilation diagnostics | pending | - | Introduce structured diagnostics model and formatting | - | Depends on phase 2 |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
@@ -305,6 +305,17 @@ Known deferred work:
 - `<builtin>` and `<host-contract>` conventions exist in the source model but are not fully wired into all producer sites yet.
 - `SourceSpan` validation currently enforces monotonic offsets; stricter line/column consistency may be revisited later if needed.
 
+## Phase 2B/2C.1 post-audit notes
+
+- Phase 2B/2C.1 implementation passed post-audit.
+- No fixes are required before commit.
+- Parser span helpers combine existing spans instead of inventing source locations.
+- Top-level declaration ranges are now propagated for `ProgramNode`, `ModuleDeclaration`, `ImportDeclaration`, `IncludeDeclaration`, `ExportDeclaration`, and `WordDefNode`.
+- Parser semantics, runtime behavior and public APIs remain unchanged.
+- Remaining Phase 2 nodes are intentionally deferred.
+- Cross-source span guard is defensive and currently untested directly.
+- Parser EOF fallback legacy behavior remains deferred.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -360,3 +371,4 @@ Before Phase 8:
 | - | - | - | - | - |
 | 2026-05-23 | pending | Phase 1A implementation prepared: source.py, SourceSpan compatibility, lexer range spans, Phase 1A tests | 707 passed | Post-audit found no blocking issues |
 | 2026-05-23 | - | Phase 2 propagation audit and convention freeze | 707 passed | Documentation-only refinement before implementation |
+| 2026-05-23 | pending | Phase 2B/2C.1 implementation prepared: parser span helpers and declaration range propagation | 718 passed | Post-audit found no blocking issues |
