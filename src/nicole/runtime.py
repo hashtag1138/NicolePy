@@ -36,6 +36,7 @@ __all__ = [
     "UNIT",
     "Ok",
     "Err",
+    "RuntimeOpaqueValue",
     "RuntimeQuote",
     "run_export",
 ]
@@ -67,6 +68,12 @@ class Ok:
 @dataclass(frozen=True, slots=True)
 class Err:
     error: str
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeOpaqueValue:
+    type_name: str
+    payload: object
 
 
 @dataclass(frozen=True, slots=True)
@@ -967,6 +974,8 @@ def _execute_operator(operator: str, stack: RuntimeStack) -> None:
     if operator in {"=", "!="}:
         right = stack.pop()
         left = stack.pop()
+        if _is_runtime_opaque_value(left) or _is_runtime_opaque_value(right):
+            raise RuntimeError("equality is not supported for host opaque values")
         if type(left) is not type(right):
             raise RuntimeError("wrong runtime signature for equality operands: expected matching types")
         if operator == "=":
@@ -1065,6 +1074,8 @@ def _matches_type_name(value: object, type_name: str) -> bool:
         return value == "MissingKey"
     if type_name == "ListError":
         return value == "OutOfBounds"
+    if type_name.startswith("host."):
+        return _matches_runtime_opaque_value(value, expected_type_name=type_name)
     raise RuntimeError(f"runtime feature not supported: type {type_name}")
 
 
@@ -1090,3 +1101,15 @@ def _ensure_supported_map_key(value: object, *, context: str) -> None:
     if type(value) is bool:
         return
     raise RuntimeError(f"wrong runtime signature for {context}: expected Int/String/Bool")
+
+
+def _is_runtime_opaque_value(value: object) -> bool:
+    return isinstance(value, RuntimeOpaqueValue)
+
+
+def _matches_runtime_opaque_value(value: object, *, expected_type_name: str) -> bool:
+    if not isinstance(value, RuntimeOpaqueValue):
+        return False
+    if type(value.type_name) is not str:
+        return False
+    return value.type_name == expected_type_name

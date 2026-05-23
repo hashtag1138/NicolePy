@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.checker import CheckerError
-from nicole.host_abi import HostABIError, HostEffect, HostWord, host_contract_from_words
+from nicole.host_abi import HostABIError, HostEffect, HostOpaqueType, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.pipeline import analyze_program
@@ -16,6 +16,7 @@ from nicole.runtime import (
     Ok,
     RuntimeError,
     RuntimeHostBindings,
+    RuntimeOpaqueValue,
     RuntimeQuote,
     RuntimeStack,
     UNIT,
@@ -28,6 +29,13 @@ from nicole.runtime import (
 
 def signature_from_source(source: str):
     return Parser(lex(source)).parse().words[0].signature
+
+
+def host_contract_with_opaque(*type_names: str, words: list[HostWord] | None = None):
+    return host_contract_from_words(
+        [] if words is None else words,
+        opaque_types=[HostOpaqueType(name=type_name) for type_name in type_names],
+    )
 
 
 def test_runtime_valid_host_call() -> None:
@@ -190,6 +198,298 @@ end-module
     runtime = RuntimeHostBindings({"host.random-int": lambda: "not-an-int"})
     with pytest.raises(RuntimeError, match="wrong runtime signature"):
         run_export(checked, "@app.run", runtime)
+
+
+def test_runtime_accepts_host_opaque_wrapper_for_host_input_output() -> None:
+    host_signature = signature_from_source("""module @app
+  : hostecho { fh:host.io.FileHandle -- out:host.io.FileHandle } ;
+end-module
+""")
+    host_contract = host_contract_with_opaque(
+        "host.io.FileHandle",
+        words=[HostWord(name="host.echo-handle", signature=host_signature, effect=HostEffect.PURE)],
+    )
+    checked = analyze_program(
+        """module @app
+  : run { fh:host.io.FileHandle -- out:host.io.FileHandle }
+    fh host.echo-handle
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract,
+    )
+
+    handle = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload={"fd": 3})
+    runtime = RuntimeHostBindings({"host.echo-handle": lambda fh: fh})
+    result = run_export(checked, "@app.run", runtime, handle)
+
+    assert result == handle
+
+
+def test_runtime_accepts_host_opaque_wrapper_for_export_input_output() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { fh:host.io.FileHandle -- out:host.io.FileHandle }
+    fh
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    handle = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="opaque")
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}), handle)
+
+    assert result == handle
+
+
+def test_runtime_accepts_host_opaque_wrapper_for_quotation_capture_input_output() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { captured:host.io.FileHandle x:host.io.FileHandle -- out:host.io.FileHandle }
+    x
+    captured
+    :[ c:host.io.FileHandle | i:host.io.FileHandle -- o:host.io.FileHandle |
+      c drop
+      i
+    ;]
+    call
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    captured = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload={"id": "cap"})
+    value = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload={"id": "in"})
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}), captured, value)
+
+    assert result == value
+
+
+def test_runtime_accepts_host_opaque_wrapper_in_list() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { xs:List<host.io.FileHandle> -- ys:List<host.io.FileHandle> }
+    xs
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    values = (
+        RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=1),
+        RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=2),
+    )
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}), values)
+
+    assert result == values
+
+
+def test_runtime_accepts_host_opaque_wrapper_in_result_value() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { r:Result<host.io.FileHandle,String> -- out:Result<host.io.FileHandle,String> }
+    r
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    result_value = Ok(RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="ok"))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}), result_value)
+
+    assert result == result_value
+
+
+def test_runtime_accepts_host_opaque_wrapper_in_result_error() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { r:Result<String,host.io.FileHandle> -- out:Result<String,host.io.FileHandle> }
+    r
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    result_value = Err(RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="err"))
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}), result_value)
+
+    assert result == result_value
+
+
+def test_runtime_accepts_host_opaque_wrapper_in_map_string_value() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { m:Map<String,host.io.FileHandle> -- out:Map<String,host.io.FileHandle> }
+    m
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    value = {"file": RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=11)}
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}), value)
+
+    assert result == value
+
+
+def test_runtime_accepts_host_opaque_wrapper_in_map_int_value() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { m:Map<Int,host.io.FileHandle> -- out:Map<Int,host.io.FileHandle> }
+    m
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    value = {1: RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=12)}
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}), value)
+
+    assert result == value
+
+
+def test_runtime_accepts_host_opaque_wrapper_in_map_bool_value() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { m:Map<Bool,host.io.FileHandle> -- out:Map<Bool,host.io.FileHandle> }
+    m
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    value = {True: RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=13)}
+    result = run_export(checked, "@app.run", RuntimeHostBindings({}), value)
+
+    assert result == value
+
+
+def test_runtime_rejects_host_opaque_wrapper_with_wrong_type_name() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { fh:host.io.FileHandle -- out:host.io.FileHandle }
+    fh
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle", "host.net.TcpSocket"),
+    )
+
+    wrong = RuntimeOpaqueValue(type_name="host.net.TcpSocket", payload="bad")
+    with pytest.raises(RuntimeError, match="expected host.io.FileHandle"):
+        run_export(checked, "@app.run", RuntimeHostBindings({}), wrong)
+
+
+def test_runtime_rejects_malformed_host_opaque_wrapper() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { fh:host.io.FileHandle -- out:host.io.FileHandle }
+    fh
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    malformed = RuntimeOpaqueValue(type_name=123, payload="bad")  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="expected host.io.FileHandle"):
+        run_export(checked, "@app.run", RuntimeHostBindings({}), malformed)
+
+
+def test_runtime_rejects_raw_python_object_for_host_opaque_type() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { fh:host.io.FileHandle -- out:host.io.FileHandle }
+    fh
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    with pytest.raises(RuntimeError, match="expected host.io.FileHandle"):
+        run_export(checked, "@app.run", RuntimeHostBindings({}), object())
+
+
+def test_runtime_rejects_file_handle_when_tcp_socket_expected() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { socket:host.net.TcpSocket -- out:host.net.TcpSocket }
+    socket
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle", "host.net.TcpSocket"),
+    )
+
+    file_handle = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="fd")
+    with pytest.raises(RuntimeError, match="expected host.net.TcpSocket"):
+        run_export(checked, "@app.run", RuntimeHostBindings({}), file_handle)
+
+
+def test_runtime_rejects_equality_on_host_opaque_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _passthrough_check(program, symbols, **_kwargs):
+        return program
+
+    monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)
+    checked = analyze_program(
+        """module @app
+  : run { a:host.io.FileHandle b:host.io.FileHandle -- out:Bool }
+    a b =
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    a = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="a")
+    b = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="b")
+    with pytest.raises(RuntimeError, match="equality is not supported for host opaque values"):
+        run_export(checked, "@app.run", RuntimeHostBindings({}), a, b)
+
+
+def test_runtime_rejects_inequality_on_host_opaque_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _passthrough_check(program, symbols, **_kwargs):
+        return program
+
+    monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)
+    checked = analyze_program(
+        """module @app
+  : run { a:host.io.FileHandle b:host.io.FileHandle -- out:Bool }
+    a b !=
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+    )
+
+    a = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="a")
+    b = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="b")
+    with pytest.raises(RuntimeError, match="equality is not supported for host opaque values"):
+        run_export(checked, "@app.run", RuntimeHostBindings({}), a, b)
 
 
 def test_runtime_typed_arithmetic_export() -> None:

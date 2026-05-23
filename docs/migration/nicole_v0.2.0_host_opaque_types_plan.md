@@ -130,7 +130,7 @@ This phase is where equality/inequality rejection belongs by policy.
 
 ## Phase 4 — Runtime opaque representation
 
-Status: pending
+Status: completed
 
 Purpose:
 Introduce runtime representation and nominal runtime checks for host opaque values.
@@ -395,3 +395,43 @@ Unexpected findings:
 
 Follow-up actions:
 Proceed to post-Phase 3 audit
+
+### Update 2026-05-23 08:36
+
+Phase:
+Phase 4
+
+Changes:
+- Added `RuntimeOpaqueValue` runtime wrapper with explicit nominal `type_name` and opaque `payload`.
+- Added runtime host-opaque matching path in `_matches_type_name(...)` for `host.*` names.
+- Enforced nominal opaque identity matching (`expected type name == wrapper.type_name`) without payload-type matching or duck typing.
+- Added runtime defensive guard in `_execute_operator(...)` to reject `=` and `!=` on opaque operands with a dedicated error.
+- Kept checker, ABI, parser, resolver, lexer, and pipeline behavior unchanged.
+
+Tests added:
+- `tests/test_runtime.py`
+- `test_runtime_accepts_host_opaque_wrapper_for_host_input_output`
+- `test_runtime_accepts_host_opaque_wrapper_for_export_input_output`
+- `test_runtime_accepts_host_opaque_wrapper_for_quotation_capture_input_output`
+- `test_runtime_accepts_host_opaque_wrapper_in_list`
+- `test_runtime_accepts_host_opaque_wrapper_in_result_value`
+- `test_runtime_accepts_host_opaque_wrapper_in_result_error`
+- `test_runtime_accepts_host_opaque_wrapper_in_map_string_value`
+- `test_runtime_accepts_host_opaque_wrapper_in_map_int_value`
+- `test_runtime_accepts_host_opaque_wrapper_in_map_bool_value`
+- `test_runtime_rejects_host_opaque_wrapper_with_wrong_type_name`
+- `test_runtime_rejects_malformed_host_opaque_wrapper`
+- `test_runtime_rejects_raw_python_object_for_host_opaque_type`
+- `test_runtime_rejects_file_handle_when_tcp_socket_expected`
+- `test_runtime_rejects_equality_on_host_opaque_values`
+- `test_runtime_rejects_inequality_on_host_opaque_values`
+
+Tests passing:
+- `.venv/bin/python -m pytest -q tests/test_runtime.py` passed (`197 passed`)
+- `.venv/bin/python -m pytest -q` passed (`695 passed`)
+
+Unexpected findings:
+- None.
+
+Follow-up actions:
+Proceed to post-Phase 4 audit
