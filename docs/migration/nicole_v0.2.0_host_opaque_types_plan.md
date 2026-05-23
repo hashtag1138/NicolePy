@@ -160,7 +160,7 @@ No lifecycle/ownership/finalizer behavior is introduced.
 
 ## Phase 5 — Pipeline and integration
 
-Status: pending
+Status: completed
 
 Purpose:
 Validate end-to-end behavior through parse/resolve/check/ABI/runtime boundaries with host opaque types.
@@ -435,3 +435,31 @@ Unexpected findings:
 
 Follow-up actions:
 Proceed to post-Phase 4 audit
+
+### Update 2026-05-23 08:49
+
+Phase:
+Phase 5 — Pipeline and integration
+
+Changes:
+- Added explicit canonical public-path integration coverage from `HostContract` through `analyze_program(...)` and `run_export(...)` for declared host opaque values.
+- Added integration assertions for successful opaque propagation through exported code and through `Result<host.*,String>`.
+- Added integration rejection coverage for wrong opaque `type_name` and raw Python object values on runtime host output/export path.
+- Kept implementation semantics unchanged (tests-only phase update).
+
+Tests added:
+- `tests/test_pipeline.py`
+- `test_pipeline_public_path_accepts_declared_opaque_value_through_host_word_and_export`
+- `test_pipeline_public_path_propagates_declared_opaque_result_container`
+- `test_pipeline_public_path_rejects_wrong_opaque_type_name_at_runtime`
+- `test_pipeline_public_path_rejects_raw_python_object_for_opaque_output`
+
+Tests passing:
+- `.venv/bin/python -m pytest -q tests/test_pipeline.py tests/test_runtime.py` passed (`224 passed`)
+- `.venv/bin/python -m pytest -q` passed (`699 passed`)
+
+Unexpected findings:
+- None.
+
+Follow-up actions:
+Proceed to post-Phase 5 audit

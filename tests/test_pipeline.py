@@ -12,6 +12,7 @@ from nicole.pipeline import CheckedProgram, analyze_program
 from nicole.resolver import ResolutionError
 from nicole.parser import Parser
 from nicole.lexer import lex
+from nicole.runtime import Ok, RuntimeError, RuntimeHostBindings, RuntimeOpaqueValue, run_export
 from nicole.symbols import SymbolError
 
 
@@ -467,3 +468,124 @@ def test_pipeline_export_rejects_undeclared_opaque_type_when_checker_is_bypassed
             "end-module\n",
             host_contract=host_contract_from_words([]),
         )
+
+
+def test_pipeline_public_path_accepts_declared_opaque_value_through_host_word_and_export() -> None:
+    host_signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- out:host.io.FileHandle }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.open", signature=host_signature, effect=HostEffect.PURE)],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    checked = analyze_program(
+        "module @app\n"
+        "  : run { -- out:host.io.FileHandle }\n"
+        "    host.open\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n",
+        host_contract=host_contract,
+    )
+
+    handle = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload={"fd": 7})
+    runtime = RuntimeHostBindings({"host.open": lambda: handle})
+    result = run_export(checked, "@app.run", runtime)
+
+    assert result == handle
+
+
+def test_pipeline_public_path_propagates_declared_opaque_result_container() -> None:
+    host_signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- out:Result<host.io.FileHandle,String> }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.open-result", signature=host_signature, effect=HostEffect.PURE)],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    checked = analyze_program(
+        "module @app\n"
+        "  : run { -- out:Result<host.io.FileHandle,String> }\n"
+        "    host.open-result\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n",
+        host_contract=host_contract,
+    )
+
+    wrapped = Ok(RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="opaque"))
+    runtime = RuntimeHostBindings({"host.open-result": lambda: wrapped})
+    result = run_export(checked, "@app.run", runtime)
+
+    assert result == wrapped
+
+
+def test_pipeline_public_path_rejects_wrong_opaque_type_name_at_runtime() -> None:
+    host_signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- out:host.io.FileHandle }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.open", signature=host_signature, effect=HostEffect.PURE)],
+        opaque_types=[
+            HostOpaqueType(name="host.io.FileHandle"),
+            HostOpaqueType(name="host.net.TcpSocket"),
+        ],
+    )
+    checked = analyze_program(
+        "module @app\n"
+        "  : run { -- out:host.io.FileHandle }\n"
+        "    host.open\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n",
+        host_contract=host_contract,
+    )
+
+    wrong = RuntimeOpaqueValue(type_name="host.net.TcpSocket", payload={"socket": 1})
+    runtime = RuntimeHostBindings({"host.open": lambda: wrong})
+
+    with pytest.raises(RuntimeError, match="expected host.io.FileHandle"):
+        run_export(checked, "@app.run", runtime)
+
+
+def test_pipeline_public_path_rejects_raw_python_object_for_opaque_output() -> None:
+    host_signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- out:host.io.FileHandle }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.open", signature=host_signature, effect=HostEffect.PURE)],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    checked = analyze_program(
+        "module @app\n"
+        "  : run { -- out:host.io.FileHandle }\n"
+        "    host.open\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n",
+        host_contract=host_contract,
+    )
+
+    runtime = RuntimeHostBindings({"host.open": lambda: object()})
+    with pytest.raises(RuntimeError, match="expected host.io.FileHandle"):
+        run_export(checked, "@app.run", runtime)
