@@ -151,7 +151,7 @@ Possible phase states:
 | Phase | Status | Branch/commit | Summary | Tests | Notes |
 |---|---|---|---|---|---|
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
-| 1. Source model | pending | - | File-bound range spans and source primitives | - | First implementation phase |
+| 1. Source model | in_progress | pending commit | Phase 1A implemented: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Post-Phase-1A audit passed; awaiting commit |
 | 2. Tokens + AST spans | pending | - | Propagate stable file-bound spans through tokens/AST/symbol provenance | - | Depends on phase 1 |
 | 3. Structured compilation diagnostics | pending | - | Introduce structured diagnostics model and formatting | - | Depends on phase 2 |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
@@ -227,6 +227,16 @@ Non-goals:
 | 2E | Phase 2 tests | `tests/test_parser.py`, `tests/test_ast_nodes.py`, optional span tests | major syntax forms covered | shallow coverage |
 | 2F | Post-phase audit and tracking update | milestone tracking file | tests, commit hash and residual risks recorded | undocumented drift |
 
+## Phase 1A post-audit notes
+
+- Phase 1A implementation passed post-audit.
+- No fixes are required before commit.
+- Provenance for real source tokens now originates in the lexer.
+- Parser/AST span precision is intentionally deferred to Phase 2.
+- Remaining synthetic provenance sites outside the lexer are pre-existing and deferred.
+- `<builtin>` and `<host-contract>` conventions exist in the source model but are not fully wired into all producer sites yet.
+- `SourceSpan` validation currently enforces monotonic offsets; stricter line/column consistency may be revisited later if needed.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -280,3 +290,4 @@ Before Phase 8:
 | Date | Commit | Change | Tests | Notes |
 |---|---|---|---|---|
 | - | - | - | - | - |
+| 2026-05-23 | pending | Phase 1A implementation prepared: source.py, SourceSpan compatibility, lexer range spans, Phase 1A tests | 707 passed | Post-audit found no blocking issues |

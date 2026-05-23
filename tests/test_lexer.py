@@ -6,6 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.lexer import LexError, lex
+from nicole.source import MEMORY_SOURCE_PATH
 from nicole.tokens import TokenKind
 
 
@@ -239,3 +240,58 @@ def test_generic_type_separators():
 
 def test_then_is_not_a_token_kind():
     assert "THEN" not in TokenKind.__members__
+
+
+def test_lexer_tokens_keep_memory_source_provenance():
+    tokens = lex(": add { -- } ;")
+    assert all(token.span.source.path == MEMORY_SOURCE_PATH for token in tokens)
+
+
+def test_lexer_eof_span_is_zero_length():
+    tokens = lex("add")
+    eof = tokens[-1]
+
+    assert eof.kind is TokenKind.EOF
+    assert eof.span.start == eof.span.end
+
+
+def test_lexer_multiline_positions_use_end_exclusive_ranges():
+    tokens = lex("a\nbb")
+    first = tokens[0]
+    second = tokens[1]
+    eof = tokens[2]
+
+    assert first.lexeme == "a"
+    assert first.span.start.line == 1
+    assert first.span.start.column == 1
+    assert first.span.end.line == 1
+    assert first.span.end.column == 2
+    assert first.span.start.offset == 0
+    assert first.span.end.offset == 1
+
+    assert second.lexeme == "bb"
+    assert second.span.start.line == 2
+    assert second.span.start.column == 1
+    assert second.span.end.line == 2
+    assert second.span.end.column == 3
+    assert second.span.start.offset == 2
+    assert second.span.end.offset == 4
+
+    assert eof.span.start == eof.span.end
+    assert eof.span.start.line == 2
+    assert eof.span.start.column == 3
+    assert eof.span.start.offset == 4
+
+
+def test_lexer_string_span_covers_full_literal_range():
+    tokens = lex('"ab"')
+    token = tokens[0]
+
+    assert token.kind is TokenKind.STRING_LITERAL
+    assert token.lexeme == "ab"
+    assert token.span.start.line == 1
+    assert token.span.start.column == 1
+    assert token.span.end.line == 1
+    assert token.span.end.column == 5
+    assert token.span.start.offset == 0
+    assert token.span.end.offset == 4

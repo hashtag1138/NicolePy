@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from .source import SourceSpan
+
 
 class TokenKind(Enum):
     EOF = auto()
@@ -50,13 +52,6 @@ class TokenKind(Enum):
     QUALIFIED_MODULE_NAME = auto()
     IDENTIFIER = auto()
     OPERATOR = auto()
-
-
-@dataclass(frozen=True, slots=True)
-class SourceSpan:
-    line: int
-    column: int
-    offset: int
 
 
 @dataclass(frozen=True, slots=True)

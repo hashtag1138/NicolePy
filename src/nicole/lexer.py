@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .source import SourceFile, SourceLocation
 from .tokens import SourceSpan, Token, TokenKind
 
 __all__ = ["LexError", "Lexer", "lex"]
@@ -22,6 +23,7 @@ class Lexer:
 
     def __init__(self) -> None:
         self.source = ""
+        self._source_file = SourceFile.memory("")
         self._source_len = 0
         self._index = 0
         self._line = 1
@@ -30,6 +32,7 @@ class Lexer:
 
     def tokenize(self, source: str) -> list[Token]:
         self.source = source
+        self._source_file = SourceFile.memory(source)
         self._source_len = len(source)
         self._index = 0
         self._line = 1
@@ -177,11 +180,12 @@ class Lexer:
 
             self._raise_error("invalid character")
 
+        location = self._location()
         self._tokens.append(
             Token(
                 kind=TokenKind.EOF,
                 lexeme="",
-                span=SourceSpan(self._line, self._column, self._index),
+                span=SourceSpan(source=self._source_file, start=location, end=location),
             )
         )
         return self._tokens
@@ -215,9 +219,7 @@ class Lexer:
                 if lexeme.endswith(".") or lexeme.endswith("-"):
                     self._raise_error("invalid identifier")
                 kind = TokenKind.BOOL_LITERAL if lexeme in {"true", "false"} else TokenKind.IDENTIFIER
-        self._tokens.append(
-            Token(kind=kind, lexeme=lexeme, span=start.span)
-        )
+        self._tokens.append(Token(kind=kind, lexeme=lexeme, span=self._span_from_mark(start)))
 
     def _lex_qualified_module_name(self) -> None:
         start = self._mark()
@@ -234,9 +236,7 @@ class Lexer:
             self._lex_module_name_segment()
 
         lexeme = self.source[start.index : self._index]
-        self._tokens.append(
-            Token(kind=TokenKind.QUALIFIED_MODULE_NAME, lexeme=lexeme, span=start.span)
-        )
+        self._tokens.append(Token(kind=TokenKind.QUALIFIED_MODULE_NAME, lexeme=lexeme, span=self._span_from_mark(start)))
 
     def _lex_module_name_segment(self) -> None:
         self._advance()
@@ -275,7 +275,7 @@ class Lexer:
             self._raise_error("invalid numeric token")
 
         lexeme = self.source[start.index : self._index]
-        self._tokens.append(Token(kind=kind, lexeme=lexeme, span=start.span))
+        self._tokens.append(Token(kind=kind, lexeme=lexeme, span=self._span_from_mark(start)))
 
     def _lex_string(self) -> None:
         start = self._mark()
@@ -290,7 +290,7 @@ class Lexer:
                     Token(
                         kind=TokenKind.STRING_LITERAL,
                         lexeme="".join(chars),
-                        span=start.span,
+                        span=self._span_from_mark(start),
                     )
                 )
                 return
@@ -332,7 +332,7 @@ class Lexer:
         start = self._mark()
         for _ in range(length):
             self._advance()
-        self._tokens.append(Token(kind=kind, lexeme=lexeme, span=start.span))
+        self._tokens.append(Token(kind=kind, lexeme=lexeme, span=self._span_from_mark(start)))
 
     def _match(self, text: str) -> bool:
         return self.source.startswith(text, self._index)
@@ -358,8 +358,14 @@ class Lexer:
     def _mark(self) -> "_CursorMark":
         return _CursorMark(
             index=self._index,
-            span=SourceSpan(self._line, self._column, self._index),
+            location=self._location(),
         )
+
+    def _location(self) -> SourceLocation:
+        return SourceLocation(line=self._line, column=self._column, offset=self._index)
+
+    def _span_from_mark(self, mark: "_CursorMark") -> SourceSpan:
+        return SourceSpan(source=self._source_file, start=mark.location, end=self._location())
 
     def _raise_error(self, message: str) -> None:
         raise LexError(message=message, line=self._line, column=self._column)
@@ -368,7 +374,7 @@ class Lexer:
 @dataclass(frozen=True, slots=True)
 class _CursorMark:
     index: int
-    span: SourceSpan
+    location: SourceLocation
 
 
 def lex(source: str) -> list[Token]:
