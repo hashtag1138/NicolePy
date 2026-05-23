@@ -28,7 +28,7 @@ def analyze_program(source: str, *, host_contract: HostContract | None = None) -
     symbols = with_standard_symbols(symbols)
     resolved = resolve(program, symbols, host_contract=effective_host_contract)
     checked = check_program(resolved, symbols)
-    export_contract = collect_exports(symbols)
+    export_contract = collect_exports(symbols, host_contract=effective_host_contract)
     return CheckedProgram(
         program=checked,
         symbols=symbols,

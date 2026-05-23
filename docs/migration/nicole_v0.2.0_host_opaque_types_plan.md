@@ -65,7 +65,7 @@ Keep this phase model-only and backward compatible for existing host-word usage.
 
 ## Phase 2 — ABI signature validation
 
-Status: pending
+Status: completed
 
 Purpose:
 Update ABI-visible signature validation to accept declared opaque types and reject undeclared opaque types.
@@ -291,3 +291,66 @@ Unexpected findings:
 
 Follow-up actions:
 Proceed to Phase 2 — ABI signature validation
+
+### Update 2026-05-23 08:07
+
+Phase:
+Phase 2 — ABI signature validation
+
+Changes:
+- Added declared-opaque ABI admission context to host ABI signature validation without changing checker wiring.
+- Accepted declared `host.*` opaque types in host-word and export ABI signature validation paths.
+- Rejected undeclared `host.*` opaque types in ABI-visible signatures.
+- Preserved quote and dirty quote ABI prohibition and map key restrictions.
+- Kept checker/runtime/parser behavior unchanged.
+
+Tests added:
+- `tests/test_host_abi.py`
+- `test_host_word_signature_accepts_declared_host_opaque_type`
+- `test_host_word_signature_rejects_undeclared_host_opaque_type`
+- `test_host_word_signature_accepts_map_value_declared_host_opaque_type`
+- `test_host_word_signature_rejects_map_key_host_opaque_type_even_if_declared`
+- `test_host_word_signature_rejects_dirty_quote_unchanged`
+- `test_host_word_signature_rejects_unknown_nominal_type_foo`
+- `test_export_signature_accepts_declared_host_opaque_type`
+- `test_export_signature_rejects_undeclared_host_opaque_type`
+- `test_export_signature_accepts_map_value_declared_host_opaque_type`
+- `test_export_signature_rejects_map_key_host_opaque_type_even_if_declared`
+- `test_export_signature_rejects_quote_unchanged`
+- `test_export_signature_rejects_dirty_quote_unchanged`
+- `test_host_and_export_abi_behavior_is_consistent_for_declared_and_undeclared`
+- `tests/test_pipeline.py`
+- `test_declared_opaque_registry_does_not_activate_checker_support`
+
+Tests passing:
+- `.venv/bin/python -m pytest -q` passed (`663 passed`)
+
+Unexpected findings:
+- None.
+
+Follow-up actions:
+Proceed to post-Phase 2 audit
+
+### Update 2026-05-23 08:11
+
+Phase:
+Phase 2 — corrective integration
+
+Changes:
+- Wired `analyze_program(...)` to pass `effective_host_contract` into `collect_exports(...)`.
+- Kept ABI rules unchanged and limited the change to canonical pipeline integration.
+- Added pipeline-level integration coverage for declared and undeclared opaque export behavior through the public entrypoint.
+
+Tests added:
+- `tests/test_pipeline.py`
+- `test_pipeline_wires_declared_opaque_types_into_export_collection`
+- `test_pipeline_export_rejects_undeclared_opaque_type_when_checker_is_bypassed`
+
+Tests passing:
+- `.venv/bin/python -m pytest -q` passed (`665 passed`)
+
+Unexpected findings:
+- None.
+
+Follow-up actions:
+Ready for post-correction audit

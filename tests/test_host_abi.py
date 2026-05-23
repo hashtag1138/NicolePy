@@ -5,16 +5,39 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from nicole.host_abi import HostABIError, HostEffect, HostOpaqueType, HostWord, host_contract_from_words
+from nicole.ast_nodes import Visibility
+from nicole.host_abi import (
+    HostABIError,
+    HostEffect,
+    HostOpaqueType,
+    HostWord,
+    collect_exports,
+    host_contract_from_words,
+)
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.parser import ParseError
 from nicole.pipeline import analyze_program
-from nicole.symbols import SymbolError
+from nicole.symbols import SymbolError, SymbolTable, WordSymbol
+from nicole.tokens import SourceSpan
 
 
 def _signature_from_source(source: str):
     return Parser(lex(source)).parse().words[0].signature
+
+
+def _export_symbols_for_signature(signature):
+    symbols = SymbolTable()
+    symbols.add(
+        WordSymbol(
+            name="run",
+            signature=signature,
+            visibility=Visibility.EXPORT,
+            span=SourceSpan(line=1, column=1, offset=0),
+            module="app",
+        )
+    )
+    return symbols
 
 
 def test_module_local_export_publishes_canonical_name() -> None:
@@ -185,3 +208,179 @@ def test_host_word_contract_behavior_remains_unchanged_with_opaque_registry() ->
         opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
     )
     assert "host.log" in contract.words
+
+
+def test_host_word_signature_accepts_declared_host_opaque_type() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- fh:host.io.FileHandle }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    contract = host_contract_from_words(
+        [HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    assert "host.open" in contract.words
+
+
+def test_host_word_signature_rejects_undeclared_host_opaque_type() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- fh:host.io.FileHandle }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(HostABIError, match="undeclared host opaque type in ABI signature"):
+        host_contract_from_words([HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)])
+
+
+@pytest.mark.parametrize("key_type", ["String", "Int", "Bool"])
+def test_host_word_signature_accepts_map_value_declared_host_opaque_type(key_type: str) -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        f"  : hostsig {{ -- m:Map<{key_type},host.io.FileHandle> }}\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    contract = host_contract_from_words(
+        [HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    assert "host.open" in contract.words
+
+
+def test_host_word_signature_rejects_map_key_host_opaque_type_even_if_declared() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- m:Map<host.io.FileHandle,String> }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(HostABIError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        host_contract_from_words(
+            [HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)],
+            opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+        )
+
+
+def test_host_word_signature_rejects_dirty_quote_unchanged() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- q:DirtyQuote<{ | -- }> }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        host_contract_from_words([HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_host_word_signature_rejects_unknown_nominal_type_foo() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- out:Foo }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(HostABIError, match="type is not ABI-compatible in v1: Foo"):
+        host_contract_from_words([HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)])
+
+
+def test_export_signature_accepts_declared_host_opaque_type() -> None:
+    signature = _signature_from_source(
+        "module @app\n"
+        "  : run { -- fh:host.io.FileHandle }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    symbols = _export_symbols_for_signature(signature)
+    contract = host_contract_from_words([], opaque_types=[HostOpaqueType(name="host.io.FileHandle")])
+    exports = collect_exports(symbols, host_contract=contract)
+    assert "@app.run" in exports.words
+
+
+def test_export_signature_rejects_undeclared_host_opaque_type() -> None:
+    signature = _signature_from_source(
+        "module @app\n"
+        "  : run { -- fh:host.io.FileHandle }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    symbols = _export_symbols_for_signature(signature)
+    with pytest.raises(HostABIError, match="undeclared host opaque type in ABI signature"):
+        collect_exports(symbols)
+
+
+@pytest.mark.parametrize("key_type", ["String", "Int", "Bool"])
+def test_export_signature_accepts_map_value_declared_host_opaque_type(key_type: str) -> None:
+    signature = _signature_from_source(
+        "module @app\n"
+        f"  : run {{ -- m:Map<{key_type},host.io.FileHandle> }}\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    symbols = _export_symbols_for_signature(signature)
+    contract = host_contract_from_words([], opaque_types=[HostOpaqueType(name="host.io.FileHandle")])
+    exports = collect_exports(symbols, host_contract=contract)
+    assert "@app.run" in exports.words
+
+
+def test_export_signature_rejects_map_key_host_opaque_type_even_if_declared() -> None:
+    signature = _signature_from_source(
+        "module @app\n"
+        "  : run { -- m:Map<host.io.FileHandle,String> }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    symbols = _export_symbols_for_signature(signature)
+    contract = host_contract_from_words([], opaque_types=[HostOpaqueType(name="host.io.FileHandle")])
+    with pytest.raises(HostABIError, match="Map<K,V> key type must be Int, String, or Bool in v1"):
+        collect_exports(symbols, host_contract=contract)
+
+
+def test_export_signature_rejects_quote_unchanged() -> None:
+    signature = _signature_from_source(
+        "module @app\n"
+        "  : run { -- q:Quote<{ | -- }> }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    symbols = _export_symbols_for_signature(signature)
+    contract = host_contract_from_words([], opaque_types=[HostOpaqueType(name="host.io.FileHandle")])
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        collect_exports(symbols, host_contract=contract)
+
+
+def test_export_signature_rejects_dirty_quote_unchanged() -> None:
+    signature = _signature_from_source(
+        "module @app\n"
+        "  : run { -- q:DirtyQuote<{ | -- }> }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    symbols = _export_symbols_for_signature(signature)
+    contract = host_contract_from_words([], opaque_types=[HostOpaqueType(name="host.io.FileHandle")])
+    with pytest.raises(HostABIError, match="Quote is forbidden across ABI in v1"):
+        collect_exports(symbols, host_contract=contract)
+
+
+def test_host_and_export_abi_behavior_is_consistent_for_declared_and_undeclared() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- fh:host.io.FileHandle }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    declared_contract = host_contract_from_words([], opaque_types=[HostOpaqueType(name="host.io.FileHandle")])
+    host_contract_from_words(
+        [HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    exports = collect_exports(_export_symbols_for_signature(signature), host_contract=declared_contract)
+    assert "@app.run" in exports.words
+
+    with pytest.raises(HostABIError, match="undeclared host opaque type in ABI signature"):
+        host_contract_from_words([HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)])
+    with pytest.raises(HostABIError, match="undeclared host opaque type in ABI signature"):
+        collect_exports(_export_symbols_for_signature(signature))

@@ -225,6 +225,21 @@ def test_pipeline_accepts_host_contract_with_declared_opaque_types_in_phase1() -
     assert "host.io.FileHandle" in result.host_contract.opaque_types
 
 
+def test_declared_opaque_registry_does_not_activate_checker_support() -> None:
+    host_contract = host_contract_from_words(
+        [],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    with pytest.raises(CheckerError, match="type is not supported in v1"):
+        analyze_program(
+            "module @app\n"
+            "  : run { -- fh:host.io.FileHandle }\n"
+            "  ;\n"
+            "end-module\n",
+            host_contract=host_contract,
+        )
+
+
 def test_pipeline_preserves_same_name_cross_module_words() -> None:
     result = analyze_program(
         "module @b\n"
@@ -399,4 +414,44 @@ def test_pipeline_export_abi_validation_is_preserved() -> None:
             "  ;\n"
             "  export : run\n"
             "end-module\n"
+        )
+
+
+def test_pipeline_wires_declared_opaque_types_into_export_collection(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _passthrough_check(program, symbols):
+        return program
+
+    monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)
+    host_contract = host_contract_from_words(
+        [],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+
+    result = analyze_program(
+        "module @app\n"
+        "  : run { -- fh:host.io.FileHandle }\n"
+        "  ;\n"
+        "  export : run\n"
+        "end-module\n",
+        host_contract=host_contract,
+    )
+    assert "@app.run" in result.export_contract.words
+
+
+def test_pipeline_export_rejects_undeclared_opaque_type_when_checker_is_bypassed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _passthrough_check(program, symbols):
+        return program
+
+    monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)
+
+    with pytest.raises(HostABIError, match="undeclared host opaque type in ABI signature"):
+        analyze_program(
+            "module @app\n"
+            "  : run { -- fh:host.io.FileHandle }\n"
+            "  ;\n"
+            "  export : run\n"
+            "end-module\n",
+            host_contract=host_contract_from_words([]),
         )
