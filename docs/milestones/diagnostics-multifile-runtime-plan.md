@@ -158,12 +158,18 @@ Structured nodes:
 - `ListLiteralNode` spans include delimiters.
 - `IfNode` spans include `if ... end`.
 - `CaseNode` spans include `case ... end`.
+- `TypedEmptyListNode` spans full `[]: Type`.
+- `TypedEmptyMapNode` spans full `map.empty: Type`.
 
 Parameters and types:
 
 - `ParameterNode` ends at type end.
 - `TypeNode` spans full type expression.
 - Constructor patterns span through closing delimiter.
+- `ParameterNode` starts at parameter name token and ends at parsed type end.
+- `TypeNode` spans the entire parsed type expression.
+- Generic type spans include closing generic delimiters.
+- Quote-type arguments preserve full nested range provenance.
 
 Blocks:
 
@@ -304,7 +310,6 @@ Known deferred work:
 - host symbol provenance may remain resolver-owned until later phases
 - host provenance remains resolver/contract-owned during Phase 2D
 - first-class host provenance is deferred to diagnostics or host-binding phases
-- builtin provenance wiring may require later cleanup
 - runtime-generated helper nodes remain outside Phase 2 scope
 
 ## Phase 1A post-audit notes
