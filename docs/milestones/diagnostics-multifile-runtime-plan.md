@@ -200,6 +200,104 @@ Provenance:
 - `<host-contract>` remains a reserved source convention for later host diagnostics or host binding phases.
 - Phase 2D implementation scope is builtin provenance plus explicit host deferral.
 
+## Decision freeze before Phase 3A
+
+Diagnostic model:
+
+- `Diagnostic` is a data object, not a renderer.
+- `Diagnostic.severity` is required.
+- `Diagnostic.phase` is required.
+- `Diagnostic.code` is required.
+- `Diagnostic.message` is required.
+- `Diagnostic.span` is optional.
+- `Diagnostic.suggestion` is optional.
+- `Diagnostic.notes` is optional and defaults to empty.
+- `Diagnostic.cause` is optional.
+- `SourceFile` is derived from `Diagnostic.span.source` when a span exists.
+- Source excerpts and caret rendering are not stored on `Diagnostic`.
+
+Severity and phase:
+
+- Phase 3 starts with severity `ERROR`.
+- `WARNING` and `NOTE` are reserved for later.
+- Compile-time phases are `LEXER`, `PARSER`, `SYMBOLS`, `RESOLVER`, `CHECKER`, `ABI`, and `PIPELINE`.
+
+DiagnosticError strategy:
+
+- Introduce `DiagnosticError` as the common base for compile-time diagnostic exceptions.
+- `DiagnosticError` carries `diagnostics: tuple[Diagnostic, ...]`.
+- `DiagnosticError.diagnostic` exposes the first diagnostic.
+- Phase 3 initially raises one diagnostic per exception.
+- Existing public exception class names remain public.
+- `LexError`, `ParseError`, `SymbolError`, `ResolutionError`, `CheckerError`, `HostABIError`, and `StandardSymbolError` become thin subclasses of `DiagnosticError`.
+- Legacy `.message`, `.line`, and `.column` accessors are preserved where applicable.
+- Early Phase 3 `__str__` remains legacy-compatible.
+
+Compatibility:
+
+- Structured diagnostics are additive first.
+- Existing `pytest.raises(..., match=...)` behavior should mostly continue to pass.
+- `analyze_program(...)` behavior remains compatible.
+- Current exception identity is preserved.
+
+Diagnostic codes:
+
+- Codes use stable uppercase snake case.
+- Codes are phase-prefixed.
+- Examples:
+  - `LEXER_UNTERMINATED_STRING`
+  - `PARSER_EXPECTED_TOKEN`
+  - `PARSER_DUPLICATE_PARAMETER_NAME`
+  - `SYMBOLS_DUPLICATE_VISIBLE_NAME`
+  - `RESOLVER_UNKNOWN_WORD`
+  - `RESOLVER_UNKNOWN_HOST_WORD`
+  - `CHECKER_TYPE_MISMATCH`
+  - `CHECKER_CASE_NOT_EXHAUSTIVE`
+  - `ABI_UNKNOWN_HOST_OPAQUE_TYPE`
+- Codes must not encode source locations or formatting details.
+
+Formatting and rendering:
+
+- Diagnostics own data only.
+- Renderer owns excerpts, carets, colors, note layout, and multi-line presentation.
+- `source.py` must not gain diagnostic rendering helpers.
+- Exception `__str__` is a compatibility layer, not the rich renderer.
+- Rich excerpt/caret rendering is deferred to a later Phase 3 subphase.
+
+Host ABI and source-less diagnostics:
+
+- `Diagnostic.span=None` is valid.
+- Phase 3 must not force synthetic `<host-contract>` spans onto current ABI errors.
+- `<host-contract>` remains reserved for later host diagnostics or host binding phases.
+- If an ABI/export error has a real Nicole source span, prefer that span.
+- Otherwise use phase `ABI` with no span.
+
+Pipeline behavior:
+
+- `analyze_program(...)` continues to raise the first error only.
+- Initial Phase 3 does not aggregate multiple diagnostics.
+- Pipeline does not need to wrap phase-specific errors if they already subclass `DiagnosticError`.
+- `PIPELINE` codes remain reserved for orchestration/wrapper failures.
+
+Phase 3 subphases:
+
+- `3A`: freeze diagnostic model, compatibility rules, code scheme, rendering ownership.
+- `3B`: add `Diagnostic`, `DiagnosticError`, enums, compatibility accessors, legacy `__str__`.
+- `3C`: adapt lexer and parser to structured diagnostics.
+- `3D`: adapt symbol collection, resolver, and checker.
+- `3E`: adapt host ABI and pipeline pass-through policy.
+- `3F`: add renderer, source excerpts, and caret formatting.
+- `3G`: finalize tests, tracking, and cleanup of remaining legacy-only assumptions.
+
+Phase 3A non-goals:
+
+- no runtime diagnostics
+- no multi-file compiler
+- no diagnostic aggregation
+- no rich excerpt/caret renderer implementation
+- no interpreter API
+- no host method binding
+
 ## Allowed phase states
 
 Possible phase states:
@@ -218,7 +316,7 @@ Possible phase states:
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
-| 3. Structured compilation diagnostics | pending | - | Introduce structured diagnostics model and formatting | - | Depends on phase 2 |
+| 3. Structured compilation diagnostics | in_progress | pending commit | Phase 3A diagnostic model freeze prepared | 750 passed | Design audit passed; awaiting documentation commit |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
@@ -432,11 +530,8 @@ Constraint:
 
 Before Phase 3:
 
-- freeze compile-time `Diagnostic` fields
-- freeze `DiagnosticError` raise/return policy
-- freeze compatibility policy for current exceptions and `__str__`
-- freeze diagnostic code naming scheme
-- freeze source excerpt/caret formatting ownership
+- completed by `Decision freeze before Phase 3A`
+- implementation must follow the frozen `Diagnostic`, `DiagnosticError`, compatibility, code naming, rendering ownership, ABI/source-less, and pipeline policies above
 
 Before Phase 4:
 
@@ -480,3 +575,4 @@ Before Phase 8:
 | 2026-05-23 | `16605aca910b6a796c9bb7e2dbdcbf2a38963c6b` | Phase 2B/2C.5 implementation prepared: CaseNode, CaseBranchNode and constructor PatternNode range propagation | 743 passed | Post-audit found no blocking issues; pattern grammar preserved |
 | 2026-05-23 | `a84bfd0bfd47267afc2ef7e4573630b424b21e5c` | Phase 2D implementation prepared: builtin symbols and helpers use `<builtin>` provenance | 746 passed | Post-audit found no blocking issues; host provenance remains deferred |
 | 2026-05-23 | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2B/2C.6 implementation prepared: ParameterNode, TypeNode, TypedEmptyListNode and TypedEmptyMapNode range propagation | 750 passed | Post-audit found no blocking issues; grammar preserved |
+| 2026-05-23 | pending | Phase 3A diagnostic model freeze prepared | 750 passed | Documentation-only design freeze after Phase 3 audit |
