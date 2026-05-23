@@ -316,7 +316,7 @@ Possible phase states:
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
-| 3. Structured compilation diagnostics | in_progress | pending commit | Phase 3B implementation prepared: structured diagnostic primitives and compatibility layer | 760 passed | One-diagnostic policy enforcement fix applied after Phase 3B audit blocker |
+| 3. Structured compilation diagnostics | in_progress | `3667bc0d4aa729e1f679e809caabe576d600524c` | Phase 3B implemented and committed: structured diagnostic primitives and compatibility layer | 760 passed | One-diagnostic policy enforcement fix committed; Phase 3C+ remains pending |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
@@ -575,4 +575,4 @@ Before Phase 8:
 | 2026-05-23 | `a84bfd0bfd47267afc2ef7e4573630b424b21e5c` | Phase 2D implementation prepared: builtin symbols and helpers use `<builtin>` provenance | 746 passed | Post-audit found no blocking issues; host provenance remains deferred |
 | 2026-05-23 | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2B/2C.6 implementation prepared: ParameterNode, TypeNode, TypedEmptyListNode and TypedEmptyMapNode range propagation | 750 passed | Post-audit found no blocking issues; grammar preserved |
 | 2026-05-23 | pending | Phase 3A diagnostic model freeze prepared | 750 passed | Documentation-only design freeze after Phase 3 audit |
-| 2026-05-23 | pending | Phase 3B implementation prepared: `Diagnostic`, `DiagnosticError`, compile-time diagnostic enums, compatibility-layer exception subclasses, and one-diagnostic policy enforcement fix | 760 passed | Uncommitted patch state after corrective fix; ready for Phase 3B re-audit |
+| 2026-05-23 | `3667bc0d4aa729e1f679e809caabe576d600524c` | Phase 3B implemented and committed: `Diagnostic`, `DiagnosticError`, compile-time diagnostic enums, compatibility-layer exception subclasses, and one-diagnostic policy enforcement fix | 760 passed | Commit `feat: add structured diagnostic foundation`; Phase 3 remains in progress for 3C+ |
