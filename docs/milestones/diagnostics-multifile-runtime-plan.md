@@ -135,6 +135,55 @@ Phase 2 scope decisions:
 - Phase 2 must not change runtime behavior.
 - AST nodes with synthesized origins must preserve explicit synthetic provenance
 
+Program node:
+
+- `ProgramNode` span starts at first declaration start.
+- `ProgramNode` span ends at EOF zero-length span.
+- Empty programs use EOF zero-length span.
+
+Declarations:
+
+- `ModuleDeclaration` spans include `module ... end-module`.
+- `ImportDeclaration` spans include alias if present.
+- `IncludeDeclaration` spans include path literals.
+- `ExportDeclaration` spans include full declaration.
+- `WordDefNode` start uses earliest meaningful modifier among `pub`, `dirty`, `:`.
+- `WordDefNode` end uses terminating `;`.
+
+Structured nodes:
+
+- `SignatureNode` spans include delimiters.
+- `QuoteTypeNode` spans include delimiters.
+- `QuoteNode` spans include delimiters.
+- `ListLiteralNode` spans include delimiters.
+- `IfNode` spans include `if ... end`.
+- `CaseNode` spans include `case ... end`.
+
+Parameters and types:
+
+- `ParameterNode` ends at type end.
+- `TypeNode` spans full type expression.
+- Constructor patterns span through closing delimiter.
+
+Blocks:
+
+- `BlockNode` is container-derived.
+- Non-empty blocks start at first contained token.
+- Empty blocks use delimiter-based spans if available.
+- Otherwise empty blocks use zero-length spans.
+
+Case branches:
+
+- `CaseBranchNode` starts at pattern start.
+- `CaseBranchNode` ends at branch body boundary.
+
+Provenance:
+
+- builtin symbols must use `<builtin>`
+- host provenance behavior must be explicit
+- synthetic AST nodes preserve synthetic provenance
+- no node may silently downgrade provenance precision
+
 ## Allowed phase states
 
 Possible phase states:
@@ -222,10 +271,29 @@ Non-goals:
 |---|---|---|---|---|
 | 2A | Audit AST span propagation | `src/nicole/parser.py`, `src/nicole/ast_nodes.py`, `src/nicole/symbols.py`, tests | every AST node family mapped to a span convention | missed node family |
 | 2B | Freeze AST span conventions | milestone tracking file | declaration, module, import, export, literal, quote and block conventions recorded | inconsistent conventions |
-| 2C | Parser range spans | `src/nicole/parser.py`, `src/nicole/ast_nodes.py` | AST nodes use meaningful range spans instead of opening-token spans only | partial spans |
-| 2D | Symbol provenance | `src/nicole/symbols.py`, `src/nicole/signature_collector.py`, `src/nicole/standard_symbols.py` | user, builtin, imported and host symbols preserve usable provenance | source-less diagnostics |
+| 2C | Parser range propagation | `src/nicole/parser.py`, `src/nicole/ast_nodes.py` | AST nodes preserve or expand provenance precision without inventing new source origins | partial spans |
+| 2D | Symbol provenance | `src/nicole/symbols.py`, `src/nicole/signature_collector.py`, `src/nicole/standard_symbols.py` | user, builtin, imported, host and synthetic symbols preserve explicit provenance categories | source-less diagnostics |
 | 2E | Phase 2 tests | `tests/test_parser.py`, `tests/test_ast_nodes.py`, optional span tests | major syntax forms covered | shallow coverage |
 | 2F | Post-phase audit and tracking update | milestone tracking file | tests, commit hash and residual risks recorded | undocumented drift |
+
+## Phase 2 implementation notes
+
+Phase 2 implementation constraints:
+
+- parser must propagate provenance instead of recreating it
+- parser should combine existing spans rather than synthesize new source locations
+- parser must never replace a more precise span with a less precise span
+- AST range upgrades must remain semantic no-ops
+- symbol provenance must remain compatible with future diagnostics
+- runtime behavior must remain unchanged
+- no diagnostics formatting belongs in Phase 2
+
+Known deferred work:
+
+- checker synthetic helpers may still use synthetic spans
+- host symbol provenance may remain resolver-owned until later phases
+- builtin provenance wiring may require later cleanup
+- runtime-generated helper nodes remain outside Phase 2 scope
 
 ## Phase 1A post-audit notes
 
@@ -291,3 +359,4 @@ Before Phase 8:
 |---|---|---|---|---|
 | - | - | - | - | - |
 | 2026-05-23 | pending | Phase 1A implementation prepared: source.py, SourceSpan compatibility, lexer range spans, Phase 1A tests | 707 passed | Post-audit found no blocking issues |
+| 2026-05-23 | - | Phase 2 propagation audit and convention freeze | 707 passed | Documentation-only refinement before implementation |
