@@ -9,13 +9,13 @@ If code and spec diverge, the spec wins.
 
 ## Current target
 
-NicolePy currently targets `v0.1.0-modules-freeze`.
+NicolePy currently targets `v0.2.0-host-opaque-types`.
 
 Target reference:
 
 - spec repo: `/data/data/com.termux/files/home/Sources/nicole/nicole_language_docs_seed`
-- tag: `v0.1.0-modules-freeze`
-- commit: `08706edd315e64c22b47e69b4121a0f0f04e7a9f`
+- tag: `v0.2.0-host-opaque-types`
+- commit: `f125f675e2a4860323a778f77ba06f1cff17eb75`
 
 ## Quick start
 
@@ -72,6 +72,58 @@ result = run_export(checked, "@app.run", RuntimeHostBindings({}))
 print(result)
 ```
 
+## Host opaque types
+
+Host opaque types are declared by the host contract, not by Nicole source syntax.
+
+Static declaration model:
+
+- use `HostOpaqueType(name="host.io.FileHandle")`
+- attach declarations to `HostContract`
+- pass that contract into `analyze_program(...)`
+
+Runtime value model:
+
+- opaque values must be wrapped as `RuntimeOpaqueValue(type_name=..., payload=...)`
+- runtime matching is nominal
+- the `payload` Python type does not determine opaque identity
+
+Canonical end-to-end flow:
+
+```python
+from nicole.host_abi import HostEffect, HostOpaqueType, HostWord, host_contract_from_words
+from nicole.pipeline import analyze_program
+from nicole.runtime import RuntimeHostBindings, RuntimeOpaqueValue, run_export
+
+# `host_signature` is the HostWord signature for: { -- out:host.io.FileHandle }.
+# It is provided by the host integration layer.
+host_signature = ...
+
+host_contract = host_contract_from_words(
+    [HostWord(name="host.open", signature=host_signature, effect=HostEffect.PURE)],
+    opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+)
+
+checked = analyze_program(
+    """
+module @app
+  : run { -- out:host.io.FileHandle }
+    host.open
+  ;
+
+  export : run
+end-module
+""",
+    host_contract=host_contract,
+)
+
+handle = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload={"fd": 3})
+runtime = RuntimeHostBindings({"host.open": lambda: handle})
+
+result = run_export(checked, "@app.run", runtime)
+print(result)
+```
+
 ## Public surface notes
 
 - User-defined words must be declared inside `module @name ... end-module`.
@@ -80,6 +132,8 @@ print(result)
 - The canonical host-visible export name is `@module.word`.
 - Import aliases do not affect host-visible export names.
 - Legacy flat public syntax such as `export : app.run { ... }` is rejected.
+- Host opaque types are declared through `HostContract.opaque_types`.
+- `RuntimeOpaqueValue` is part of the public runtime surface for host opaque values.
 
 ## Runtime and ABI notes
 
@@ -87,6 +141,14 @@ print(result)
 - The runtime consumes `CheckedProgram` only and does not re-parse, re-resolve, or re-check source.
 - `HostContract` and `ExportContract` are the static host/export surfaces exposed by the Python implementation.
 - `Quote<{ ... }>` and `DirtyQuote<{ ... }>` are not ABI-compatible in v1 and must not cross the host boundary.
+
+## Current limitations
+
+- Undeclared `host.*` types are rejected in ABI-visible signatures and checker-visible type positions.
+- `Map<host.*, V>` is forbidden. Opaque types may be map values only.
+- Opaque values cannot be used with `=` or `!=`.
+- Runtime host opaque values must use nominal `RuntimeOpaqueValue(type_name=..., payload=...)`.
+- `Quote<{ ... }>` and `DirtyQuote<{ ... }>` remain forbidden across the ABI boundary.
 
 ## Additional docs
 

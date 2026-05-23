@@ -189,7 +189,7 @@ Keep this phase integration-focused; no broad refactor.
 
 ## Phase 6 — Documentation and final coverage
 
-Status: pending
+Status: completed
 
 Purpose:
 Publish migration alignment and complete final spec-facing coverage.
@@ -463,3 +463,49 @@ Unexpected findings:
 
 Follow-up actions:
 Proceed to post-Phase 5 audit
+
+### Update 2026-05-23 09:19
+
+Phase:
+Phase 6 — Documentation and final coverage
+
+Changes:
+- Updated `README.md` to target `v0.2.0-host-opaque-types` instead of the stale `v0.1.0-modules-freeze` baseline.
+- Documented the host opaque declaration model through `HostContract` and `HostOpaqueType`.
+- Documented the required runtime wrapper `RuntimeOpaqueValue` and the canonical public flow `HostContract -> analyze_program(...) -> run_export(...)`.
+- Added an end-to-end opaque example and documented current limitations: undeclared `host.*` rejection, opaque map-key prohibition, opaque equality restriction, nominal runtime wrapper requirement, and quote ABI restriction.
+- Kept implementation behavior unchanged.
+
+Tests added:
+- None. Existing Phase 1-5 coverage already supports the documented behavior.
+
+Tests passing:
+- `.venv/bin/python -m pytest -q` passed (`699 passed`)
+
+Unexpected findings:
+- None.
+
+Follow-up actions:
+- Ready for post-Phase 6 audit
+
+### Update 2026-05-23 09:23
+
+Phase:
+Phase 6 — documentation correction
+
+Changes:
+- Corrected the README canonical host-opaque example to remove parser-internal construction.
+- Replaced `Parser(lex(...)).parse().words[0].signature` with a public-facing `host_signature` placeholder supplied by the host integration layer.
+- Kept behavior unchanged.
+
+Tests added:
+- None.
+
+Tests passing:
+- `.venv/bin/python -m pytest -q` passed (`699 passed`)
+
+Unexpected findings:
+- None.
+
+Follow-up actions:
+- Ready for post-correction audit
