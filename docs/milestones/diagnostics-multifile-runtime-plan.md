@@ -206,7 +206,7 @@ Possible phase states:
 |---|---|---|---|---|---|
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
-| 2. Tokens + AST spans | in_progress | pending commit | Phase 2B/2C.4 implemented: IfNode range propagation | 733 passed | Post-patch audit passed; awaiting commit |
+| 2. Tokens + AST spans | in_progress | pending commit | Phase 2B/2C.5 implemented: case, branch and pattern range propagation | 743 passed | Post-patch audit passed; awaiting commit |
 | 3. Structured compilation diagnostics | pending | - | Introduce structured diagnostics model and formatting | - | Depends on phase 2 |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
@@ -354,6 +354,19 @@ Known deferred work:
 - Parser semantics, runtime behavior and public APIs remain unchanged.
 - `CaseNode`, `CaseBranchNode`, `PatternNode` and symbol provenance work remains deferred.
 
+## Phase 2B/2C.5 post-audit notes
+
+- Phase 2B/2C.5 implementation passed post-audit.
+- No fixes are required before commit.
+- `CaseNode` spans now include `case ... end`.
+- `CaseBranchNode` spans now start at pattern start and end at boundary token start.
+- Branch boundary behavior follows the frozen convention: next branch pattern start, or enclosing `end` for the final branch.
+- Constructor `PatternNode` spans for `Ok(x)` and `Err(x)` now include the closing `)`.
+- Pattern grammar is preserved: nested constructor patterns, multi-argument constructor patterns and arbitrary constructors remain rejected.
+- Parser semantics, runtime behavior and public APIs remain unchanged.
+- Symbol provenance work remains deferred.
+- The branch boundary rule remains coupled to `_looks_like_case_branch_start_at_current()` and should be revisited only if case grammar changes.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -413,3 +426,4 @@ Before Phase 8:
 | 2026-05-23 | pending | Phase 2B/2C.2 implementation prepared: structured node range propagation | 724 passed | Post-audit found no blocking issues |
 | 2026-05-23 | pending | Phase 2B/2C.3 implementation prepared: BlockNode range propagation | 729 passed | Post-audit found no blocking issues |
 | 2026-05-23 | pending | Phase 2B/2C.4 implementation prepared: IfNode range propagation | 733 passed | Post-audit found no blocking issues; existing required-else grammar preserved |
+| 2026-05-23 | pending | Phase 2B/2C.5 implementation prepared: CaseNode, CaseBranchNode and constructor PatternNode range propagation | 743 passed | Post-audit found no blocking issues; pattern grammar preserved |

@@ -561,8 +561,8 @@ class Parser:
                 self._raise_error("missing 'end'")
             branches.append(self._parse_case_branch(nested_words=nested_words))
 
-        self._expect(TokenKind.END, "missing 'end'")
-        return CaseNode(span=start.span, branches=tuple(branches))
+        end = self._expect(TokenKind.END, "missing 'end'")
+        return CaseNode(span=self._span_from(start, end), branches=tuple(branches))
 
     def _parse_case_branch(self, *, nested_words: list[WordDefNode] | None) -> CaseBranchNode:
         pattern = self._parse_pattern()
@@ -583,7 +583,18 @@ class Parser:
             stop_predicate=lambda: self._check(TokenKind.END)
             or self._looks_like_case_branch_start_at_current(),
         )
-        return CaseBranchNode(span=pattern.span, pattern=pattern, body=body, guard=guard)
+        boundary_span = self._current().span
+        boundary_start_span = SourceSpan(
+            source=boundary_span.source,
+            start=boundary_span.start,
+            end=boundary_span.start,
+        )
+        return CaseBranchNode(
+            span=self._span_from(pattern, boundary_start_span),
+            pattern=pattern,
+            body=body,
+            guard=guard,
+        )
 
     def _parse_pattern(self) -> PatternNode:
         pattern, next_index = self._parse_pattern_at(self._index)
@@ -644,6 +655,7 @@ class Parser:
         close_index = inner_index + 1
         if close_index >= len(self._tokens) or self._tokens[close_index].kind is not TokenKind.RPAREN:
             self._raise_error("unexpected token")
+        close_token = self._tokens[close_index]
 
         kind = PatternKind.OK if token.lexeme == "Ok" else PatternKind.ERR
         value = None
@@ -654,7 +666,7 @@ class Parser:
 
         return (
             PatternNode(
-                span=token.span,
+                span=self._span_from(token, close_token),
                 kind=kind,
                 value=value,
                 binding=binding,

@@ -322,6 +322,172 @@ def test_parser_case_with_mixed_guarded_and_unguarded_branches_parses():
     assert case_node.branches[3].guard is None
 
 
+def test_parser_case_node_span_includes_terminating_end():
+    source = (
+        "module @app\n"
+        "  : classify { n:Int -- text:String }\n"
+        "    n case\n"
+        "      0 => \"zero\"\n"
+        "      _ => \"many\"\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    case_node = program.words[0].body.items[1]
+    case_token = _token_by_kind(tokens, TokenKind.CASE, index=0)
+    end_token = _token_by_kind(tokens, TokenKind.END, index=0)
+
+    assert isinstance(case_node, CaseNode)
+    assert case_node.span.start == case_token.span.start
+    assert case_node.span.end == end_token.span.end
+
+
+def test_parser_ok_constructor_pattern_span_includes_closing_rparen():
+    source = (
+        "module @app\n"
+        "  : classify { r:Result<Int,MapError> -- n:Int }\n"
+        "    r case\n"
+        "      Ok(v) => v\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    pattern = program.words[0].body.items[1].branches[0].pattern
+    ok_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="Ok", index=0)
+    rparen_token = _token_by_kind(tokens, TokenKind.RPAREN, index=0)
+
+    assert pattern.kind is PatternKind.OK
+    assert pattern.span.start == ok_token.span.start
+    assert pattern.span.end == rparen_token.span.end
+
+
+def test_parser_err_constructor_pattern_span_includes_closing_rparen():
+    source = (
+        "module @app\n"
+        "  : classify { r:Result<Int,MapError> -- n:Int }\n"
+        "    r case\n"
+        "      Err(e) => 0\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    pattern = program.words[0].body.items[1].branches[0].pattern
+    err_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="Err", index=0)
+    rparen_token = _token_by_kind(tokens, TokenKind.RPAREN, index=0)
+
+    assert pattern.kind is PatternKind.ERR
+    assert pattern.span.start == err_token.span.start
+    assert pattern.span.end == rparen_token.span.end
+
+
+def test_parser_case_branch_first_ends_at_next_branch_pattern_boundary():
+    source = (
+        "module @app\n"
+        "  : classify { n:Int -- text:String }\n"
+        "    n case\n"
+        "      0 => \"zero\"\n"
+        "      1 => \"one\"\n"
+        "      _ => \"many\"\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    case_node = program.words[0].body.items[1]
+    first_branch = case_node.branches[0]
+    second_branch = case_node.branches[1]
+    first_pattern_token = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="0", index=0)
+    second_pattern_token = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="1", index=0)
+
+    assert isinstance(case_node, CaseNode)
+    assert first_branch.span.start == first_pattern_token.span.start
+    assert first_branch.span.end == second_pattern_token.span.start
+    assert second_branch.span.start == second_pattern_token.span.start
+
+
+def test_parser_case_branch_final_ends_at_enclosing_end_boundary():
+    source = (
+        "module @app\n"
+        "  : classify { n:Int -- text:String }\n"
+        "    n case\n"
+        "      0 => \"zero\"\n"
+        "      _ => \"many\"\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    case_node = program.words[0].body.items[1]
+    final_branch = case_node.branches[-1]
+    wildcard_token = _token_by_kind(tokens, TokenKind.UNDERSCORE, index=0)
+    end_token = _token_by_kind(tokens, TokenKind.END, index=0)
+
+    assert isinstance(case_node, CaseNode)
+    assert final_branch.span.start == wildcard_token.span.start
+    assert final_branch.span.end == end_token.span.start
+
+
+def test_parser_case_branch_with_body_items_still_uses_boundary_rule():
+    source = (
+        "module @app\n"
+        "  : classify { n:Int -- text:String }\n"
+        "    n case\n"
+        "      0 => \"zero\" drop\n"
+        "      _ => \"many\"\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    case_node = program.words[0].body.items[1]
+    first_branch = case_node.branches[0]
+    second_pattern_token = _token_by_kind(tokens, TokenKind.UNDERSCORE, index=0)
+
+    assert isinstance(case_node, CaseNode)
+    assert len(first_branch.body.items) == 2
+    assert first_branch.span.end == second_pattern_token.span.start
+
+
+def test_parser_nested_case_preserves_outer_ranges():
+    source = (
+        "module @app\n"
+        "  : nested { x:Int y:Int -- n:Int }\n"
+        "    x case\n"
+        "      0 => y case\n"
+        "        1 => 1\n"
+        "        _ => 2\n"
+        "      end\n"
+        "      _ => 3\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    outer_case = program.words[0].body.items[1]
+    inner_case = outer_case.branches[0].body.items[1]
+    outer_case_token = _token_by_kind(tokens, TokenKind.CASE, index=0)
+    inner_case_token = _token_by_kind(tokens, TokenKind.CASE, index=1)
+    inner_end_token = _token_by_kind(tokens, TokenKind.END, index=0)
+    outer_end_token = _token_by_kind(tokens, TokenKind.END, index=1)
+
+    assert isinstance(outer_case, CaseNode)
+    assert isinstance(inner_case, CaseNode)
+    assert inner_case.span.start == inner_case_token.span.start
+    assert inner_case.span.end == inner_end_token.span.end
+    assert outer_case.span.start == outer_case_token.span.start
+    assert outer_case.span.end == outer_end_token.span.end
+
+
 def test_parser_quotation():
     program = parse_source(": q { -- } :[ | x:Int -- y:Int | x 1 + ;] ;")
     quote = program.words[0].body.items[0]
@@ -633,6 +799,37 @@ def test_parser_accepts_err_variant_pattern(variant_name):
     ],
 )
 def test_parser_rejects_invalid_constructor_patterns(source):
+    with pytest.raises(ParseError):
+        parse_source(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        (
+            ": bad-case { r:Result<Int,MapError> -- text:String }\n"
+            "  r case\n"
+            "    Ok(Err(e)) => \"bad\"\n"
+            "  end\n"
+            ";"
+        ),
+        (
+            ": bad-case { r:Result<Int,MapError> -- text:String }\n"
+            "  r case\n"
+            "    Ok(a,b) => \"bad\"\n"
+            "  end\n"
+            ";"
+        ),
+        (
+            ": bad-case { r:Result<Int,MapError> -- text:String }\n"
+            "  r case\n"
+            "    Some(v) => \"bad\"\n"
+            "  end\n"
+            ";"
+        ),
+    ],
+)
+def test_parser_constructor_pattern_capabilities_remain_unchanged(source):
     with pytest.raises(ParseError):
         parse_source(source)
 
