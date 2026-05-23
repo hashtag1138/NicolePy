@@ -1209,6 +1209,48 @@ def test_parser_signature_span_includes_delimiters():
     assert signature.span.end == rbrace_token.span.end
 
 
+def test_parser_parameter_span_starts_at_name_and_ends_at_type_end():
+    source = "module @app\n  : run { xs:Map<String,Int> -- }\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    parameter = program.words[0].signature.inputs[0]
+    name_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="xs")
+    end_type_token = _token_by_kind(tokens, TokenKind.GT, index=0)
+
+    assert parameter.span.start == name_token.span.start
+    assert parameter.span.end == end_type_token.span.end
+    assert parameter.span.end == parameter.type_node.span.end
+
+
+def test_parser_type_span_includes_closing_generic_delimiter():
+    source = "module @app\n  : run { -- m:Map<String,List<Int>> }\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    type_node = program.words[0].signature.outputs[0].type_node
+    map_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="Map")
+    outer_gt = _token_by_kind(tokens, TokenKind.GT, index=1)
+
+    assert type_node.span.start == map_token.span.start
+    assert type_node.span.end == outer_gt.span.end
+
+
+def test_parser_quote_type_argument_preserves_nested_range_provenance():
+    source = "module @app\n  : run { -- q:Quote<{ | x:Int -- y:Int }> }\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    type_node = program.words[0].signature.outputs[0].type_node
+    quote_type = type_node.args[0]
+    quote_name_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="Quote")
+    quote_type_lbrace = _token_by_kind(tokens, TokenKind.LBRACE, index=1)
+    quote_type_rbrace = _token_by_kind(tokens, TokenKind.RBRACE, index=0)
+    gt_token = _token_by_kind(tokens, TokenKind.GT, index=0)
+
+    assert type_node.span.start == quote_name_token.span.start
+    assert type_node.span.end == gt_token.span.end
+    assert quote_type.span.start == quote_type_lbrace.span.start
+    assert quote_type.span.end == quote_type_rbrace.span.end
+
+
 def test_parser_quote_type_span_includes_delimiters():
     source = (
         "module @app\n"
@@ -1240,17 +1282,32 @@ def test_parser_non_empty_list_literal_span_includes_closing_bracket():
     assert list_node.span.end == rbracket_token.span.end
 
 
-def test_parser_empty_list_literal_span_includes_closing_bracket():
+def test_parser_typed_empty_list_span_includes_full_type_annotation():
     source = "module @app\n  : xs { -- ys:List<Int> }\n    []:List<Int>\n  ;\nend-module\n"
     tokens = lex(source)
     program = parse_source_raw(source)
     list_node = program.words[0].body.items[0]
     lbracket_token = _token_by_kind(tokens, TokenKind.LBRACKET)
-    rbracket_token = _token_by_kind(tokens, TokenKind.RBRACKET)
+    end_type_token = _token_by_kind(tokens, TokenKind.GT, index=1)
 
     assert isinstance(list_node, TypedEmptyListNode)
     assert list_node.span.start == lbracket_token.span.start
-    assert list_node.span.end == rbracket_token.span.end
+    assert list_node.span.end == end_type_token.span.end
+    assert list_node.span.end == list_node.type_node.span.end
+
+
+def test_parser_typed_empty_map_span_includes_full_type_annotation():
+    source = "module @app\n  : m { -- out:Map<String,Int> }\n    map.empty:Map<String,Int>\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    map_node = program.words[0].body.items[0]
+    map_empty_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="map.empty")
+    end_type_token = _token_by_kind(tokens, TokenKind.GT, index=1)
+
+    assert isinstance(map_node, TypedEmptyMapNode)
+    assert map_node.span.start == map_empty_token.span.start
+    assert map_node.span.end == end_type_token.span.end
+    assert map_node.span.end == map_node.type_node.span.end
 
 
 def test_parser_quote_node_span_includes_closing_delimiter():

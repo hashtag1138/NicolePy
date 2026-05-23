@@ -262,7 +262,11 @@ class Parser:
         name_token = self._expect_definition_identifier("expected parameter name")
         self._expect(TokenKind.COLON, "expected ':' in parameter")
         type_node = self._parse_type()
-        return ParameterNode(span=name_token.span, name=name_token.lexeme, type_node=type_node)
+        return ParameterNode(
+            span=self._span_from(name_token, type_node),
+            name=name_token.lexeme,
+            type_node=type_node,
+        )
 
     def _expect_definition_identifier(self, message: str) -> Token:
         token = self._current()
@@ -280,25 +284,29 @@ class Parser:
         if name_token.lexeme in {"Quote", "DirtyQuote"} and self._match(TokenKind.LT):
             if self._check(TokenKind.LBRACE):
                 quote_type = self._parse_quote_type()
-                self._expect(TokenKind.GT, "malformed type")
+                end = self._expect(TokenKind.GT, "malformed type")
                 quote_type.effect_kind = (
                     QuoteEffect.DIRTY
                     if name_token.lexeme == "DirtyQuote"
                     else QuoteEffect.PURE
                 )
                 return TypeNode(
-                    span=name_token.span,
+                    span=self._span_from(name_token, end),
                     name="Quote",
                     args=(quote_type,),
                 )
 
         if self._match(TokenKind.LT):
-            args = self._parse_type_arguments()
-            return TypeNode(span=name_token.span, name=name_token.lexeme, args=tuple(args))
+            args, end = self._parse_type_arguments()
+            return TypeNode(
+                span=self._span_from(name_token, end),
+                name=name_token.lexeme,
+                args=tuple(args),
+            )
 
         return TypeNode(span=name_token.span, name=name_token.lexeme)
 
-    def _parse_type_arguments(self) -> list[TypeNode | QuoteTypeNode]:
+    def _parse_type_arguments(self) -> tuple[list[TypeNode | QuoteTypeNode], Token]:
         args: list[TypeNode | QuoteTypeNode] = []
         if self._check(TokenKind.GT):
             self._raise_error("malformed type")
@@ -306,8 +314,8 @@ class Parser:
             args.append(self._parse_type())
             if self._match(TokenKind.COMMA):
                 continue
-            self._expect(TokenKind.GT, "malformed type")
-            return args
+            end = self._expect(TokenKind.GT, "malformed type")
+            return args, end
 
     def _parse_quote_type(self) -> QuoteTypeNode:
         start = self._expect(TokenKind.LBRACE, "malformed type")
@@ -462,12 +470,15 @@ class Parser:
         start = self._expect(TokenKind.LBRACKET, "expected '['")
         elements: list[AtomNode] = []
         if self._check(TokenKind.RBRACKET):
-            end = self._expect(TokenKind.RBRACKET, "expected ']'")
+            self._expect(TokenKind.RBRACKET, "expected ']'")
             self._expect(TokenKind.COLON, "empty list requires explicit type annotation")
             type_node = self._parse_type()
             if type_node.name != "List":
                 self._raise_error("empty list requires List<T> annotation")
-            return TypedEmptyListNode(span=self._span_from(start, end), type_node=type_node)
+            return TypedEmptyListNode(
+                span=self._span_from(start, type_node),
+                type_node=type_node,
+            )
 
         while True:
             elements.append(self._parse_list_element(nested_words=nested_words))
@@ -484,7 +495,7 @@ class Parser:
         type_node = self._parse_type()
         if type_node.name != "Map":
             self._raise_error("map.empty requires Map<K,V> annotation")
-        return TypedEmptyMapNode(span=start.span, type_node=type_node)
+        return TypedEmptyMapNode(span=self._span_from(start, type_node), type_node=type_node)
 
     def _parse_list_element(self, *, nested_words: list[WordDefNode] | None) -> AtomNode:
         token = self._current()
