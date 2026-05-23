@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from .ast_nodes import (
     BlockNode,
     CaseBranchNode,
@@ -18,20 +16,16 @@ from .ast_nodes import (
     ResolutionInfo,
     WordDefNode,
 )
+from .errors import DiagnosticError, DiagnosticPhase
 from .host_abi import BindingAvailability, HostContract
 from .symbols import SymbolSource, SymbolTable, WordSymbol
 
 __all__ = ["ResolutionError", "Resolver", "resolve"]
 
 
-@dataclass(slots=True)
-class ResolutionError(Exception):
-    message: str
-    line: int
-    column: int
-
-    def __str__(self) -> str:
-        return f"{self.message} at {self.line}:{self.column}"
+class ResolutionError(DiagnosticError):
+    phase = DiagnosticPhase.RESOLVER
+    default_code = "RESOLVER_ERROR"
 
 
 class Resolver:

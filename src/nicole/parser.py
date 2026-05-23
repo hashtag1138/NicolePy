@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from .ast_nodes import (
@@ -37,6 +36,7 @@ from .ast_nodes import (
     Visibility,
     WordDefNode,
 )
+from .errors import DiagnosticError, DiagnosticPhase
 from .tokens import SourceSpan, Token, TokenKind
 
 __all__ = ["ParseError", "Parser"]
@@ -70,14 +70,9 @@ _RESERVED_WORD_PREFIXES = (
 )
 
 
-@dataclass(slots=True)
-class ParseError(Exception):
-    message: str
-    line: int
-    column: int
-
-    def __str__(self) -> str:
-        return f"{self.message} at {self.line}:{self.column}"
+class ParseError(DiagnosticError):
+    phase = DiagnosticPhase.PARSER
+    default_code = "PARSER_ERROR"
 
 
 class Parser:

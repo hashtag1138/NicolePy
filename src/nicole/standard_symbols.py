@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from .ast_nodes import ParameterNode, QuoteTypeNode, SignatureNode, TypeNode, Visibility
+from .errors import DiagnosticError, DiagnosticPhase
 from .source import SourceFile, SourceLocation
 from .symbols import SymbolSource, SymbolTable, WordSymbol
 from .tokens import SourceSpan
@@ -23,12 +22,10 @@ _BUILTIN_SPAN = SourceSpan(
 _BUILTIN_OWNER = "std"
 
 
-@dataclass(slots=True)
-class StandardSymbolError(Exception):
-    message: str
-
-    def __str__(self) -> str:
-        return self.message
+class StandardSymbolError(DiagnosticError):
+    phase = DiagnosticPhase.SYMBOLS
+    default_code = "SYMBOLS_STANDARD_ERROR"
+    include_location_in_str = False
 
 
 def load_standard_symbols() -> list[WordSymbol]:

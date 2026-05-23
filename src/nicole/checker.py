@@ -26,6 +26,7 @@ from .ast_nodes import (
     TypedEmptyMapNode,
     WordDefNode,
 )
+from .errors import DiagnosticError, DiagnosticPhase
 from .host_abi import HostABIError, HostEffect, validate_type_v1
 from .symbols import SymbolSource, SymbolTable, WordSymbol
 
@@ -42,14 +43,9 @@ _LANGUAGE_SCALAR_TYPES_V1 = {
 }
 
 
-@dataclass(slots=True)
-class CheckerError(Exception):
-    message: str
-    line: int
-    column: int
-
-    def __str__(self) -> str:
-        return f"{self.message} at {self.line}:{self.column}"
+class CheckerError(DiagnosticError):
+    phase = DiagnosticPhase.CHECKER
+    default_code = "CHECKER_ERROR"
 
 
 @dataclass(frozen=True, slots=True)

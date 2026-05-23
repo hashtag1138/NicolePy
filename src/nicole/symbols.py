@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from .ast_nodes import SignatureNode, Visibility
+from .errors import DiagnosticError, DiagnosticPhase
 from .tokens import SourceSpan
 
 
@@ -15,14 +16,9 @@ class SymbolSource(Enum):
 _RESERVED_ROOTS = {"host", "list", "map", "result"}
 
 
-@dataclass(slots=True)
-class SymbolError(Exception):
-    message: str
-    line: int
-    column: int
-
-    def __str__(self) -> str:
-        return f"{self.message} at {self.line}:{self.column}"
+class SymbolError(DiagnosticError):
+    phase = DiagnosticPhase.SYMBOLS
+    default_code = "SYMBOLS_ERROR"
 
 
 @dataclass(frozen=True, slots=True)

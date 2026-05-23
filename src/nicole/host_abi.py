@@ -7,6 +7,7 @@ import re
 from types import MappingProxyType
 
 from .ast_nodes import QuoteTypeNode, SignatureNode, TypeNode, Visibility
+from .errors import DiagnosticError, DiagnosticPhase
 from .symbols import SymbolTable
 
 _ABI_SCALAR_TYPES_V1 = {
@@ -21,12 +22,10 @@ _ABI_SCALAR_TYPES_V1 = {
 _HOST_OPAQUE_TYPE_RE = re.compile(r"^host\.[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*$")
 
 
-@dataclass(slots=True)
-class HostABIError(Exception):
-    message: str
-
-    def __str__(self) -> str:
-        return self.message
+class HostABIError(DiagnosticError):
+    phase = DiagnosticPhase.ABI
+    default_code = "ABI_ERROR"
+    include_location_in_str = False
 
 
 class BindingAvailability(Enum):

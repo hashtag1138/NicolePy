@@ -2,20 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .errors import DiagnosticError, DiagnosticPhase
 from .source import SourceFile, SourceLocation
 from .tokens import SourceSpan, Token, TokenKind
 
 __all__ = ["LexError", "Lexer", "lex"]
 
 
-@dataclass(slots=True)
-class LexError(Exception):
-    message: str
-    line: int
-    column: int
-
-    def __str__(self) -> str:
-        return f"{self.message} at {self.line}:{self.column}"
+class LexError(DiagnosticError):
+    phase = DiagnosticPhase.LEXER
+    default_code = "LEXER_ERROR"
 
 
 class Lexer:
