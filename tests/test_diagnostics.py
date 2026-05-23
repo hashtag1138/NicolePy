@@ -135,6 +135,18 @@ def test_legacy_message_line_column_and_str_are_compatible() -> None:
     assert str(error) == "invalid character at 5:11"
 
 
+def test_parse_error_legacy_message_line_column_and_str_are_compatible() -> None:
+    error = ParseError(message="unexpected token", line=7, column=2)
+
+    assert len(error.diagnostics) == 1
+    assert error.diagnostic.phase is DiagnosticPhase.PARSER
+    assert error.diagnostic.code == "PARSER_ERROR"
+    assert error.message == "unexpected token"
+    assert error.line == 7
+    assert error.column == 2
+    assert str(error) == "unexpected token at 7:2"
+
+
 def test_locationless_errors_keep_legacy_string_behavior() -> None:
     host_error = HostABIError("type is not ABI-compatible in v1: Foo")
     builtin_error = StandardSymbolError("cannot redefine standard builtin: map.get")

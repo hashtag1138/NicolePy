@@ -316,7 +316,7 @@ Possible phase states:
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
-| 3. Structured compilation diagnostics | in_progress | `3667bc0d4aa729e1f679e809caabe576d600524c` | Phase 3B implemented and committed: structured diagnostic primitives and compatibility layer | 760 passed | One-diagnostic policy enforcement fix committed; Phase 3C+ remains pending |
+| 3. Structured compilation diagnostics | in_progress | `3667bc0d4aa729e1f679e809caabe576d600524c` | Phase 3B committed; Phase 3C implementation prepared: lexer/parser errors now attach structured diagnostics | 770 passed | Phase 3C patch is prepared and uncommitted; Phase 3D+ remains pending |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
@@ -331,7 +331,8 @@ Possible phase states:
 - AST nodes are range-aware according to Phase 2 frozen conventions.
 - Builtin symbols and builtin helper nodes use `<builtin>` provenance.
 - Host provenance remains resolver/contract-owned and deferred.
-- Diagnostics are still exception/message based and are the next milestone area.
+- Lexer and parser now attach structured diagnostics (phase/code/span) while preserving legacy exception compatibility.
+- Symbol collection, resolver, checker, ABI, and runtime diagnostics are still pending follow-up phases.
 - No `NicoleCompiler` exists yet.
 - No real `NicoleInterpreter` API exists yet.
 - Runtime errors still lack structured span/operation/stack trace diagnostics.
@@ -356,13 +357,12 @@ Possible phase states:
 
 ## Next patch
 
-Phase 3B — structured diagnostic foundation corrective patch.
+Phase 3D — adapt symbol collection, resolver, and checker to structured diagnostics.
 
 Scope:
-- enforce one-diagnostic-per-exception policy for `DiagnosticError` in Phase 3B
-- keep `diagnostics: tuple[Diagnostic, ...]` storage shape and `diagnostic` accessor
-- preserve legacy `.message`, `.line`, `.column` and `__str__` compatibility behavior
-- add focused tests for empty/multi diagnostic rejection and span-derived location compatibility
+- adapt `SymbolError`, `ResolutionError`, and `CheckerError` raise paths to attach stable structured diagnostics
+- preserve legacy `.message`, `.line`, `.column`, and `str(exception)` compatibility
+- keep one-diagnostic-per-exception policy
 
 Non-goals:
 - no runtime diagnostics yet
@@ -576,3 +576,4 @@ Before Phase 8:
 | 2026-05-23 | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2B/2C.6 implementation prepared: ParameterNode, TypeNode, TypedEmptyListNode and TypedEmptyMapNode range propagation | 750 passed | Post-audit found no blocking issues; grammar preserved |
 | 2026-05-23 | pending | Phase 3A diagnostic model freeze prepared | 750 passed | Documentation-only design freeze after Phase 3 audit |
 | 2026-05-23 | `3667bc0d4aa729e1f679e809caabe576d600524c` | Phase 3B implemented and committed: `Diagnostic`, `DiagnosticError`, compile-time diagnostic enums, compatibility-layer exception subclasses, and one-diagnostic policy enforcement fix | 760 passed | Commit `feat: add structured diagnostic foundation`; Phase 3 remains in progress for 3C+ |
+| 2026-05-23 | pending | Phase 3C implementation prepared: lexer/parser `LexError` and `ParseError` now attach structured diagnostics with stable codes and span provenance while preserving legacy behavior | 770 passed | Commit pending; Phase 3 remains in progress and Phase 3D is next |

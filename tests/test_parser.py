@@ -28,6 +28,7 @@ from nicole.ast_nodes import (
     TypedEmptyMapNode,
     Visibility,
 )
+from nicole.errors import DiagnosticPhase, DiagnosticSeverity
 from nicole.lexer import lex
 from nicole.parser import ParseError, Parser
 from nicole.tokens import TokenKind
@@ -120,8 +121,25 @@ def test_parser_rejects_top_level_word_definition():
 
 
 def test_parser_rejects_export_outside_module():
-    with pytest.raises(ParseError, match="export declaration is only allowed inside module"):
-        parse_source_raw("export : run")
+    source = "export : run"
+    tokens = lex(source)
+    export_token = _token_by_kind(tokens, TokenKind.EXPORT)
+
+    with pytest.raises(ParseError, match="export declaration is only allowed inside module") as exc_info:
+        parse_source_raw(source)
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.severity is DiagnosticSeverity.ERROR
+    assert diagnostic.phase is DiagnosticPhase.PARSER
+    assert diagnostic.code == "PARSER_EXPORT_OUTSIDE_MODULE"
+    assert diagnostic.message == "export declaration is only allowed inside module"
+    assert diagnostic.span == export_token.span
+    assert error.message == "export declaration is only allowed inside module"
+    assert error.line == export_token.span.line
+    assert error.column == export_token.span.column
+    assert str(error) == f"{error.message} at {error.line}:{error.column}"
 
 
 def test_parser_rejects_nested_module():
@@ -240,6 +258,37 @@ def test_parser_rejects_duplicate_word_input_names():
             "  x\n"
             ";"
         )
+
+
+def test_parser_duplicate_word_input_name_exposes_structured_diagnostic() -> None:
+    source = (
+        "module @app\n"
+        "  : bad { x:Int x:Int -- y:Int }\n"
+        "    x\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    duplicate_param_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="x", index=1)
+    duplicate_param_type_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="Int", index=1)
+
+    with pytest.raises(ParseError, match="duplicate local name in word frame") as exc_info:
+        parse_source_raw(source)
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.severity is DiagnosticSeverity.ERROR
+    assert diagnostic.phase is DiagnosticPhase.PARSER
+    assert diagnostic.code == "PARSER_DUPLICATE_LOCAL_NAME"
+    assert diagnostic.message == "duplicate local name in word frame"
+    assert diagnostic.span is not None
+    assert diagnostic.span.start == duplicate_param_token.span.start
+    assert diagnostic.span.end == duplicate_param_type_token.span.end
+    assert error.message == "duplicate local name in word frame"
+    assert error.line == duplicate_param_token.span.line
+    assert error.column == duplicate_param_token.span.column
+    assert str(error) == f"{error.message} at {error.line}:{error.column}"
 
 
 def test_parser_if_has_no_condition_field():
@@ -568,6 +617,32 @@ def test_parser_rejects_bare_empty_list():
         parse_source(": bad { -- xs:List<Int> } [] ;")
 
 
+def test_parser_invalid_empty_list_annotation_uses_type_span() -> None:
+    source = (
+        "module @app\n"
+        "  : bad { -- xs:List<Int> }\n"
+        "    []:Map<String,Int>\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    type_name_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="Map", index=0)
+    type_end_token = _token_by_kind(tokens, TokenKind.GT, index=1)
+
+    with pytest.raises(ParseError, match="empty list requires List<T> annotation") as exc_info:
+        parse_source_raw(source)
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.code == "PARSER_INVALID_EMPTY_LIST_ANNOTATION"
+    assert diagnostic.span is not None
+    assert diagnostic.span.start == type_name_token.span.start
+    assert diagnostic.span.end == type_end_token.span.end
+    assert error.line == type_name_token.span.line
+    assert error.column == type_name_token.span.column
+
+
 def test_parser_accepts_typed_empty_map():
     program = parse_source(": empty { -- m:Map<String,Int> } map.empty:Map<String,Int> ;")
     map_node = program.words[0].body.items[0]
@@ -622,6 +697,32 @@ def test_parser_accepts_dirtyquote_nested_in_generic_type():
 def test_parser_rejects_bare_empty_map():
     with pytest.raises(ParseError):
         parse_source(": bad { -- m:Map<String,Int> } map.empty ;")
+
+
+def test_parser_invalid_empty_map_annotation_uses_type_span() -> None:
+    source = (
+        "module @app\n"
+        "  : bad { -- xs:Map<String,Int> }\n"
+        "    map.empty:List<Int>\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    type_name_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="List", index=0)
+    type_end_token = _token_by_kind(tokens, TokenKind.GT, index=1)
+
+    with pytest.raises(ParseError, match="map.empty requires Map<K,V> annotation") as exc_info:
+        parse_source_raw(source)
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.code == "PARSER_INVALID_EMPTY_MAP_ANNOTATION"
+    assert diagnostic.span is not None
+    assert diagnostic.span.start == type_name_token.span.start
+    assert diagnostic.span.end == type_end_token.span.end
+    assert error.line == type_name_token.span.line
+    assert error.column == type_name_token.span.column
 
 
 def test_parser_pub_and_export():
@@ -711,6 +812,34 @@ def test_parser_accepts_subword_reusing_parent_local_name():
 def test_parser_malformed_input_raises_parse_error():
     with pytest.raises(ParseError):
         parse_source(": bad { -- } 1")
+
+
+def test_parser_malformed_type_exposes_structured_diagnostic() -> None:
+    source = (
+        "module @app\n"
+        "  : broken { -- xs:List<Int }\n"
+        "    0\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    closing_rbrace = _token_by_kind(tokens, TokenKind.RBRACE, index=0)
+
+    with pytest.raises(ParseError, match="malformed type") as exc_info:
+        parse_source_raw(source)
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.severity is DiagnosticSeverity.ERROR
+    assert diagnostic.phase is DiagnosticPhase.PARSER
+    assert diagnostic.code == "PARSER_INVALID_TYPE"
+    assert diagnostic.message == "malformed type"
+    assert diagnostic.span == closing_rbrace.span
+    assert error.message == "malformed type"
+    assert error.line == closing_rbrace.span.line
+    assert error.column == closing_rbrace.span.column
+    assert str(error) == f"{error.message} at {error.line}:{error.column}"
 
 
 def test_parser_rejects_arbitrary_identifier_pattern():
@@ -901,6 +1030,56 @@ def test_parser_rejects_result_constructor_call_syntax(source):
         parse_source(source)
 
 
+def test_parser_nested_constructor_pattern_error_uses_nested_token_span() -> None:
+    source = (
+        "module @app\n"
+        "  : bad-case { r:Result<Int,MapError> -- text:String }\n"
+        "    r case\n"
+        "      Ok(Err(e)) => \"bad\"\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    nested_constructor_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="Err", index=0)
+
+    with pytest.raises(ParseError, match="unexpected token") as exc_info:
+        parse_source_raw(source)
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.code == "PARSER_INVALID_PATTERN"
+    assert diagnostic.span == nested_constructor_token.span
+    assert error.line == nested_constructor_token.span.line
+    assert error.column == nested_constructor_token.span.column
+
+
+def test_parser_constructor_pattern_comma_error_uses_comma_span() -> None:
+    source = (
+        "module @app\n"
+        "  : bad-case { r:Result<Int,MapError> -- text:String }\n"
+        "    r case\n"
+        "      Ok(a,b) => \"bad\"\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    comma_token = next(token for token in tokens if token.kind is TokenKind.COMMA and token.span.line == 4)
+
+    with pytest.raises(ParseError, match="unexpected token") as exc_info:
+        parse_source_raw(source)
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.code == "PARSER_INVALID_PATTERN"
+    assert diagnostic.span == comma_token.span
+    assert error.line == comma_token.span.line
+    assert error.column == comma_token.span.column
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -922,6 +1101,31 @@ def test_parser_rejects_export_declaration_with_qualified_name():
             "  export : host.log\n"
             "end-module\n"
         )
+
+
+def test_parser_export_qualified_name_error_uses_exported_token_span() -> None:
+    source = (
+        "module @app\n"
+        "  : run { -- }\n"
+        "  ;\n"
+        "  export : host.log\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    exported_word_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="host.log")
+    end_module_token = _token_by_kind(tokens, TokenKind.END_MODULE, index=0)
+
+    with pytest.raises(ParseError, match="export declaration expects local word name") as exc_info:
+        parse_source_raw(source)
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.code == "PARSER_EXPORT_EXPECTS_LOCAL_WORD"
+    assert diagnostic.span == exported_word_token.span
+    assert diagnostic.span != end_module_token.span
+    assert error.line == exported_word_token.span.line
+    assert error.column == exported_word_token.span.column
 
 
 @pytest.mark.parametrize(

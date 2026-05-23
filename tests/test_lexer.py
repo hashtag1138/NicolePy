@@ -5,6 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from nicole.errors import DiagnosticPhase, DiagnosticSeverity
 from nicole.lexer import LexError, lex
 from nicole.source import MEMORY_SOURCE_PATH
 from nicole.tokens import TokenKind
@@ -99,6 +100,25 @@ def test_qualified_module_name_tokenized():
 def test_invalid_qualified_module_name_raises(source):
     with pytest.raises(LexError, match="invalid module reference"):
         lex(source)
+
+
+def test_invalid_module_reference_exposes_structured_diagnostic() -> None:
+    with pytest.raises(LexError, match="invalid module reference") as exc_info:
+        lex("@")
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.severity is DiagnosticSeverity.ERROR
+    assert diagnostic.phase is DiagnosticPhase.LEXER
+    assert diagnostic.code == "LEXER_INVALID_MODULE_REFERENCE"
+    assert diagnostic.message == "invalid module reference"
+    assert diagnostic.span is not None
+    assert diagnostic.span.start == diagnostic.span.end
+    assert error.message == "invalid module reference"
+    assert error.line == diagnostic.span.line
+    assert error.column == diagnostic.span.column
+    assert str(error) == f"invalid module reference at {error.line}:{error.column}"
 
 
 def test_result_constructors_and_propagation_recognized():
@@ -224,6 +244,25 @@ def test_unterminated_string_raises():
 def test_invalid_escape_sequences_raise(source):
     with pytest.raises(LexError, match="invalid escape sequence"):
         lex(source)
+
+
+def test_invalid_escape_sequence_exposes_structured_diagnostic() -> None:
+    with pytest.raises(LexError, match="invalid escape sequence") as exc_info:
+        lex('"\\x"')
+
+    error = exc_info.value
+    diagnostic = error.diagnostic
+
+    assert diagnostic.severity is DiagnosticSeverity.ERROR
+    assert diagnostic.phase is DiagnosticPhase.LEXER
+    assert diagnostic.code == "LEXER_INVALID_ESCAPE_SEQUENCE"
+    assert diagnostic.message == "invalid escape sequence"
+    assert diagnostic.span is not None
+    assert diagnostic.span.start == diagnostic.span.end
+    assert error.message == "invalid escape sequence"
+    assert error.line == diagnostic.span.line
+    assert error.column == diagnostic.span.column
+    assert str(error) == f"invalid escape sequence at {error.line}:{error.column}"
 
 
 def test_generic_type_separators():

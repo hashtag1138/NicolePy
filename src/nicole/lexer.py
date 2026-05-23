@@ -14,6 +14,22 @@ class LexError(DiagnosticError):
     default_code = "LEXER_ERROR"
 
 
+_LEXER_ERROR_DETAILS: dict[str, tuple[str, str | None]] = {
+    "invalid character": ("LEXER_UNEXPECTED_CHARACTER", "remove or replace the unsupported character"),
+    "invalid identifier": ("LEXER_INVALID_IDENTIFIER", "use a valid identifier segment after '.' or '-'"),
+    "invalid module reference": (
+        "LEXER_INVALID_MODULE_REFERENCE",
+        "use '@module' or '@module.word' style module references",
+    ),
+    "invalid numeric token": ("LEXER_INVALID_NUMBER", "use a valid numeric literal format"),
+    "unterminated string": ("LEXER_UNTERMINATED_STRING", "close the string with a matching quote"),
+    "invalid escape sequence": (
+        "LEXER_INVALID_ESCAPE_SEQUENCE",
+        "use one of: \\\" \\\\ \\n \\t",
+    ),
+}
+
+
 class Lexer:
     """Strict lexer for Nicole source text."""
 
@@ -364,7 +380,20 @@ class Lexer:
         return SourceSpan(source=self._source_file, start=mark.location, end=self._location())
 
     def _raise_error(self, message: str) -> None:
-        raise LexError(message=message, line=self._line, column=self._column)
+        code, suggestion = _LEXER_ERROR_DETAILS.get(
+            message,
+            ("LEXER_ERROR", None),
+        )
+        location = self._location()
+        span = SourceSpan(source=self._source_file, start=location, end=location)
+        raise LexError(
+            message=message,
+            line=self._line,
+            column=self._column,
+            code=code,
+            span=span,
+            suggestion=suggestion,
+        )
 
 
 @dataclass(frozen=True, slots=True)
