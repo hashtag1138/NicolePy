@@ -6,6 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.ast_nodes import (
+    BlockNode,
     CaseNode,
     ExportDeclaration,
     IdentifierNode,
@@ -1096,3 +1097,103 @@ def test_parser_nested_structures_preserve_outer_ranges():
     assert quote_type.span.end == quote_type_rbrace.span.end
     assert quote_node.span.start == quote_start_token.span.start
     assert quote_node.span.end == quote_end_token.span.end
+
+
+def test_parser_word_body_block_span_uses_first_and_last_items():
+    source = "module @app\n  : run { -- }\n    1 2 +\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    word = program.words[0]
+    first_item_token = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="1")
+    last_item_token = _token_by_kind(tokens, TokenKind.OPERATOR, lexeme="+")
+
+    assert isinstance(word.body, BlockNode)
+    assert word.body.span.start == first_item_token.span.start
+    assert word.body.span.end == last_item_token.span.end
+
+
+def test_parser_empty_word_body_block_span_is_zero_length_at_semicolon_boundary():
+    source = "module @app\n  : run { -- }\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    word = program.words[0]
+    semicolon_token = _token_by_kind(tokens, TokenKind.SEMICOLON)
+
+    assert isinstance(word.body, BlockNode)
+    assert word.body.items == ()
+    assert word.body.span.start == semicolon_token.span.start
+    assert word.body.span.end == semicolon_token.span.start
+    assert word.body.span.start == word.body.span.end
+
+
+def test_parser_quote_body_block_span_uses_items_while_quote_node_keeps_delimiters():
+    source = "module @app\n  : q { -- }\n    :[ | -- | x 1 + ;]\n  ;\nend-module\n"
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    quote = program.words[0].body.items[0]
+    first_body_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="x")
+    last_body_token = _token_by_kind(tokens, TokenKind.OPERATOR, lexeme="+")
+    quote_start_token = _token_by_kind(tokens, TokenKind.QUOTE_START)
+    quote_end_token = _token_by_kind(tokens, TokenKind.QUOTE_END)
+
+    assert isinstance(quote, QuoteNode)
+    assert isinstance(quote.body, BlockNode)
+    assert quote.body.span.start == first_body_token.span.start
+    assert quote.body.span.end == last_body_token.span.end
+    assert quote.span.start == quote_start_token.span.start
+    assert quote.span.end == quote_end_token.span.end
+
+
+def test_parser_signature_and_quote_type_ranges_remain_delimiter_based():
+    source = (
+        "module @app\n"
+        "  : typed { -- q:Quote<{ | x:Int -- y:Int }> }\n"
+        "    0\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    word = program.words[0]
+    signature = word.signature
+    quote_type = signature.outputs[0].type_node.args[0]
+    body_literal = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="0")
+    signature_lbrace = _token_by_kind(tokens, TokenKind.LBRACE, index=0)
+    signature_rbrace = _token_by_kind(tokens, TokenKind.RBRACE, index=1)
+    quote_type_lbrace = _token_by_kind(tokens, TokenKind.LBRACE, index=1)
+    quote_type_rbrace = _token_by_kind(tokens, TokenKind.RBRACE, index=0)
+
+    assert signature.span.start == signature_lbrace.span.start
+    assert signature.span.end == signature_rbrace.span.end
+    assert quote_type.span.start == quote_type_lbrace.span.start
+    assert quote_type.span.end == quote_type_rbrace.span.end
+    assert word.body.span.start == body_literal.span.start
+    assert word.body.span.end == body_literal.span.end
+
+
+def test_parser_if_inner_block_ranges_update_without_changing_if_node_span():
+    source = (
+        "module @app\n"
+        "  : choose { x:Bool -- n:Int }\n"
+        "    x if\n"
+        "      1\n"
+        "    else\n"
+        "      2\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    if_node = program.words[0].body.items[1]
+    if_token = _token_by_kind(tokens, TokenKind.IF)
+    then_literal = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="1")
+    else_literal = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="2")
+
+    assert isinstance(if_node, IfNode)
+    assert if_node.then_block.span.start == then_literal.span.start
+    assert if_node.then_block.span.end == then_literal.span.end
+    assert if_node.else_block.span.start == else_literal.span.start
+    assert if_node.else_block.span.end == else_literal.span.end
+    assert if_node.span.start == if_token.span.start
+    assert if_node.span.end == if_token.span.end

@@ -338,10 +338,6 @@ class Parser:
         stop_predicate: Callable[[], bool] | None = None,
     ) -> BlockNode:
         items: list[AtomNode] = []
-        span = self._current().span
-        if self._check_any(stop_kinds) or self._check(TokenKind.EOF):
-            return BlockNode(span=span, items=tuple(items))
-
         while not self._check(TokenKind.EOF):
             if stop_predicate is not None and stop_predicate():
                 break
@@ -355,6 +351,16 @@ class Parser:
                     nested_words.append(nested_word)
                 continue
             items.append(self._parse_atom(nested_words=nested_words))
+
+        if items:
+            span = self._span_from(items[0], items[-1])
+        else:
+            boundary_span = self._current().span
+            span = SourceSpan(
+                source=boundary_span.source,
+                start=boundary_span.start,
+                end=boundary_span.start,
+            )
 
         return BlockNode(span=span, items=tuple(items))
 

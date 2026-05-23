@@ -201,7 +201,7 @@ Possible phase states:
 |---|---|---|---|---|---|
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
-| 2. Tokens + AST spans | in_progress | pending commit | Phase 2B/2C.2 implemented: structured node delimiter ranges | 724 passed | Post-patch audit passed; awaiting commit |
+| 2. Tokens + AST spans | in_progress | pending commit | Phase 2B/2C.3 implemented: BlockNode range propagation | 729 passed | Post-patch audit passed; awaiting commit |
 | 3. Structured compilation diagnostics | pending | - | Introduce structured diagnostics model and formatting | - | Depends on phase 2 |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
@@ -326,6 +326,17 @@ Known deferred work:
 - Block, control-flow, pattern and symbol provenance work remains deferred.
 - Tests using delimiter occurrence indexes are acceptable for this patch but may become brittle if grammar token ordering changes.
 
+## Phase 2B/2C.3 post-audit notes
+
+- Phase 2B/2C.3 implementation passed post-audit.
+- No fixes are required before commit.
+- Non-empty `BlockNode` spans now start at the first contained node and end at the last contained node.
+- Empty `BlockNode` spans use a zero-length span derived from the current boundary token.
+- Empty-block boundary tokens may include `;`, `else`, `end`, `QUOTE_END`, or other enclosing syntax boundaries depending on parser context.
+- No new source provenance is invented.
+- Parser semantics, runtime behavior and public APIs remain unchanged.
+- Control-flow, pattern and symbol provenance work remains deferred.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -383,3 +394,4 @@ Before Phase 8:
 | 2026-05-23 | - | Phase 2 propagation audit and convention freeze | 707 passed | Documentation-only refinement before implementation |
 | 2026-05-23 | `d4e3bc8cb661a17a54bc6ca3cdcc489fee8b2096` | Phase 2B/2C.1 implementation prepared: parser span helpers and declaration range propagation | 718 passed | Post-audit found no blocking issues |
 | 2026-05-23 | pending | Phase 2B/2C.2 implementation prepared: structured node range propagation | 724 passed | Post-audit found no blocking issues |
+| 2026-05-23 | pending | Phase 2B/2C.3 implementation prepared: BlockNode range propagation | 729 passed | Post-audit found no blocking issues |
