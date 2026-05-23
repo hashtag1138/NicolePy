@@ -1171,7 +1171,7 @@ def test_parser_signature_and_quote_type_ranges_remain_delimiter_based():
     assert word.body.span.end == body_literal.span.end
 
 
-def test_parser_if_inner_block_ranges_update_without_changing_if_node_span():
+def test_parser_if_node_span_with_else_includes_end():
     source = (
         "module @app\n"
         "  : choose { x:Bool -- n:Int }\n"
@@ -1187,6 +1187,7 @@ def test_parser_if_inner_block_ranges_update_without_changing_if_node_span():
     program = parse_source_raw(source)
     if_node = program.words[0].body.items[1]
     if_token = _token_by_kind(tokens, TokenKind.IF)
+    end_token = _token_by_kind(tokens, TokenKind.END, index=0)
     then_literal = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="1")
     else_literal = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="2")
 
@@ -1196,4 +1197,107 @@ def test_parser_if_inner_block_ranges_update_without_changing_if_node_span():
     assert if_node.else_block.span.start == else_literal.span.start
     assert if_node.else_block.span.end == else_literal.span.end
     assert if_node.span.start == if_token.span.start
-    assert if_node.span.end == if_token.span.end
+    assert if_node.span.end == end_token.span.end
+
+
+def test_parser_if_without_else_remains_rejected():
+    with pytest.raises(ParseError):
+        parse_source(
+            ": choose { x:Bool -- n:Int }\n"
+            "  x if\n"
+            "    1\n"
+            "  end\n"
+            ";"
+        )
+
+
+def test_parser_if_empty_then_block_keeps_block_empty_policy_and_if_span():
+    source = (
+        "module @app\n"
+        "  : choose { x:Bool -- n:Int }\n"
+        "    x if\n"
+        "    else\n"
+        "      2\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    if_node = program.words[0].body.items[1]
+    if_token = _token_by_kind(tokens, TokenKind.IF, index=0)
+    else_token = _token_by_kind(tokens, TokenKind.ELSE, index=0)
+    end_token = _token_by_kind(tokens, TokenKind.END, index=0)
+    else_literal = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="2")
+
+    assert isinstance(if_node, IfNode)
+    assert if_node.then_block.items == ()
+    assert if_node.then_block.span.start == else_token.span.start
+    assert if_node.then_block.span.end == else_token.span.start
+    assert if_node.else_block.span.start == else_literal.span.start
+    assert if_node.else_block.span.end == else_literal.span.end
+    assert if_node.span.start == if_token.span.start
+    assert if_node.span.end == end_token.span.end
+
+
+def test_parser_nested_if_preserves_inner_and_outer_ranges():
+    source = (
+        "module @app\n"
+        "  : nested { x:Bool y:Bool -- n:Int }\n"
+        "    x if\n"
+        "      y if\n"
+        "        1\n"
+        "      else\n"
+        "        2\n"
+        "      end\n"
+        "    else\n"
+        "      3\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    outer_if = program.words[0].body.items[1]
+    inner_if = outer_if.then_block.items[1]
+    outer_if_token = _token_by_kind(tokens, TokenKind.IF, index=0)
+    inner_if_token = _token_by_kind(tokens, TokenKind.IF, index=1)
+    inner_end_token = _token_by_kind(tokens, TokenKind.END, index=0)
+    outer_end_token = _token_by_kind(tokens, TokenKind.END, index=1)
+
+    assert isinstance(outer_if, IfNode)
+    assert isinstance(inner_if, IfNode)
+    assert inner_if.span.start == inner_if_token.span.start
+    assert inner_if.span.end == inner_end_token.span.end
+    assert outer_if.span.start == outer_if_token.span.start
+    assert outer_if.span.end == outer_end_token.span.end
+
+
+def test_parser_word_body_block_span_stays_body_derived_with_if_node_inside():
+    source = (
+        "module @app\n"
+        "  : choose { x:Bool -- n:Int }\n"
+        "    x\n"
+        "    x if\n"
+        "      1\n"
+        "    else\n"
+        "      2\n"
+        "    end\n"
+        "    9\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    word = program.words[0]
+    first_item_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="x", index=1)
+    last_item_token = _token_by_kind(tokens, TokenKind.INT_LITERAL, lexeme="9", index=0)
+    if_node = next(item for item in word.body.items if isinstance(item, IfNode))
+    if_token = _token_by_kind(tokens, TokenKind.IF, index=0)
+    end_token = _token_by_kind(tokens, TokenKind.END, index=0)
+
+    assert isinstance(if_node, IfNode)
+    assert word.body.span.start == first_item_token.span.start
+    assert word.body.span.end == last_item_token.span.end
+    assert if_node.span.start == if_token.span.start
+    assert if_node.span.end == end_token.span.end

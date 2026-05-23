@@ -545,8 +545,12 @@ class Parser:
             nested_words=nested_words,
             allow_nested_defs=False,
         )
-        self._expect(TokenKind.END, "missing 'end'")
-        return IfNode(span=start.span, then_block=then_block, else_block=else_block)
+        end = self._expect(TokenKind.END, "missing 'end'")
+        return IfNode(
+            span=self._span_from(start, end),
+            then_block=then_block,
+            else_block=else_block,
+        )
 
     def _parse_case(self, *, nested_words: list[WordDefNode] | None) -> CaseNode:
         start = self._expect(TokenKind.CASE, "expected 'case'")
