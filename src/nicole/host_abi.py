@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum, auto
+import re
 from types import MappingProxyType
 
 from .ast_nodes import QuoteTypeNode, SignatureNode, TypeNode, Visibility
@@ -17,6 +18,7 @@ _ABI_SCALAR_TYPES_V1 = {
     "ListError",
     "MapError",
 }
+_HOST_OPAQUE_TYPE_RE = re.compile(r"^host\.[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*$")
 
 
 @dataclass(slots=True)
@@ -49,6 +51,14 @@ class HostWord:
             raise HostABIError("host word effect must be HostEffect.PURE or HostEffect.DIRTY")
 
 
+@dataclass(frozen=True, slots=True)
+class HostOpaqueType:
+    name: str
+
+    def __post_init__(self) -> None:
+        _validate_host_opaque_type_name(self.name)
+
+
 @dataclass(slots=True)
 class ExportWord:
     export_name: str
@@ -59,13 +69,18 @@ class ExportWord:
 @dataclass(frozen=True, slots=True)
 class HostContract:
     words: Mapping[str, HostWord]
+    opaque_types: Mapping[str, HostOpaqueType]
 
 
 def empty_host_contract() -> HostContract:
-    return HostContract(words=MappingProxyType({}))
+    return HostContract(words=MappingProxyType({}), opaque_types=MappingProxyType({}))
 
 
-def host_contract_from_words(words: Iterable[HostWord]) -> HostContract:
+def host_contract_from_words(
+    words: Iterable[HostWord],
+    *,
+    opaque_types: Iterable[HostOpaqueType] = (),
+) -> HostContract:
     entries: dict[str, HostWord] = {}
     for word in words:
         if not word.name.startswith("host."):
@@ -74,7 +89,17 @@ def host_contract_from_words(words: Iterable[HostWord]) -> HostContract:
             raise HostABIError(f"duplicate host word: {word.name}")
         _validate_signature_types(word.signature, forbid_quote=True)
         entries[word.name] = word
-    return HostContract(words=MappingProxyType(entries))
+
+    opaque_entries: dict[str, HostOpaqueType] = {}
+    for opaque_type in opaque_types:
+        if opaque_type.name in opaque_entries:
+            raise HostABIError(f"duplicate host opaque type: {opaque_type.name}")
+        opaque_entries[opaque_type.name] = opaque_type
+
+    return HostContract(
+        words=MappingProxyType(entries),
+        opaque_types=MappingProxyType(opaque_entries),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,3 +229,9 @@ def _validate_signature_types(signature: SignatureNode, *, forbid_quote: bool) -
         validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
     for parameter in signature.outputs:
         validate_type_v1(parameter.type_node, forbid_quote=forbid_quote)
+
+
+def _validate_host_opaque_type_name(name: str) -> None:
+    if _HOST_OPAQUE_TYPE_RE.match(name) is not None:
+        return
+    raise HostABIError(f"host opaque type name must be canonical host.*: {name}")

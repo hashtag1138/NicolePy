@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.ast_nodes import IdentifierNode, ModuleDeclaration, WordDefNode
 from nicole.checker import CheckerError
-from nicole.host_abi import HostABIError, HostEffect, HostWord, host_contract_from_words
+from nicole.host_abi import HostABIError, HostEffect, HostOpaqueType, HostWord, host_contract_from_words
 from nicole.pipeline import CheckedProgram, analyze_program
 from nicole.resolver import ResolutionError
 from nicole.parser import Parser
@@ -47,6 +47,7 @@ def test_pipeline_accepts_module_program_without_exports() -> None:
 
     assert isinstance(result, CheckedProgram)
     assert dict(result.export_contract.words) == {}
+    assert dict(result.host_contract.opaque_types) == {}
 
 
 def test_pipeline_resolves_same_module_short_name() -> None:
@@ -198,6 +199,30 @@ def test_pipeline_accepts_host_calls_with_imports() -> None:
     assert import_call.resolution.resolved_symbol is not None
     assert import_call.resolution.resolved_symbol.module == "util"
     assert host_call.resolution.owner_scope == "host"
+
+
+def test_pipeline_accepts_host_contract_with_declared_opaque_types_in_phase1() -> None:
+    host_signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    result = analyze_program(
+        "module @app\n"
+        "  : run { msg:String -- }\n"
+        "    msg host.log\n"
+        "  ;\n"
+        "end-module\n",
+        host_contract=host_contract,
+    )
+    assert "host.io.FileHandle" in result.host_contract.opaque_types
 
 
 def test_pipeline_preserves_same_name_cross_module_words() -> None:

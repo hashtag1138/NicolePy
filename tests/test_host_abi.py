@@ -5,10 +5,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from nicole.host_abi import HostABIError
+from nicole.host_abi import HostABIError, HostEffect, HostOpaqueType, HostWord, host_contract_from_words
+from nicole.lexer import lex
+from nicole.parser import Parser
 from nicole.parser import ParseError
 from nicole.pipeline import analyze_program
 from nicole.symbols import SymbolError
+
+
+def _signature_from_source(source: str):
+    return Parser(lex(source)).parse().words[0].signature
 
 
 def test_module_local_export_publishes_canonical_name() -> None:
@@ -130,3 +136,52 @@ def test_exported_word_still_uses_abi_type_validation() -> None:
             "end-module\n"
         )
 
+
+def test_host_contract_accepts_declared_host_io_file_handle() -> None:
+    contract = host_contract_from_words([], opaque_types=[HostOpaqueType(name="host.io.FileHandle")])
+    assert "host.io.FileHandle" in contract.opaque_types
+
+
+def test_host_contract_accepts_declared_host_net_tcp_socket() -> None:
+    contract = host_contract_from_words([], opaque_types=[HostOpaqueType(name="host.net.TcpSocket")])
+    assert "host.net.TcpSocket" in contract.opaque_types
+
+
+@pytest.mark.parametrize("name", ["FileHandle", "opaque.FileHandle", "extern.FileHandle", "foo.bar"])
+def test_host_contract_rejects_non_canonical_opaque_type_name(name: str) -> None:
+    with pytest.raises(HostABIError, match="host opaque type name must be canonical host\\.\\*"):
+        host_contract_from_words([], opaque_types=[HostOpaqueType(name=name)])
+
+
+def test_host_contract_rejects_duplicate_opaque_type_declarations() -> None:
+    with pytest.raises(HostABIError, match="duplicate host opaque type: host.io.FileHandle"):
+        host_contract_from_words(
+            [],
+            opaque_types=[
+                HostOpaqueType(name="host.io.FileHandle"),
+                HostOpaqueType(name="host.io.FileHandle"),
+            ],
+        )
+
+
+def test_host_contract_has_no_opaque_type_aliasing_mechanism() -> None:
+    contract = host_contract_from_words(
+        [],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    assert "FileHandle" not in contract.opaque_types
+    assert "host.io.FH" not in contract.opaque_types
+
+
+def test_host_word_contract_behavior_remains_unchanged_with_opaque_registry() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    contract = host_contract_from_words(
+        [HostWord(name="host.log", signature=signature, effect=HostEffect.PURE)],
+        opaque_types=[HostOpaqueType(name="host.io.FileHandle")],
+    )
+    assert "host.log" in contract.words
