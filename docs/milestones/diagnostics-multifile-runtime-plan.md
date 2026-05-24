@@ -610,12 +610,12 @@ Phase 5 non-goals:
 
 ## Next patch
 
-Phase 5B — runtime diagnostic foundation
+Phase 5C — convert runtime raise sites
 
 Scope:
-- add `RuntimeDiagnostic`
-- add compatibility-wrapper runtime `RuntimeError`
-- add `RUNTIME` phase and stable runtime diagnostic code scheme
+- convert runtime raise sites to attach structured runtime diagnostics
+- preserve existing runtime messages while adding codes and carrier data
+- keep runtime stack and execution model unchanged
 
 Non-goals:
 - no Nicole stack trace yet
@@ -866,6 +866,20 @@ Risks:
 - host exception exposure
 - runtime-generated synthetic nodes
 
+## Phase 5B post-audit notes
+
+Result:
+
+- `PASS_READY_FOR_TRACKING`
+
+Notes:
+
+- runtime diagnostic foundation exists
+- runtime raise sites still use legacy messages
+- runtime diagnostic conversion remains deferred to Phase 5C
+- runtime stack model remains unchanged
+- runtime frame model remains deferred to Phase 6
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -941,3 +955,4 @@ Before Phase 8:
 | 2026-05-24 | - | Phase 4E design freeze corrected after repository audit: merge by declarations in normalized file order, rebuild `ProgramNode.words`, keep representative multi-file `ProgramNode.span`, add `_analyze_program(...)`, keep `analyze_program(...)` compatibility with `source_files=()`, and preserve current duplicate/import/export behavior | - | Tracking-only design correction after audit result `DESIGN_NEEDS_CORRECTION_BEFORE_IMPLEMENTATION`; Phase 4E implementation remains next |
 | 2026-05-24 | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4E implemented and committed: each source file is parsed independently, merged `ProgramNode` analysis is enabled without source concatenation, merged declarations preserve normalized order, `ProgramNode.words` is rebuilt, original declaration/node provenance is preserved, representative multi-file `ProgramNode.span` is used, `_analyze_program(...)` reuses the pipeline, `CheckedProgram.source_files` was added, `NicoleCompiler` retains physical source files, `analyze_program(...)` remains backward compatible with `source_files=()`, include declarations remain inert, duplicate module/name/export behavior remains unchanged, and `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` was removed | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 13 passed; `./.venv/bin/python -m pytest tests/test_pipeline.py -q`: 30 passed; `./.venv/bin/python -m pytest -q`: 821 passed | Commit `feat: merge compiler source programs`; residual risk: representative multi-file `ProgramNode.span` is not authoritative and declaration spans remain authoritative for diagnostics; Phase 5 runtime diagnostics is next |
 | 2026-05-24 | - | Phase 5A runtime audit accepted and architecture freeze recorded: runtime diagnostics remain structured-data only, `RuntimeError` stays public as a compatibility-wrapper carrier, `RUNTIME` phase/codes and span policy are frozen, and stack traces/frame history/locals snapshots remain out of scope for Phase 5 | - | Tracking-only freeze after audit result `RUNTIME_READY_FOR_DESIGN_FREEZE`; Phase 5B runtime diagnostic foundation is next |
+| 2026-05-24 | `10d186b146eb986b6abe5e7b76698fa72c089553` | Phase 5B implemented and committed: `RuntimeDiagnosticSeverity`, `RuntimeDiagnosticPhase`, `RuntimeDiagnostic`, and `runtime_diagnostic(...)` were added; `RuntimeError` remains public and string-compatible while now carrying `diagnostic`, `diagnostics`, and `message`; default runtime diagnostics use `ERROR`, `RUNTIME`, `RUNTIME_ERROR`, and `span=None` | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 201 passed; `./.venv/bin/python -m pytest -q`: 825 passed | Commit `feat: add runtime diagnostic foundation`; runtime execution, runtime raise-site behavior, host behavior, and tail-call behavior remain unchanged; no stack traces, frame objects, or locals snapshots were added; Phase 5C convert runtime raise sites is next |
