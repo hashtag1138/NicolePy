@@ -451,13 +451,74 @@ Phase 4 non-goals:
 - no user class API
 - no host method binding
 
+## Decision freeze before Phase 4E
+
+Phase 4E title:
+
+- AST merge and full pipeline reuse
+
+Audit result:
+
+- previous proposed design was audited against real code
+- result: `DESIGN_NEEDS_CORRECTION_BEFORE_IMPLEMENTATION`
+- corrections are now frozen before implementation
+
+Corrected Phase 4E decisions:
+
+- parse each source file independently
+- never concatenate source text
+- merge top-level ASTs by constructing one merged `ProgramNode`
+- merge `ProgramNode.declarations` in normalized file order
+- rebuild `ProgramNode.words`; do not ignore it
+- `ProgramNode.words` is real state
+- `ProgramNode.words` must be rebuilt from all `WordDefNode` values contained in merged module declarations
+- preserve original `SourceSpan` on declarations and nested nodes
+- do not combine spans across files
+- `ProgramNode.span` uses the parsed program span for single-file compile
+- `ProgramNode.span` uses the first parsed program span for multi-file compile
+- declaration and node spans remain authoritative for diagnostics
+- no synthetic `<multifile>` source
+- no cross-file physical span
+- `IncludeDeclaration` remains inert: parse only
+- `IncludeDeclaration` remains inert: no target loading
+- `IncludeDeclaration` remains inert: no include resolution
+- `IncludeDeclaration` remains inert: no error merely because include exists
+- reuse the existing static analysis pipeline
+- extract or add `_analyze_program(program, *, host_contract=None) -> CheckedProgram`
+- remove or bypass `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` only when merged AST analysis is implemented
+- add backward-compatible `CheckedProgram.source_files: tuple[SourceFile, ...] = ()`
+- `NicoleCompiler` fills `source_files` with the real physical `SourceFile` objects
+- `analyze_program(...)` remains compatible and keeps `source_files=()`
+- existing duplicate module behavior remains unchanged across files
+- existing duplicate visible-name behavior remains unchanged across files
+- existing duplicate export behavior remains unchanged across files
+- no new module or import semantics in Phase 4E
+
+Phase 4E non-goals:
+
+- no runtime diagnostics
+- no Nicole stack trace
+- no `NicoleInterpreter` API
+- no user class API
+- no host method binding
+- no include resolution
+- no source concatenation
+- no new language semantics
+
+Phase 4E residual risks:
+
+- `ProgramNode.span` for multi-file programs is only a representative span; declaration spans are authoritative
+- `ProgramNode.words` rebuild is required and must be tested
+- cross-file duplicates will surface existing diagnostics; this is intended
+
 ## Next patch
 
 Phase 4E — AST merge and full pipeline reuse
 
 Scope:
 - merge normalized multi-file programs without concatenating source text
-- reuse existing pipeline stages on merged declarations
+- rebuild merged `ProgramNode.words`
+- reuse existing pipeline stages through `_analyze_program(...)`
 - keep parser, runtime, and language semantics unchanged
 
 Non-goals:
@@ -655,6 +716,18 @@ Known deferred work:
 - Residual risk: symlinked `.nic` file acceptance is implemented by design but is not yet directly tested.
 - Phase 4E AST merge and full pipeline reuse work is next.
 
+## Phase 4E pre-implementation audit notes
+
+- Previous proposed Phase 4E design was audited against the real repository.
+- Audit result: `DESIGN_NEEDS_CORRECTION_BEFORE_IMPLEMENTATION`.
+- The corrected Phase 4E decisions are now frozen before implementation.
+- `ProgramNode.words` rebuild is mandatory and must not be omitted.
+- Multi-file `ProgramNode.span` must remain a representative single-file span; declaration spans remain authoritative.
+- `CheckedProgram.source_files` remains planned as backward-compatible `tuple[SourceFile, ...] = ()`.
+- `analyze_program(...)` remains compatible and should keep `source_files=()`.
+- Cross-file duplicate module, duplicate visible-name, and duplicate export behavior should continue using current diagnostics.
+- Phase 4E implementation is next.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -727,3 +800,4 @@ Before Phase 8:
 | 2026-05-24 | `267ea2fc20b5696b15b744566620452c6833feb9` | Phase 4B implemented and committed: source-aware lexer entrypoint added with `lex_source(source_file: SourceFile)`, `Lexer.tokenize_source(source_file: SourceFile)`, and preserved `lex(source: str)` / `Lexer.tokenize(source: str)` compatibility | `./.venv/bin/python -m pytest tests/test_lexer.py -q`: 37 passed; `./.venv/bin/python -m pytest -q`: 806 passed | Commit `feat: add source-aware lexer entrypoint`; Phase 4C compiler skeleton for explicit files is next |
 | 2026-05-24 | `30cfeab08d8743f41d0f844bb4c56853f9696788` | Phase 4C implemented and committed: explicit file compiler skeleton added with `src/nicole/compiler.py`, `NicoleCompiler`, `NicoleCompiler.compile(input_path)`, `NicoleCompiler.compile_file(file_path)`, `compile_path(input_path, *, host_contract=None)`, physical `SourceFile` compilation flow, and structured `PIPELINE_*` input diagnostics | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 5 passed; `./.venv/bin/python -m pytest -q`: 811 passed | Commit `feat: add explicit file compiler skeleton`; Phase 4D recursive directory loader and input normalization is next |
 | 2026-05-24 | `da0cc8523f808a8fac824c385b1361d710f6c2b8` | Phase 4D implemented and committed: compiler input normalization added with `NicoleCompiler.compile(...)` accepting `str | Path | Iterable[str | Path]`, recursive `*.nic` discovery, deterministic resolved-path ordering, `Path.resolve()` deduplication, blocked symlink-directory traversal, accepted symlinked `.nic` files by design, structured `PIPELINE_*` input diagnostics, and temporary `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` gate for multiple discovered files | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 10 passed; `./.venv/bin/python -m pytest -q`: 816 passed | Commit `feat: add compiler input normalization`; post-commit audit `PASS_READY_FOR_TRACKING`; residual risk: symlinked `.nic` file acceptance is not yet directly tested; Phase 4E AST merge and full pipeline reuse is next |
+| 2026-05-24 | - | Phase 4E design freeze corrected after repository audit: merge by declarations in normalized file order, rebuild `ProgramNode.words`, keep representative multi-file `ProgramNode.span`, add `_analyze_program(...)`, keep `analyze_program(...)` compatibility with `source_files=()`, and preserve current duplicate/import/export behavior | - | Tracking-only design correction after audit result `DESIGN_NEEDS_CORRECTION_BEFORE_IMPLEMENTATION`; Phase 4E implementation remains next |
