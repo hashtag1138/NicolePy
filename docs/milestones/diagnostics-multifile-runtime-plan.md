@@ -1,9 +1,9 @@
 # NicolePy milestone — diagnostics, multi-file compilation, explicit runtime
 
-## Baseline
+## Initial audited baseline
 
-- Current date: 2026-05-23
-- Current HEAD: `9f7e3279b6c9a703a051dad345643b38b5b4b08c`
+- Initial audit date: 2026-05-23
+- Initial audited HEAD: `9f7e3279b6c9a703a051dad345643b38b5b4b08c`
 - Current tag(s): `v0.2.0-host-opaque-types`
 - Audit source: previous Codex audit, "NicolePy Implementation Audit — Diagnostics, multi-file compilation, explicit runtime"
 - Test baseline: 699 passed (audit baseline, HEAD 9f7e3279b6c9a703a051dad345643b38b5b4b08c)
@@ -317,7 +317,7 @@ Possible phase states:
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
 | 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
-| 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
+| 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Phase 4A freeze integrated; implementation remains pending |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
 | 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
@@ -360,22 +360,112 @@ Possible phase states:
 - Existing public APIs should remain unchanged.
 - Phase 2 changes should only improve source provenance precision.
 
+## Decision freeze before Phase 4A
+
+Phase 4 scope:
+
+- multi-file compiler/loader only
+- no include semantics
+- no runtime diagnostics
+- no Nicole stack trace
+- no `NicoleInterpreter` API
+- no user class API
+- no host method binding
+
+API direction:
+
+- add `src/nicole/compiler.py`
+- add `NicoleCompiler`
+- add `compile_paths(inputs, *, host_contract=None)`
+- preserve `analyze_program(source, *, host_contract=None)`
+- preserve `run_export(...)`
+
+Lexer direction:
+
+- add `lex_source(source_file: SourceFile) -> list[Token]`
+- preserve `lex(source: str)`
+- preserve `Lexer.tokenize(source: str)`
+- `lex(source)` must continue to use `SourceFile.memory(source)`
+
+Loader decisions:
+
+- accept files, directories, or mixed iterables
+- compile only `.nic` files
+- directory traversal is recursive
+- ordering is deterministic by normalized path
+- duplicate files are deduplicated by resolved path
+- do not follow directory symlinks
+- explicit wrong-extension file is an error
+- missing file is an error
+- directory with no `.nic` files is an error
+- file-loading failures are structured diagnostics in `PIPELINE` phase
+
+AST merge decisions:
+
+- never concatenate source text
+- parse each file independently
+- merge `ProgramNode` declarations
+- preserve each declaration's original `SourceSpan`
+- do not combine spans across files
+
+Include decision:
+
+- `IncludeDeclaration` may continue to parse
+- do not resolve include
+- do not load include targets
+- do not error merely because include exists
+
+CheckedProgram direction:
+
+- consider adding `source_files: tuple[SourceFile, ...] = ()`
+- must remain backward compatible
+- `NicoleCompiler` should expose real `source_files` when implemented
+
+Phase 4 subphases:
+
+- `4B`: source-aware lexer entrypoint
+- `4C`: compiler skeleton for explicit files
+- `4D`: recursive directory loader and input normalization
+- `4E`: AST merge and full pipeline reuse
+- `4F`: `CheckedProgram.source_files` provenance
+- `4G`: final audit before code commit
+- `4H`: tracking-only milestone update after code commit
+
+Phase 4 invariants:
+
+- parser never reads disk
+- runtime never reads source files
+- compiler owns loading
+- existing single-source API remains compatible
+- existing runtime API remains compatible
+- diagnostics must retain physical file/line/column where applicable
+- no source concatenation
+- no language semantics changes in Phase 4
+
+Phase 4 non-goals:
+
+- no include semantics
+- no runtime diagnostics
+- no Nicole stack trace
+- no `NicoleInterpreter` API
+- no user class API
+- no host method binding
+
 ## Next patch
 
-Phase 4 — Multi-file compiler
+Phase 4B — source-aware lexer entrypoint
 
 Scope:
-- freeze multi-file compiler decisions before implementation
-- add explicit compiler/loader API for files and directories
-- load `.nic` files from explicit file and directory inputs
-- preserve current `analyze_program(...)` compatibility
-- keep include semantics deferred unless explicitly approved
+- add `lex_source(source_file: SourceFile) -> list[Token]`
+- preserve `lex(source: str)` compatibility through `SourceFile.memory(source)`
+- preserve `Lexer.tokenize(source: str)` compatibility
+- keep parser, runtime, and language semantics unchanged
 
 Non-goals:
+- no file-system loader yet
+- no AST merge yet
 - no runtime diagnostics yet
-- no Nicole stack trace yet
 - no interpreter API yet
-- no user class API yet
 - no host method binding yet
 
 ## Phase 1A detailed sequence
@@ -542,12 +632,13 @@ Before Phase 3:
 
 Before Phase 4:
 
-- freeze multi-file merge model
-- freeze duplicate file policy
-- freeze module collision policy
-- freeze symlink policy
-- freeze wrong-extension policy
-- freeze whether `CheckedProgram` retains source files or a source map
+- completed by `Decision freeze before Phase 4A`
+- multi-file merge model: parse independently and merge declarations only
+- duplicate file policy: deduplicate by resolved path
+- module collision policy: no new language/module semantics are introduced in Phase 4
+- symlink policy: do not follow directory symlinks
+- wrong-extension policy: explicit wrong-extension file is an error
+- `CheckedProgram` provenance direction: consider backward-compatible `source_files` retention
 
 Before Phase 5:
 
@@ -590,3 +681,4 @@ Before Phase 8:
 | 2026-05-23 | `51a3f1aa88e80ee9df9d4de1c8a1a9e390bbbe50` | Phase 3F implemented and committed: diagnostic renderer with excerpts, caret formatting, clipping and compatibility-preserving presentation support | 799 passed | Commit `feat: add diagnostic renderer`; Phase 3 remains in progress and Phase 3G is next |
 | 2026-05-24 | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3G implemented and committed: remaining legacy compile-time diagnostic assumptions cleaned up and Phase 3 structured diagnostics finalized | 802 passed | Commit `chore: finalize phase3 diagnostic cleanup`; Phase 3 ready for closure tracking |
 | 2026-05-24 | - | Phase 3 closed after tracking update; Phase 4 is next | 802 passed | Tracking-only closure after Phase 3G commit |
+| 2026-05-24 | - | Phase 4A tracking freeze integrated: scope limited to multi-file compiler/loader, Phase 4B-4H breakdown recorded, invariants and non-goals documented | `python -m pytest -q` failed: `No module named pytest` | Documentation-only update; implementation remains pending |
