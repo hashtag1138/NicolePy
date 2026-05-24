@@ -98,6 +98,81 @@ def test_runtime_diagnostic_helper_builds_expected_object() -> None:
     assert diagnostic.cause is cause
 
 
+def test_runtime_missing_export_error_has_structured_diagnostic() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { -- n:Int }
+    1
+  ;
+  export : run
+end-module
+"""
+    )
+
+    with pytest.raises(RuntimeError, match="missing export: @app.missing") as exc_info:
+        run_export(checked, "@app.missing", RuntimeHostBindings({}))
+
+    error = exc_info.value
+    assert str(error) == "missing export: @app.missing"
+    assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert error.diagnostic.code == "RUNTIME_MISSING_EXPORT"
+
+
+def test_runtime_division_by_zero_has_structured_diagnostic() -> None:
+    stack = RuntimeStack()
+    stack.push(1)
+    stack.push(0)
+
+    with pytest.raises(RuntimeError, match="runtime arithmetic error: div by zero") as exc_info:
+        _execute_operator("div", stack)
+
+    error = exc_info.value
+    assert str(error) == "runtime arithmetic error: div by zero"
+    assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert error.diagnostic.code == "RUNTIME_DIVISION_BY_ZERO"
+    assert error.diagnostic.message == "runtime arithmetic error: div by zero"
+
+
+def test_runtime_host_failure_keeps_message_and_attaches_cause() -> None:
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
+    checked = analyze_program(
+        """module @app
+  : run { -- }
+    "hello" host.log
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract,
+    )
+
+    def boom(msg: str) -> None:
+        raise ValueError("boom")
+
+    runtime = RuntimeHostBindings({"host.log": boom})
+    with pytest.raises(RuntimeError, match="runtime host error: host.log") as exc_info:
+        run_export(checked, "@app.run", runtime)
+
+    error = exc_info.value
+    assert str(error) == "runtime host error: host.log"
+    assert isinstance(error.diagnostic.cause, ValueError)
+    assert error.diagnostic.code == "RUNTIME_HOST_FAILURE"
+    assert isinstance(error.__cause__, ValueError)
+
+
+def test_runtime_stack_underflow_error_has_structured_diagnostic_without_span() -> None:
+    with pytest.raises(RuntimeError, match="runtime stack underflow") as exc_info:
+        RuntimeStack().pop()
+
+    error = exc_info.value
+    assert error.diagnostic.code == "RUNTIME_STACK_UNDERFLOW"
+    assert error.diagnostic.span is None
+
+
 def test_runtime_valid_host_call() -> None:
     host_signature = signature_from_source("""module @app
   : hostsig { msg:String -- } ;
