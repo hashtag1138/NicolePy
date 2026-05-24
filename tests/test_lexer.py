@@ -6,8 +6,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.errors import DiagnosticPhase, DiagnosticSeverity
-from nicole.lexer import LexError, lex
-from nicole.source import MEMORY_SOURCE_PATH
+from nicole.lexer import LexError, lex, lex_source
+from nicole.source import MEMORY_SOURCE_PATH, SourceFile
 from nicole.tokens import TokenKind
 
 
@@ -284,6 +284,51 @@ def test_then_is_not_a_token_kind():
 def test_lexer_tokens_keep_memory_source_provenance():
     tokens = lex(": add { -- } ;")
     assert all(token.span.source.path == MEMORY_SOURCE_PATH for token in tokens)
+
+
+def test_lex_uses_memory_source_file() -> None:
+    source = ": add { -- } ;"
+    tokens = lex(source)
+
+    assert all(token.span.source.path == MEMORY_SOURCE_PATH for token in tokens)
+    assert all(token.span.source.text == source for token in tokens)
+
+
+def test_lex_source_attaches_physical_source_to_tokens() -> None:
+    source_file = SourceFile("app.nic", text=": add { -- } ;")
+    tokens = lex_source(source_file)
+
+    assert all(token.span.source is source_file for token in tokens)
+    assert [token.kind for token in tokens] == [
+        TokenKind.COLON,
+        TokenKind.IDENTIFIER,
+        TokenKind.LBRACE,
+        TokenKind.STACK_ARROW,
+        TokenKind.RBRACE,
+        TokenKind.SEMICOLON,
+        TokenKind.EOF,
+    ]
+
+
+def test_lex_source_eof_uses_physical_source() -> None:
+    source_file = SourceFile("app.nic", text="add")
+    eof = lex_source(source_file)[-1]
+
+    assert eof.kind is TokenKind.EOF
+    assert eof.span.source is source_file
+    assert eof.span.start == eof.span.end
+
+
+def test_lex_source_error_uses_physical_source() -> None:
+    source_file = SourceFile("app.nic", text='"\\x"')
+
+    with pytest.raises(LexError, match="invalid escape sequence") as exc_info:
+        lex_source(source_file)
+
+    diagnostic = exc_info.value.diagnostic
+    assert diagnostic.span is not None
+    assert diagnostic.span.source is source_file
+    assert diagnostic.span.source.path == "app.nic"
 
 
 def test_lexer_eof_span_is_zero_length():

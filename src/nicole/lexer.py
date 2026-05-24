@@ -6,7 +6,7 @@ from .errors import DiagnosticError, DiagnosticPhase
 from .source import SourceFile, SourceLocation
 from .tokens import SourceSpan, Token, TokenKind
 
-__all__ = ["LexError", "Lexer", "lex"]
+__all__ = ["LexError", "Lexer", "lex", "lex_source"]
 
 
 class LexError(DiagnosticError):
@@ -43,9 +43,14 @@ class Lexer:
         self._tokens: list[Token] = []
 
     def tokenize(self, source: str) -> list[Token]:
-        self.source = source
-        self._source_file = SourceFile.memory(source)
-        self._source_len = len(source)
+        return self.tokenize_source(SourceFile.memory(source))
+
+    def tokenize_source(self, source_file: SourceFile) -> list[Token]:
+        if source_file.text is None:
+            raise ValueError("source_file.text must not be None")
+        self.source = source_file.text
+        self._source_file = source_file
+        self._source_len = len(self.source)
         self._index = 0
         self._line = 1
         self._column = 1
@@ -404,6 +409,10 @@ class _CursorMark:
 
 def lex(source: str) -> list[Token]:
     return Lexer().tokenize(source)
+
+
+def lex_source(source_file: SourceFile) -> list[Token]:
+    return Lexer().tokenize_source(source_file)
 
 
 def _is_identifier_start(ch: str) -> bool:
