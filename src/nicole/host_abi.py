@@ -9,6 +9,7 @@ from types import MappingProxyType
 from .ast_nodes import QuoteTypeNode, SignatureNode, TypeNode, Visibility
 from .errors import DiagnosticError, DiagnosticPhase
 from .symbols import SymbolTable
+from .tokens import SourceSpan
 
 _ABI_SCALAR_TYPES_V1 = {
     "Int",
@@ -26,6 +27,25 @@ class HostABIError(DiagnosticError):
     phase = DiagnosticPhase.ABI
     default_code = "ABI_ERROR"
     include_location_in_str = False
+
+
+def _raise_abi_error(
+    message: str,
+    *,
+    code: str,
+    span: SourceSpan | None = None,
+    suggestion: str | None = None,
+) -> None:
+    if span is None:
+        raise HostABIError(message=message, code=code, suggestion=suggestion)
+    raise HostABIError(
+        message=message,
+        code=code,
+        span=span,
+        line=span.line,
+        column=span.column,
+        suggestion=suggestion,
+    )
 
 
 class BindingAvailability(Enum):
@@ -47,7 +67,10 @@ class HostWord:
 
     def __post_init__(self) -> None:
         if not isinstance(self.effect, HostEffect):
-            raise HostABIError("host word effect must be HostEffect.PURE or HostEffect.DIRTY")
+            _raise_abi_error(
+                "host word effect must be HostEffect.PURE or HostEffect.DIRTY",
+                code="ABI_INVALID_HOST_EFFECT",
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,16 +106,25 @@ def host_contract_from_words(
     opaque_entries: dict[str, HostOpaqueType] = {}
     for opaque_type in opaque_types:
         if opaque_type.name in opaque_entries:
-            raise HostABIError(f"duplicate host opaque type: {opaque_type.name}")
+            _raise_abi_error(
+                f"duplicate host opaque type: {opaque_type.name}",
+                code="ABI_DUPLICATE_HOST_OPAQUE_TYPE",
+            )
         opaque_entries[opaque_type.name] = opaque_type
     declared_opaque_type_names = frozenset(opaque_entries)
 
     entries: dict[str, HostWord] = {}
     for word in words:
         if not word.name.startswith("host."):
-            raise HostABIError(f"host word name must start with 'host.': {word.name}")
+            _raise_abi_error(
+                f"host word name must start with 'host.': {word.name}",
+                code="ABI_INVALID_HOST_WORD_NAME",
+            )
         if word.name in entries:
-            raise HostABIError(f"duplicate host word: {word.name}")
+            _raise_abi_error(
+                f"duplicate host word: {word.name}",
+                code="ABI_DUPLICATE_HOST_WORD",
+            )
         _validate_signature_types(
             word.signature,
             forbid_quote=True,
@@ -119,7 +151,10 @@ def export_contract_from_words(words: Iterable[ExportWord]) -> ExportContract:
     entries: dict[str, ExportWord] = {}
     for word in words:
         if word.export_name in entries:
-            raise HostABIError(f"duplicate export word: {word.export_name}")
+            _raise_abi_error(
+                f"duplicate export word: {word.export_name}",
+                code="ABI_HOST_EXPORT_CONFLICT",
+            )
         entries[word.export_name] = word
     return ExportContract(words=MappingProxyType(entries))
 
@@ -136,10 +171,16 @@ def collect_exports(symbols: SymbolTable, *, host_contract: HostContract | None 
             if symbol.visibility is not Visibility.EXPORT:
                 continue
             if symbol.module is None:
-                raise HostABIError(f"export symbol missing module ownership: {symbol.name}")
+                _raise_abi_error(
+                    f"export symbol missing module ownership: {symbol.name}",
+                    code="ABI_INVALID_EXPORT_SYMBOL",
+                    span=symbol.span,
+                )
             if symbol.owner is not None:
-                raise HostABIError(
-                    f"export target must be module-level word: @{symbol.module}.{symbol.qualified_name}"
+                _raise_abi_error(
+                    f"export target must be module-level word: @{symbol.module}.{symbol.qualified_name}",
+                    code="ABI_INVALID_EXPORT_SYMBOL",
+                    span=symbol.span,
                 )
             _validate_signature_types(
                 symbol.signature,
@@ -166,7 +207,11 @@ def validate_type_v1(
 ) -> None:
     if type_node.name in {"Quote", "DirtyQuote"}:
         if forbid_quote:
-            raise HostABIError("Quote is forbidden across ABI in v1 (including DirtyQuote)")
+            _raise_abi_error(
+                "Quote is forbidden across ABI in v1 (including DirtyQuote)",
+                code="ABI_UNSUPPORTED_HOST_TYPE",
+                span=type_node.span,
+            )
         if len(type_node.args) != 1:
             return
         quote_signature = type_node.args[0]
@@ -195,22 +240,42 @@ def validate_type_v1(
     if forbid_quote:
         if type_node.name in declared_opaque_type_names:
             if _HOST_OPAQUE_TYPE_RE.match(type_node.name) is None:
-                raise HostABIError(f"type is not ABI-compatible in v1: {type_node.name}")
+                _raise_abi_error(
+                    f"type is not ABI-compatible in v1: {type_node.name}",
+                    code="ABI_INVALID_HOST_SIGNATURE",
+                    span=type_node.span,
+                )
             if type_node.args:
-                raise HostABIError(f"type is not ABI-compatible in v1: {type_node.name}")
+                _raise_abi_error(
+                    f"type is not ABI-compatible in v1: {type_node.name}",
+                    code="ABI_INVALID_HOST_SIGNATURE",
+                    span=type_node.span,
+                )
             return
 
         if _HOST_OPAQUE_TYPE_RE.match(type_node.name) is not None:
-            raise HostABIError(f"undeclared host opaque type in ABI signature: {type_node.name}")
+            _raise_abi_error(
+                f"undeclared host opaque type in ABI signature: {type_node.name}",
+                code="ABI_UNKNOWN_HOST_OPAQUE_TYPE",
+                span=type_node.span,
+            )
 
         if type_node.name in _ABI_SCALAR_TYPES_V1:
             if type_node.args:
-                raise HostABIError(f"type is not ABI-compatible in v1: {type_node.name}")
+                _raise_abi_error(
+                    f"type is not ABI-compatible in v1: {type_node.name}",
+                    code="ABI_INVALID_HOST_SIGNATURE",
+                    span=type_node.span,
+                )
             return
 
         if type_node.name == "List":
             if len(type_node.args) != 1 or not isinstance(type_node.args[0], TypeNode):
-                raise HostABIError("type is not ABI-compatible in v1: List")
+                _raise_abi_error(
+                    "type is not ABI-compatible in v1: List",
+                    code="ABI_INVALID_HOST_SIGNATURE",
+                    span=type_node.span,
+                )
             validate_type_v1(
                 type_node.args[0],
                 forbid_quote=True,
@@ -220,13 +285,25 @@ def validate_type_v1(
 
         if type_node.name == "Map":
             if len(type_node.args) != 2:
-                raise HostABIError("type is not ABI-compatible in v1: Map")
+                _raise_abi_error(
+                    "type is not ABI-compatible in v1: Map",
+                    code="ABI_INVALID_HOST_SIGNATURE",
+                    span=type_node.span,
+                )
             key_type = type_node.args[0]
             value_type = type_node.args[1]
             if not isinstance(key_type, TypeNode) or not isinstance(value_type, TypeNode):
-                raise HostABIError("type is not ABI-compatible in v1: Map")
+                _raise_abi_error(
+                    "type is not ABI-compatible in v1: Map",
+                    code="ABI_INVALID_HOST_SIGNATURE",
+                    span=type_node.span,
+                )
             if key_type.name not in {"Int", "String", "Bool"}:
-                raise HostABIError("Map<K,V> key type must be Int, String, or Bool in v1")
+                _raise_abi_error(
+                    "Map<K,V> key type must be Int, String, or Bool in v1",
+                    code="ABI_UNSUPPORTED_HOST_TYPE",
+                    span=key_type.span,
+                )
             validate_type_v1(
                 key_type,
                 forbid_quote=True,
@@ -241,11 +318,19 @@ def validate_type_v1(
 
         if type_node.name == "Result":
             if len(type_node.args) != 2:
-                raise HostABIError("type is not ABI-compatible in v1: Result")
+                _raise_abi_error(
+                    "type is not ABI-compatible in v1: Result",
+                    code="ABI_INVALID_HOST_SIGNATURE",
+                    span=type_node.span,
+                )
             value_type = type_node.args[0]
             error_type = type_node.args[1]
             if not isinstance(value_type, TypeNode) or not isinstance(error_type, TypeNode):
-                raise HostABIError("type is not ABI-compatible in v1: Result")
+                _raise_abi_error(
+                    "type is not ABI-compatible in v1: Result",
+                    code="ABI_INVALID_HOST_SIGNATURE",
+                    span=type_node.span,
+                )
             validate_type_v1(
                 value_type,
                 forbid_quote=True,
@@ -258,12 +343,20 @@ def validate_type_v1(
             )
             return
 
-        raise HostABIError(f"type is not ABI-compatible in v1: {type_node.name}")
+        _raise_abi_error(
+            f"type is not ABI-compatible in v1: {type_node.name}",
+            code="ABI_INVALID_HOST_SIGNATURE",
+            span=type_node.span,
+        )
 
     if type_node.name == "Map" and len(type_node.args) == 2:
         key_type = type_node.args[0]
         if isinstance(key_type, TypeNode) and key_type.name not in {"Int", "String", "Bool"}:
-            raise HostABIError("Map<K,V> key type must be Int, String, or Bool in v1")
+            _raise_abi_error(
+                "Map<K,V> key type must be Int, String, or Bool in v1",
+                code="ABI_UNSUPPORTED_HOST_TYPE",
+                span=key_type.span,
+            )
 
     for argument in type_node.args:
         if isinstance(argument, TypeNode):
@@ -275,7 +368,11 @@ def validate_type_v1(
             continue
         if isinstance(argument, QuoteTypeNode):
             if forbid_quote:
-                raise HostABIError("Quote is forbidden across ABI in v1 (including DirtyQuote)")
+                _raise_abi_error(
+                    "Quote is forbidden across ABI in v1 (including DirtyQuote)",
+                    code="ABI_UNSUPPORTED_HOST_TYPE",
+                    span=type_node.span,
+                )
             for parameter in argument.captures:
                 validate_type_v1(
                     parameter.type_node,
@@ -319,4 +416,7 @@ def _validate_signature_types(
 def _validate_host_opaque_type_name(name: str) -> None:
     if _HOST_OPAQUE_TYPE_RE.match(name) is not None:
         return
-    raise HostABIError(f"host opaque type name must be canonical host.*: {name}")
+    _raise_abi_error(
+        f"host opaque type name must be canonical host.*: {name}",
+        code="ABI_INVALID_HOST_OPAQUE_TYPE_NAME",
+    )

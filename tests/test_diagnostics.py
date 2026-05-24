@@ -173,6 +173,18 @@ def test_locationless_errors_keep_legacy_string_behavior() -> None:
     assert str(builtin_error) == "cannot redefine standard builtin: map.get"
 
 
+def test_host_abi_error_legacy_message_line_column_and_str_are_compatible() -> None:
+    error = HostABIError(message="type is not ABI-compatible in v1: Foo", line=8, column=4)
+
+    assert len(error.diagnostics) == 1
+    assert error.diagnostic.phase is DiagnosticPhase.ABI
+    assert error.diagnostic.code == "ABI_ERROR"
+    assert error.message == "type is not ABI-compatible in v1: Foo"
+    assert error.line == 8
+    assert error.column == 4
+    assert str(error) == "type is not ABI-compatible in v1: Foo"
+
+
 def test_public_exception_classes_remain_available_and_diagnostic_based() -> None:
     public_exceptions = (
         LexError,

@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.ast_nodes import IdentifierNode, ModuleDeclaration, WordDefNode
 from nicole.checker import CheckerError
+from nicole.errors import DiagnosticError, DiagnosticPhase
 from nicole.host_abi import HostABIError, HostEffect, HostOpaqueType, HostWord, host_contract_from_words
 from nicole.pipeline import CheckedProgram, analyze_program
 from nicole.resolver import ResolutionError
@@ -589,3 +590,28 @@ def test_pipeline_public_path_rejects_raw_python_object_for_opaque_output() -> N
     runtime = RuntimeHostBindings({"host.open": lambda: object()})
     with pytest.raises(RuntimeError, match="expected host.io.FileHandle"):
         run_export(checked, "@app.run", runtime)
+
+
+def test_analyze_program_passes_through_diagnostic_error_subclass_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyDiagnosticError(DiagnosticError):
+        phase = DiagnosticPhase.PIPELINE
+        default_code = "PIPELINE_DUMMY_TEST"
+
+    expected = DummyDiagnosticError(message="dummy diagnostic failure", code="PIPELINE_DUMMY_TEST")
+
+    def _raise_same_error(program, symbols, **_kwargs):
+        raise expected
+
+    monkeypatch.setattr("nicole.pipeline.check_program", _raise_same_error)
+
+    with pytest.raises(DummyDiagnosticError) as exc_info:
+        analyze_program(
+            "module @app\n"
+            "  : run { -- }\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+    assert exc_info.value is expected

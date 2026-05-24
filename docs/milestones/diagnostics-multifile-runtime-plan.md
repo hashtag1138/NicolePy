@@ -316,7 +316,7 @@ Possible phase states:
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
-| 3. Structured compilation diagnostics | in_progress | `8c78bf445a5f1bd86ec0546b67da68906912e779` | Phase 3B, 3C and 3D committed: lexer/parser/static-analysis errors now attach structured diagnostics | 781 passed | Phase 3D committed; Phase 3E pending |
+| 3. Structured compilation diagnostics | in_progress | `8c78bf445a5f1bd86ec0546b67da68906912e779` | Phase 3B-3E prepared: lexer/parser/static-analysis/ABI errors now attach structured diagnostics | 785 passed | Phase 3E implementation prepared; Phase 3F pending |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
@@ -332,7 +332,7 @@ Possible phase states:
 - Builtin symbols and builtin helper nodes use `<builtin>` provenance.
 - Host provenance remains resolver/contract-owned and deferred.
 - Lexer and parser now attach structured diagnostics (phase/code/span) while preserving legacy exception compatibility.
-- Symbol collection, resolver, and checker now attach structured diagnostics; ABI and runtime diagnostics are still pending follow-up phases.
+- Symbol collection, resolver, checker, and Host ABI now attach structured diagnostics; runtime diagnostics are still pending follow-up phases.
 - No `NicoleCompiler` exists yet.
 - No real `NicoleInterpreter` API exists yet.
 - Runtime errors still lack structured span/operation/stack trace diagnostics.
@@ -357,21 +357,22 @@ Possible phase states:
 
 ## Next patch
 
-Phase 3E — adapt host ABI and pipeline pass-through policy.
+Phase 3F — renderer, source excerpts and caret formatting.
 
 Scope:
-- adapt `HostABIError` raise paths to structured diagnostics
-- verify pipeline pass-through policy for phase-specific `DiagnosticError` subclasses
-- preserve source-less ABI diagnostics where no Nicole source span exists
-- prefer real Nicole source spans when available
-- preserve legacy behavior and one-diagnostic policy
+- add a diagnostic renderer for structured diagnostics
+- render source excerpts and caret/range indicators from `Diagnostic.span`
+- support source-less diagnostics gracefully
+- preserve `Diagnostic` as data-only
+- keep exception `__str__` as a legacy compatibility layer unless explicitly changed later
 
 Non-goals:
 - no runtime diagnostics yet
 - no multi-file compiler yet
 - no interpreter API yet
 - no host method binding yet
-- no renderer/caret/excerpt work
+- no diagnostic aggregation unless explicitly approved
+- no changes to `SourceSpan`/source primitives
 
 ## Phase 1A detailed sequence
 
@@ -581,3 +582,4 @@ Before Phase 8:
 | 2026-05-23 | `3667bc0d4aa729e1f679e809caabe576d600524c` | Phase 3B implemented and committed: `Diagnostic`, `DiagnosticError`, compile-time diagnostic enums, compatibility-layer exception subclasses, and one-diagnostic policy enforcement fix | 760 passed | Commit `feat: add structured diagnostic foundation`; Phase 3 remains in progress for 3C+ |
 | 2026-05-23 | `e6e1b8178f89e094f53d40d8a417a776a1f2f7b4` | Phase 3C implemented and committed: lexer/parser `LexError` and `ParseError` now attach structured diagnostics with stable codes and span provenance while preserving legacy behavior | 770 passed | Commit `feat: attach lexer parser diagnostics`; Phase 3 remains in progress and Phase 3D is next |
 | 2026-05-23 | `8c78bf445a5f1bd86ec0546b67da68906912e779` | Phase 3D implemented and committed: SymbolError, ResolutionError and CheckerError now attach structured diagnostics with stable codes and source-aware spans while preserving legacy compatibility | 781 passed | Commit `feat: attach static analysis diagnostics`; Phase 3 remains in progress |
+| 2026-05-24 | pending | Phase 3E implementation prepared: HostABIError raise paths now attach structured diagnostics with stable ABI codes and pipeline `analyze_program(...)` preserves DiagnosticError pass-through behavior | 785 passed | Commit pending; Phase 3 remains in progress and Phase 3F is next |

@@ -6,6 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.ast_nodes import Visibility
+from nicole.errors import DiagnosticPhase
 from nicole.host_abi import (
     HostABIError,
     HostEffect,
@@ -384,3 +385,36 @@ def test_host_and_export_abi_behavior_is_consistent_for_declared_and_undeclared(
         host_contract_from_words([HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)])
     with pytest.raises(HostABIError, match="undeclared host opaque type in ABI signature"):
         collect_exports(_export_symbols_for_signature(signature))
+
+
+def test_host_abi_error_without_nicole_source_has_no_span() -> None:
+    with pytest.raises(HostABIError) as exc_info:
+        host_contract_from_words(
+            [],
+            opaque_types=[
+                HostOpaqueType(name="host.io.FileHandle"),
+                HostOpaqueType(name="host.io.FileHandle"),
+            ],
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.ABI
+    assert error.diagnostic.code == "ABI_DUPLICATE_HOST_OPAQUE_TYPE"
+    assert error.diagnostic.span is None
+
+
+def test_host_abi_error_with_nicole_source_uses_real_span() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- out:Foo }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    offending_span = signature.outputs[0].type_node.span
+    with pytest.raises(HostABIError) as exc_info:
+        host_contract_from_words([HostWord(name="host.open", signature=signature, effect=HostEffect.PURE)])
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.ABI
+    assert error.diagnostic.code == "ABI_INVALID_HOST_SIGNATURE"
+    assert error.diagnostic.span == offending_span
