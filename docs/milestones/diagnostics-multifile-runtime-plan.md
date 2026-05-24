@@ -319,7 +319,7 @@ Possible phase states:
 | 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
 | 4. Multi-file compiler | completed | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4 completed: source-aware lexing, explicit file compile, recursive input normalization, and merged multi-file AST analysis are implemented | `13 passed`; `30 passed`; `821 passed` | Phase 4A and Phase 4E freezes integrated; Phase 5 runtime diagnostics is next |
 | 5. Runtime diagnostics | completed | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5 completed: runtime diagnostics architecture freeze, RuntimeDiagnostic foundation, raise-site conversion, context enrichment, and pure runtime diagnostic rendering are implemented | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; Phase 6A stack trace architecture audit is next |
-| 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
+| 6. Nicole stack trace | in_progress | - | Phase 6A completed: stack trace architecture audit completed and required architecture freezes recorded before implementation work | `218 passed`; `842 passed` | Decision `PASS_PHASE_READY_TO_CLOSE`; Phase 6B RuntimeFrame and RuntimeStackTrace design freeze is next |
 | 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
 | 8. User class API | pending | - | Add ergonomic app-level wrapper usage patterns | - | Thin convenience layer |
 | 9. Optional host method binding | deferred | - | Optional decorator/introspection binding model | - | Deferred by decision |
@@ -361,6 +361,13 @@ Possible phase states:
 - Runtime behavior remains unchanged after renderer introduction.
 - Phase 5E audit result: `PASS_ACCEPTED`.
 - Coverage added: minimal rendering, span rendering, operation rendering, notes rendering, cause rendering, RuntimeError rendering, deterministic rendering, no mutation, opaque masking.
+- Phase 6A stack trace architecture audit completed with result `PASS_PHASE_READY_TO_CLOSE`.
+- Runtime behavior currently preserved.
+- No stack trace implementation exists yet.
+- Current runtime architecture is compatible with future stack traces.
+- No Nicole language semantic change required.
+- No divergence detected with repository specification.
+- Existing runtime diagnostics architecture can support future frame attachment.
 - Documentation target references for the diagnostic phases are now aligned through Phase 3F planning.
 
 ## Compatibility constraints already observed
@@ -859,21 +866,28 @@ Residual risks:
 
 ## Next patch
 
-Phase 6A — stack trace architecture audit
+Phase 6B
+
+Name:
+
+RuntimeFrame and RuntimeStackTrace design freeze
 
 Scope:
-- enrich `RuntimeDiagnostic` payloads
-- attach operation context where naturally available
-- attach source spans where naturally available
-- preserve existing messages
-- preserve runtime behavior
+- define RuntimeFrame structure
+- define RuntimeStackTrace structure
+- define frame lifecycle
+- define frame ownership rules
+- define host frame policy
+- define quotation frame policy
+- define tail-call representation
+- define renderer integration boundaries
 
 Non-goals:
-- no stack traces yet
-- no frame snapshots
+- no implementation
+- no renderer work
+- no ANSI formatting
 - no locals snapshots
-- no `NicoleInterpreter`
-- no renderer
+- no IDE integration
 
 ## Phase 1A detailed sequence
 
@@ -1203,6 +1217,94 @@ Residual non-blocking gaps:
 
 - broader `RUNTIME_RUNTIME_TYPE_ERROR` branch coverage
 
+## Phase 6A post-audit notes
+
+Phase:
+
+- 6A Stack trace architecture audit
+
+Status:
+
+- completed
+
+Decision:
+
+- `PASS_PHASE_READY_TO_CLOSE`
+
+Audit outcome:
+
+- `PASS_PHASE_READY_TO_CLOSE`
+
+Reasoning summary:
+
+- Runtime behavior currently preserved
+- No stack trace implementation exists yet
+- Current runtime architecture is compatible with future stack traces
+- No Nicole language semantic change required
+- No divergence detected with repository specification
+- Existing runtime diagnostics architecture can support future frame attachment
+
+## Decision freeze before Phase 6B
+
+FROZEN_DECISION_PHASE6A_1:
+
+- Runtime frames are implementation-level structures only.
+- Frames MUST NOT introduce Nicole language semantics.
+- Frames are diagnostic/runtime metadata.
+
+FROZEN_DECISION_PHASE6A_2:
+
+- Frame creation points are limited to:
+- `_invoke_word(...)`
+- `_execute_call(...)`
+- `_invoke_runtime_quote_value(...)`
+- `_execute_host_call(...)`
+- No additional frame creation points unless explicitly reviewed.
+
+FROZEN_DECISION_PHASE6A_3:
+
+- _FramePropagationSignal MUST remain a propagation mechanism only.
+- It MUST NOT become a runtime frame object.
+
+FROZEN_DECISION_PHASE6A_4:
+
+- Tail-call optimization behavior remains unchanged.
+- Self-tail-call loops MUST NOT generate synthetic recursive frame growth.
+- Future stack traces should preserve compact behavior.
+
+FROZEN_DECISION_PHASE6A_5:
+
+- RuntimeStack remains a value stack only.
+- RuntimeStack MUST NOT become a diagnostic stack container.
+
+FROZEN_DECISION_PHASE6A_6:
+
+- operation strings inside RuntimeDiagnostic MUST NOT be used as frame replacements.
+- Future RuntimeFrame data remains separate.
+
+FROZEN_DECISION_PHASE6A_7:
+
+- Locals snapshot behavior is deferred.
+- No automatic capture policy is frozen yet.
+
+Residual gap:
+
+- Bundle used during audit did not allow complete local replay because:
+- src/nicole/lexer.py was absent.
+- Audit relied on:
+- supplied runtime files
+- supplied test outputs
+- AUDIT_STATE.txt
+
+Residual gap:
+
+- Future design decisions still required:
+- quotation frame policy
+- host frame policy
+- locals snapshot policy
+- tail-call trace representation
+- renderer formatting policy
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -1283,3 +1385,4 @@ Before Phase 8:
 | 2026-05-24 | `db43fa1f23433b839b620e538212ecd0af1745c7` | Phase 5D implementation accepted and tracked | `209 passed`; `833 passed` | Commit `feat: enrich runtime diagnostic context`; post-audit result accepted; residual coverage gap remains non-blocking |
 | 2026-05-24 | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5E implementation accepted | `218 passed`; `842 passed` | Commit `feat: render runtime diagnostics` |
 | 2026-05-24 | - | Phase 5 closed after complete audit | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; no required fixes before closure |
+| 2026-05-24 | - | Phase 6A stack trace architecture audit completed and architecture freezes recorded before implementation | `218 passed`; `842 passed` | Tracking-only closeout with decision `PASS_PHASE_READY_TO_CLOSE`; Phase 6B design freeze is next |
