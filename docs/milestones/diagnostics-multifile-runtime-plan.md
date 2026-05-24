@@ -317,7 +317,7 @@ Possible phase states:
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
 | 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
-| 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Phase 4A freeze integrated; implementation remains pending |
+| 4. Multi-file compiler | in_progress | `267ea2fc20b5696b15b744566620452c6833feb9` | Phase 4B completed: source-aware lexer entrypoint added for physical `SourceFile` provenance | `37 passed`; `806 passed` | Phase 4A freeze integrated; Phase 4C compiler skeleton for explicit files is next |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
 | 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
@@ -337,7 +337,7 @@ Possible phase states:
 - Remaining export-related `SymbolError` and `StandardSymbolError` legacy-only assumptions are now covered with explicit `SYMBOLS` codes and focused regression tests.
 - Checker-internal `HostABIError` validation paths remain remapped to public `CheckerError` on checker entry points; user-visible checker behavior is unchanged.
 - Renderer API decision for Phase 3 remains module-level import (`nicole.diagnostic_renderer`) with no package-level re-export.
-- Multi-file compiler work remains pending for Phase 4.
+- Multi-file compiler work is in progress for Phase 4.
 - No `NicoleCompiler` exists yet.
 - No real `NicoleInterpreter` API exists yet.
 - Runtime diagnostics remain pending for Phase 5; runtime errors still lack structured span/operation/stack trace diagnostics.
@@ -453,16 +453,16 @@ Phase 4 non-goals:
 
 ## Next patch
 
-Phase 4B — source-aware lexer entrypoint
+Phase 4C — compiler skeleton for explicit files
 
 Scope:
-- add `lex_source(source_file: SourceFile) -> list[Token]`
-- preserve `lex(source: str)` compatibility through `SourceFile.memory(source)`
-- preserve `Lexer.tokenize(source: str)` compatibility
+- add `src/nicole/compiler.py`
+- add `NicoleCompiler`
+- add explicit-file compiler entrypoints that will reuse existing pipeline stages
 - keep parser, runtime, and language semantics unchanged
 
 Non-goals:
-- no file-system loader yet
+- no directory loading yet
 - no AST merge yet
 - no runtime diagnostics yet
 - no interpreter API yet
@@ -613,6 +613,18 @@ Known deferred work:
 - No diagnostics, runtime, compiler, interpreter or language semantic changes were introduced.
 - Phase 3 may start only after this tracking cleanup is committed.
 
+## Phase 4B post-audit notes
+
+- Phase 4B implementation passed post-audit.
+- No fixes are required after validation.
+- `lex_source(source_file: SourceFile) -> list[Token]` was added.
+- `Lexer.tokenize_source(source_file: SourceFile)` was added.
+- `lex(source: str)` remains compatible and continues to use `SourceFile.memory(source)`.
+- `Lexer.tokenize(source: str)` remains compatible.
+- Token spans and lexer diagnostics from `lex_source(...)` now preserve the provided physical `SourceFile`.
+- Parser behavior, runtime behavior, diagnostics model, token kinds, lexeme behavior, column counting, and EOF behavior remain unchanged apart from preserving the provided source file.
+- Phase 4C compiler skeleton work is next.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -682,3 +694,4 @@ Before Phase 8:
 | 2026-05-24 | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3G implemented and committed: remaining legacy compile-time diagnostic assumptions cleaned up and Phase 3 structured diagnostics finalized | 802 passed | Commit `chore: finalize phase3 diagnostic cleanup`; Phase 3 ready for closure tracking |
 | 2026-05-24 | - | Phase 3 closed after tracking update; Phase 4 is next | 802 passed | Tracking-only closure after Phase 3G commit |
 | 2026-05-24 | - | Phase 4A tracking freeze integrated: scope limited to multi-file compiler/loader, Phase 4B-4H breakdown recorded, invariants and non-goals documented | `python -m pytest -q` failed: `No module named pytest` | Documentation-only update; implementation remains pending |
+| 2026-05-24 | `267ea2fc20b5696b15b744566620452c6833feb9` | Phase 4B implemented and committed: source-aware lexer entrypoint added with `lex_source(source_file: SourceFile)`, `Lexer.tokenize_source(source_file: SourceFile)`, and preserved `lex(source: str)` / `Lexer.tokenize(source: str)` compatibility | `./.venv/bin/python -m pytest tests/test_lexer.py -q`: 37 passed; `./.venv/bin/python -m pytest -q`: 806 passed | Commit `feat: add source-aware lexer entrypoint`; Phase 4C compiler skeleton for explicit files is next |
