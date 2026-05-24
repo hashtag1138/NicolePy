@@ -76,6 +76,8 @@ def _apply_module_exports(
                 message=f"export target does not exist in module @{module_name}: {export.word_name}",
                 line=export.span.line,
                 column=export.span.column,
+                span=export.span,
+                code="SYMBOLS_EXPORT_TARGET_NOT_FOUND",
             )
 
         module_level_symbols = [
@@ -88,6 +90,8 @@ def _apply_module_exports(
                 message=f"export target must be a module-level word: {export.word_name}",
                 line=export.span.line,
                 column=export.span.column,
+                span=export.span,
+                code="SYMBOLS_EXPORT_TARGET_NOT_MODULE_LEVEL",
             )
 
         target = module_level_symbols[0]
@@ -97,6 +101,8 @@ def _apply_module_exports(
                 message=f"duplicate export declaration: {canonical_name}",
                 line=export.span.line,
                 column=export.span.column,
+                span=export.span,
+                code="SYMBOLS_DUPLICATE_EXPORT",
             )
         seen_canonical.add(canonical_name)
 

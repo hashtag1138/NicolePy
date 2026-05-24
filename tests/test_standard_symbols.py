@@ -6,6 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.lexer import lex
+from nicole.errors import DiagnosticPhase
 from nicole.parser import ParseError, Parser
 from nicole.source import BUILTIN_SOURCE_PATH, HOST_CONTRACT_SOURCE_PATH
 from nicole.signature_collector import collect_signatures
@@ -224,3 +225,11 @@ def test_higher_order_builtins_are_marked_callable_only_for_quotes():
 def test_injection_rejects_user_redefinition_of_builtin():
     with pytest.raises(ParseError):
         parse_source(": list.get { -- } ;")
+
+
+def test_standard_symbol_error_default_diagnostic_is_explicit_and_source_less() -> None:
+    error = StandardSymbolError("cannot redefine standard builtin: map.get")
+
+    assert error.diagnostic.phase is DiagnosticPhase.SYMBOLS
+    assert error.diagnostic.code == "SYMBOLS_STANDARD_BUILTIN_REDEFINITION"
+    assert error.diagnostic.span is None

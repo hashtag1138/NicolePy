@@ -321,6 +321,46 @@ def test_symbol_error_exposes_structured_diagnostic() -> None:
     assert error.column == error.diagnostic.span.column
 
 
+def test_export_missing_target_exposes_structured_diagnostic() -> None:
+    source = (
+        "module @app\n"
+        "  export : missing\n"
+        "end-module\n"
+    )
+    with pytest.raises(SymbolError) as exc_info:
+        resolve_source(source)
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.SYMBOLS
+    assert error.diagnostic.code == "SYMBOLS_EXPORT_TARGET_NOT_FOUND"
+    assert error.message == "export target does not exist in module @app: missing"
+    assert error.diagnostic.span is not None
+    assert error.line == error.diagnostic.span.line
+    assert error.column == error.diagnostic.span.column
+    assert str(error) == f"{error.message} at {error.line}:{error.column}"
+
+
+def test_duplicate_export_exposes_structured_diagnostic() -> None:
+    source = (
+        "module @app\n"
+        "  : run { -- }\n"
+        "  ;\n"
+        "  export : run\n"
+        "  export : run\n"
+        "end-module\n"
+    )
+    with pytest.raises(SymbolError) as exc_info:
+        resolve_source(source)
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.SYMBOLS
+    assert error.diagnostic.code == "SYMBOLS_DUPLICATE_EXPORT"
+    assert error.message == "duplicate export declaration: @app.run"
+    assert error.diagnostic.span is not None
+    assert error.line == error.diagnostic.span.line
+    assert error.column == error.diagnostic.span.column
+
+
 def test_resolver_unresolved_name_exposes_structured_diagnostic() -> None:
     source = (
         "module @app\n"

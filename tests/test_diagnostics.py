@@ -166,6 +166,9 @@ def test_locationless_errors_keep_legacy_string_behavior() -> None:
 
     assert host_error.message == "type is not ABI-compatible in v1: Foo"
     assert builtin_error.message == "cannot redefine standard builtin: map.get"
+    assert builtin_error.diagnostic.phase is DiagnosticPhase.SYMBOLS
+    assert builtin_error.diagnostic.code == "SYMBOLS_STANDARD_BUILTIN_REDEFINITION"
+    assert builtin_error.diagnostic.span is None
     assert not hasattr(host_error, "line")
     assert not hasattr(host_error, "column")
     assert not hasattr(builtin_error, "line")

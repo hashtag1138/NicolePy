@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from nicole.ast_nodes import CaseNode, IdentifierNode, IfNode, ModuleDeclaration, QuoteNode, WordDefNode
 from nicole.checker import Checker, CheckerError, check_program
 from nicole.errors import DiagnosticPhase
-from nicole.host_abi import HostEffect, HostOpaqueType, HostWord, host_contract_from_words
+from nicole.host_abi import HostABIError, HostEffect, HostOpaqueType, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.resolver import resolve
@@ -142,8 +142,13 @@ def test_checker_accepts_v1_nested_container_types() -> None:
     check_source('module @app\n  : pass { xs:List<Result<Int,Bool>> m:Map<String,List<Result<Int,Bool>>> -- ys:List<Result<Int,Bool>> out:Map<String,List<Result<Int,Bool>>> }\n    xs m\n  ;\nend-module\n')
 
 def test_checker_rejects_unknown_nominal_type_in_signature() -> None:
-    with pytest.raises(CheckerError, match='type is not supported in v1: Foo'):
+    with pytest.raises(CheckerError, match='type is not supported in v1: Foo') as exc_info:
         check_source('module @app\n  : id { x:Foo -- y:Foo }\n    x\n  ;\nend-module\n')
+
+    error = exc_info.value
+    assert not isinstance(error, HostABIError)
+    assert error.diagnostic.phase is DiagnosticPhase.CHECKER
+    assert error.diagnostic.code == "CHECKER_UNSUPPORTED_TYPE_V1"
 
 def test_checker_rejects_nested_unknown_nominal_type() -> None:
     with pytest.raises(CheckerError, match='type is not supported in v1: CustomError'):

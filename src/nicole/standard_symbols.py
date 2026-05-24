@@ -24,7 +24,7 @@ _BUILTIN_OWNER = "std"
 
 class StandardSymbolError(DiagnosticError):
     phase = DiagnosticPhase.SYMBOLS
-    default_code = "SYMBOLS_STANDARD_ERROR"
+    default_code = "SYMBOLS_STANDARD_BUILTIN_REDEFINITION"
     include_location_in_str = False
 
 
