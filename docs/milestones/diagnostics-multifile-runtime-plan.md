@@ -514,17 +514,113 @@ Phase 4E residual risks:
 - `ProgramNode.words` rebuild is required and must be tested
 - cross-file duplicates will surface existing diagnostics; this is intended
 
+## Decision freeze before Phase 5A
+
+Runtime diagnostic model:
+
+- runtime diagnostics are structured data, not renderers
+- existing public `nicole.runtime.RuntimeError` identity remains public
+- `RuntimeError` becomes compatibility-wrapper plus diagnostic carrier
+- runtime diagnostics are additive first
+- existing runtime behavior should remain compatible where possible
+
+RuntimeDiagnostic shape:
+
+Required:
+
+- severity
+- phase
+- code
+- message
+
+Optional:
+
+- span
+- operation
+- suggestion
+- notes
+- cause
+
+Forbidden in Phase 5:
+
+- stack trace
+- frame history
+- locals snapshot
+- runtime renderer ownership
+
+Phase:
+
+- add `RUNTIME`
+
+Runtime codes:
+
+- stable uppercase snake case
+- `RUNTIME_STACK_UNDERFLOW`
+- `RUNTIME_DIVISION_BY_ZERO`
+- `RUNTIME_MISSING_EXPORT`
+- `RUNTIME_CASE_MATCH_FAILURE`
+- `RUNTIME_HOST_FAILURE`
+- `RUNTIME_INVALID_QUOTATION`
+- `RUNTIME_HOST_BINDING_MISSING`
+- `RUNTIME_INVALID_COMPARISON`
+- `RUNTIME_UNSUPPORTED_OPERATION`
+
+Rules:
+
+- codes must not encode source locations
+- codes must not encode formatting
+
+Span policy:
+
+- runtime should use AST node spans when available
+- no synthetic cross-file spans
+- if no source exists: `span=None`
+
+Opaque values:
+
+- runtime diagnostics must never expose opaque payload internals
+
+Host exception policy:
+
+- runtime diagnostics may preserve Python exception chain internally
+- user-visible diagnostics must not expose arbitrary host object internals
+
+Tail-call constraints:
+
+- self-tail-call optimization behavior remains unchanged
+- runtime diagnostics must not create logical stack growth
+
+Phase 5 subphases:
+
+- `5B`: runtime diagnostic foundation
+- `5B`: `RuntimeDiagnostic`
+- `5B`: compatibility `RuntimeError`
+- `5C`: convert runtime raise sites
+- `5D`: runtime source/span attachment
+- `5E`: host runtime failures
+- `5F`: runtime cleanup and tests
+
+Phase 5 non-goals:
+
+- no Nicole stack traces
+- no frame history
+- no locals snapshots
+- no `NicoleInterpreter` API
+- no host method binding
+
 ## Next patch
 
-Phase 5 — Runtime diagnostics
+Phase 5B — runtime diagnostic foundation
 
 Scope:
-- add structured runtime diagnostic payloads
-- preserve compiler/runtime separation after completed Phase 4 multi-file compiler work
-- define authoritative runtime diagnostic provenance and operation reporting
+- add `RuntimeDiagnostic`
+- add compatibility-wrapper runtime `RuntimeError`
+- add `RUNTIME` phase and stable runtime diagnostic code scheme
 
 Non-goals:
 - no Nicole stack trace yet
+- no frame history yet
+- no locals snapshots yet
 - no interpreter API yet
 - no host method binding yet
 
@@ -748,6 +844,28 @@ Known deferred work:
 - `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` was removed because merged AST reuse now supports multi-file compilation.
 - Phase 5 runtime diagnostics work is next.
 
+## Phase 5A audit notes
+
+Result:
+
+- `RUNTIME_READY_FOR_DESIGN_FREEZE`
+
+Observed:
+
+- runtime currently lacks frame objects
+- runtime currently lacks stack traces
+- runtime currently uses message-only `RuntimeError`
+- `CheckedProgram.source_files` exists but runtime does not consume it
+- self-tail-call optimization already exists
+
+Risks:
+
+- future frame design
+- tail-call interaction
+- opaque payload exposure
+- host exception exposure
+- runtime-generated synthetic nodes
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -822,3 +940,4 @@ Before Phase 8:
 | 2026-05-24 | `da0cc8523f808a8fac824c385b1361d710f6c2b8` | Phase 4D implemented and committed: compiler input normalization added with `NicoleCompiler.compile(...)` accepting `str | Path | Iterable[str | Path]`, recursive `*.nic` discovery, deterministic resolved-path ordering, `Path.resolve()` deduplication, blocked symlink-directory traversal, accepted symlinked `.nic` files by design, structured `PIPELINE_*` input diagnostics, and temporary `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` gate for multiple discovered files | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 10 passed; `./.venv/bin/python -m pytest -q`: 816 passed | Commit `feat: add compiler input normalization`; post-commit audit `PASS_READY_FOR_TRACKING`; residual risk: symlinked `.nic` file acceptance is not yet directly tested; Phase 4E AST merge and full pipeline reuse is next |
 | 2026-05-24 | - | Phase 4E design freeze corrected after repository audit: merge by declarations in normalized file order, rebuild `ProgramNode.words`, keep representative multi-file `ProgramNode.span`, add `_analyze_program(...)`, keep `analyze_program(...)` compatibility with `source_files=()`, and preserve current duplicate/import/export behavior | - | Tracking-only design correction after audit result `DESIGN_NEEDS_CORRECTION_BEFORE_IMPLEMENTATION`; Phase 4E implementation remains next |
 | 2026-05-24 | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4E implemented and committed: each source file is parsed independently, merged `ProgramNode` analysis is enabled without source concatenation, merged declarations preserve normalized order, `ProgramNode.words` is rebuilt, original declaration/node provenance is preserved, representative multi-file `ProgramNode.span` is used, `_analyze_program(...)` reuses the pipeline, `CheckedProgram.source_files` was added, `NicoleCompiler` retains physical source files, `analyze_program(...)` remains backward compatible with `source_files=()`, include declarations remain inert, duplicate module/name/export behavior remains unchanged, and `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` was removed | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 13 passed; `./.venv/bin/python -m pytest tests/test_pipeline.py -q`: 30 passed; `./.venv/bin/python -m pytest -q`: 821 passed | Commit `feat: merge compiler source programs`; residual risk: representative multi-file `ProgramNode.span` is not authoritative and declaration spans remain authoritative for diagnostics; Phase 5 runtime diagnostics is next |
+| 2026-05-24 | - | Phase 5A runtime audit accepted and architecture freeze recorded: runtime diagnostics remain structured-data only, `RuntimeError` stays public as a compatibility-wrapper carrier, `RUNTIME` phase/codes and span policy are frozen, and stack traces/frame history/locals snapshots remain out of scope for Phase 5 | - | Tracking-only freeze after audit result `RUNTIME_READY_FOR_DESIGN_FREEZE`; Phase 5B runtime diagnostic foundation is next |
