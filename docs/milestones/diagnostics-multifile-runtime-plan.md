@@ -613,6 +613,110 @@ Phase 5 non-goals:
 - no `NicoleInterpreter` API
 - no host method binding
 
+## Decision freeze before Phase 5D
+
+Phase 5D title:
+
+- Runtime diagnostic context enrichment
+
+Audit result:
+
+- `RUNTIME_CONTEXT_READY_FOR_FREEZE`
+
+Observed current state:
+
+- `RuntimeDiagnostic` already has:
+- `severity`
+- `phase`
+- `code`
+- `message`
+- `span`
+- `operation`
+- `suggestion`
+- `notes`
+- `cause`
+- `RuntimeError` already exposes:
+- `message`
+- `diagnostic`
+- `diagnostics`
+- `RuntimeError` string behavior remains legacy-compatible
+- Runtime raise sites already attach structured diagnostics after Phase 5C
+- Runtime stack traces do not exist yet
+- Runtime frame objects do not exist yet
+- Locals snapshots do not exist yet
+
+Phase 5D scope:
+
+- enrich existing `RuntimeDiagnostic` payloads only where context is naturally available
+- add or complete operation context where naturally available
+- add or complete AST span context where naturally available
+- add direct diagnostic assertions for previously under-tested categories:
+- `RUNTIME_INVALID_COMPARISON`
+- `RUNTIME_INVALID_QUOTATION`
+- `RUNTIME_UNSUPPORTED_OPERATION`
+- representative `RUNTIME_RUNTIME_TYPE_ERROR` paths
+- preserve all existing runtime messages
+- preserve all existing runtime behavior
+- preserve host exception chaining
+- preserve opaque payload masking
+- preserve self-tail-call behavior
+
+Phase 5D non-goals:
+
+- no stack traces
+- no frame objects
+- no frame history
+- no locals snapshots
+- no runtime renderer
+- no `NicoleInterpreter` API
+- no host method binding
+- no host binding redesign
+- no new runtime semantics
+- no message rewrites
+
+Implementation constraints to record:
+
+- spans must come only from existing AST nodes or existing natural runtime context
+- if no natural span exists, use `span=None`
+- do not synthesize source spans
+- do not create cross-file spans
+- operation must be a short stable string only when naturally known
+- do not use operation as a substitute for future stack frames
+- cause may be used only for real underlying exceptions or propagated runtime causes
+- diagnostics must not expose `RuntimeOpaqueValue.payload`
+
+Recommended Phase 5D implementation files:
+
+- `src/nicole/runtime.py`
+- `tests/test_runtime.py`
+
+Files to avoid during implementation:
+
+- `src/nicole/interpreter.py`
+- `src/nicole/pipeline.py`
+- `src/nicole/compiler.py`
+- `src/nicole/checker.py`
+- `src/nicole/host_abi.py`
+- `src/nicole/parser.py`
+- `docs/**` except tracking-only updates
+
+Required test focus to record:
+
+- invalid comparison diagnostic assertion
+- invalid quotation diagnostic assertion
+- unsupported operation diagnostic assertion
+- representative runtime type error diagnostic assertion
+- verify messages remain unchanged
+- verify spans are natural or `None`
+- verify no opaque payload appears in diagnostic message/notes
+- verify runtime tests and full suite pass
+
+Residual risks to record:
+
+- `RuntimeDiagnostic.operation` must not become an implicit stack-frame model
+- Phase 6 still owns stack trace design
+- adding context across many runtime branches can accidentally change legacy messages if not tested carefully
+
 ## Next patch
 
 Phase 5D — runtime diagnostic context enrichment
