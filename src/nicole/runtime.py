@@ -1185,8 +1185,9 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
     if operator in {"+", "-", "*", "div", "mod"}:
         right = stack.pop()
         left = stack.pop()
-        _ensure_matches_type(left, "Int", context="left operand")
-        _ensure_matches_type(right, "Int", context="right operand")
+        operation = "divide" if operator == "div" else "modulo" if operator == "mod" else "arithmetic"
+        _ensure_matches_type(left, "Int", context="left operand", span=span, operation=operation)
+        _ensure_matches_type(right, "Int", context="right operand", span=span, operation=operation)
         try:
             if operator == "+":
                 stack.push(left + right)
@@ -1213,8 +1214,8 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
     if operator in {"+.", "-.", "*.", "/."}:
         right = stack.pop()
         left = stack.pop()
-        _ensure_matches_type(left, "Float", context="left operand")
-        _ensure_matches_type(right, "Float", context="right operand")
+        _ensure_matches_type(left, "Float", context="left operand", span=span, operation="divide")
+        _ensure_matches_type(right, "Float", context="right operand", span=span, operation="divide")
         try:
             if operator == "+.":
                 stack.push(left + right)
@@ -1262,7 +1263,7 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
             "wrong runtime signature for comparison operands: expected Int/Int or Float/Float",
             code="RUNTIME_INVALID_COMPARISON",
             span=span,
-            operation=operator,
+            operation="compare",
         )
 
     if operator in {"=", "!="}:
@@ -1273,14 +1274,14 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
                 "equality is not supported for host opaque values",
                 code="RUNTIME_INVALID_COMPARISON",
                 span=span,
-                operation=operator,
+                operation="compare",
             )
         if type(left) is not type(right):
             raise _runtime_error(
                 "wrong runtime signature for equality operands: expected matching types",
                 code="RUNTIME_INVALID_COMPARISON",
                 span=span,
-                operation=operator,
+                operation="compare",
             )
         if operator == "=":
             stack.push(left == right)
@@ -1291,8 +1292,8 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
     if operator in {"and", "or"}:
         right = stack.pop()
         left = stack.pop()
-        _ensure_matches_type(left, "Bool", context="left operand")
-        _ensure_matches_type(right, "Bool", context="right operand")
+        _ensure_matches_type(left, "Bool", context="left operand", span=span, operation=operator)
+        _ensure_matches_type(right, "Bool", context="right operand", span=span, operation=operator)
         if operator == "and":
             stack.push(left and right)
         else:
@@ -1301,7 +1302,7 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
 
     if operator == "not":
         value = stack.pop()
-        _ensure_matches_type(value, "Bool", context="operand")
+        _ensure_matches_type(value, "Bool", context="operand", span=span, operation=operator)
         stack.push(not value)
         return
 
@@ -1314,7 +1315,14 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
     )
 
 
-def _ensure_matches_type(value: object, type_spec: str | TypeNode, *, context: str) -> None:
+def _ensure_matches_type(
+    value: object,
+    type_spec: str | TypeNode,
+    *,
+    context: str,
+    span: SourceSpan | None = None,
+    operation: str | None = None,
+) -> None:
     expected = _describe_type(type_spec)
     if _matches_type(value, type_spec):
         return
@@ -1322,7 +1330,8 @@ def _ensure_matches_type(value: object, type_spec: str | TypeNode, *, context: s
     raise _runtime_error(
         message,
         code="RUNTIME_RUNTIME_TYPE_ERROR",
-        operation=context,
+        span=span,
+        operation=operation if operation is not None else context,
     )
 
 

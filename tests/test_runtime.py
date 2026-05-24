@@ -173,6 +173,88 @@ def test_runtime_stack_underflow_error_has_structured_diagnostic_without_span() 
     assert error.diagnostic.span is None
 
 
+def test_runtime_invalid_comparison_has_diagnostic_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _passthrough_check(program, symbols, **_kwargs):
+        return program
+
+    monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)
+    checked = analyze_program(
+        """module @app
+  : run { -- b:Bool }
+    1 2.0 <
+  ;
+  export : run
+end-module
+"""
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="wrong runtime signature for comparison operands: expected Int/Int or Float/Float",
+    ) as exc_info:
+        run_export(checked, "@app.run", RuntimeHostBindings({}))
+
+    error = exc_info.value
+    assert str(error) == "wrong runtime signature for comparison operands: expected Int/Int or Float/Float"
+    assert error.diagnostic.code == "RUNTIME_INVALID_COMPARISON"
+    assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert error.diagnostic.operation == "compare"
+    assert error.diagnostic.span is not None
+
+
+def test_runtime_invalid_quotation_has_diagnostic_context() -> None:
+    parsed = Parser(
+        lex(
+            """module @app
+  : run { -- }
+    1 call
+  ;
+end-module
+"""
+        )
+    ).parse()
+    call_op = parsed.words[0].body.items[1]
+
+    stack = RuntimeStack()
+    stack.push(1)
+    with pytest.raises(RuntimeError, match="call expects runtime quotation") as exc_info:
+        _execute_call({}, stack, {}, RuntimeHostBindings({}), span=call_op.span)
+
+    error = exc_info.value
+    assert str(error) == "call expects runtime quotation"
+    assert error.diagnostic.code == "RUNTIME_INVALID_QUOTATION"
+    assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert error.diagnostic.operation == "call"
+    assert error.diagnostic.span == call_op.span
+
+
+def test_runtime_unsupported_operation_has_diagnostic_context() -> None:
+    with pytest.raises(RuntimeError, match="runtime feature not supported: operator pow") as exc_info:
+        _execute_operator("pow", RuntimeStack())
+
+    error = exc_info.value
+    assert str(error) == "runtime feature not supported: operator pow"
+    assert error.diagnostic.code == "RUNTIME_UNSUPPORTED_OPERATION"
+    assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert error.diagnostic.operation == "pow"
+    assert error.diagnostic.span is None
+
+
+def test_runtime_type_error_has_diagnostic_context() -> None:
+    stack = RuntimeStack()
+    stack.push(1)
+    stack.push(2)
+    with pytest.raises(RuntimeError, match="wrong runtime signature for left operand: expected Bool") as exc_info:
+        _execute_operator("and", stack)
+
+    error = exc_info.value
+    assert str(error) == "wrong runtime signature for left operand: expected Bool"
+    assert error.diagnostic.code == "RUNTIME_RUNTIME_TYPE_ERROR"
+    assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert error.diagnostic.operation == "and"
+    assert error.diagnostic.span is None
+
+
 def test_runtime_valid_host_call() -> None:
     host_signature = signature_from_source("""module @app
   : hostsig { msg:String -- } ;
@@ -599,10 +681,20 @@ end-module
         host_contract=host_contract_with_opaque("host.io.FileHandle"),
     )
 
-    a = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="a")
-    b = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="b")
-    with pytest.raises(RuntimeError, match="equality is not supported for host opaque values"):
+    secret_payload = "secret-token-opaque"
+    a = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=secret_payload)
+    b = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=secret_payload)
+    with pytest.raises(RuntimeError, match="equality is not supported for host opaque values") as exc_info:
         run_export(checked, "@app.run", RuntimeHostBindings({}), a, b)
+
+    error = exc_info.value
+    assert str(error) == "equality is not supported for host opaque values"
+    assert error.diagnostic.code == "RUNTIME_INVALID_COMPARISON"
+    assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert error.diagnostic.operation == "compare"
+    assert error.diagnostic.span is not None
+    assert secret_payload not in error.diagnostic.message
+    assert all(secret_payload not in note for note in error.diagnostic.notes)
 
 
 def test_runtime_rejects_inequality_on_host_opaque_values(monkeypatch: pytest.MonkeyPatch) -> None:
