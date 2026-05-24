@@ -21,6 +21,7 @@ class CheckedProgram:
     symbols: SymbolTable
     host_contract: HostContract
     export_contract: ExportContract
+    source_files: tuple[SourceFile, ...] = ()
 
 
 def analyze_program(source: str, *, host_contract: HostContract | None = None) -> CheckedProgram:
@@ -38,8 +39,15 @@ def _analyze_source_file(source_file: SourceFile, *, host_contract: HostContract
 
 
 def _analyze_tokens(tokens: list[Token], *, host_contract: HostContract | None = None) -> CheckedProgram:
-    effective_host_contract = host_contract if host_contract is not None else empty_host_contract()
     program = Parser(tokens).parse()
+    return _analyze_program(
+        program,
+        host_contract=host_contract,
+    )
+
+
+def _analyze_program(program: ProgramNode, *, host_contract: HostContract | None = None) -> CheckedProgram:
+    effective_host_contract = host_contract if host_contract is not None else empty_host_contract()
     symbols = collect_signatures(program)
     symbols = with_standard_symbols(symbols)
     resolved = resolve(program, symbols, host_contract=effective_host_contract)
@@ -54,4 +62,5 @@ def _analyze_tokens(tokens: list[Token], *, host_contract: HostContract | None =
         symbols=symbols,
         host_contract=effective_host_contract,
         export_contract=export_contract,
+        source_files=(),
     )

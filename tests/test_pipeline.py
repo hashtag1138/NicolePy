@@ -9,7 +9,7 @@ from nicole.ast_nodes import IdentifierNode, ModuleDeclaration, WordDefNode
 from nicole.checker import CheckerError
 from nicole.errors import DiagnosticError, DiagnosticPhase
 from nicole.host_abi import HostABIError, HostEffect, HostOpaqueType, HostWord, host_contract_from_words
-from nicole.pipeline import CheckedProgram, analyze_program
+from nicole.pipeline import CheckedProgram, _analyze_program, analyze_program
 from nicole.resolver import ResolutionError
 from nicole.parser import Parser
 from nicole.lexer import lex
@@ -50,6 +50,32 @@ def test_pipeline_accepts_module_program_without_exports() -> None:
     assert isinstance(result, CheckedProgram)
     assert dict(result.export_contract.words) == {}
     assert dict(result.host_contract.opaque_types) == {}
+
+
+def test_analyze_program_keeps_source_files_empty_for_compatibility() -> None:
+    result = analyze_program(
+        "module @app\n"
+        "  : run { -- }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    assert result.source_files == ()
+
+
+def test_internal_analyze_program_helper_reuses_pipeline_flow() -> None:
+    program = _parse_source(
+        "module @app\n"
+        "  : run { -- n:Int }\n"
+        "    1\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    result = _analyze_program(program)
+
+    assert isinstance(result, CheckedProgram)
+    assert result.source_files == ()
+    assert "@app.run" not in result.export_contract.words
 
 
 def test_pipeline_resolves_same_module_short_name() -> None:

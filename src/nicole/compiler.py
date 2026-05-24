@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 import os
 from pathlib import Path
 
+from .ast_nodes import ASTNode, ModuleDeclaration, ProgramNode, WordDefNode
 from .errors import DiagnosticError, DiagnosticPhase
 from .host_abi import HostContract
-from .pipeline import CheckedProgram, _analyze_source_file
+from .lexer import lex_source
+from .parser import Parser
+from .pipeline import CheckedProgram, _analyze_program, _analyze_source_file
 from .source import SourceFile
 
 __all__ = ["NicoleCompiler", "compile_path"]
@@ -35,24 +39,35 @@ class NicoleCompiler:
                 message="no .nic source files were found in the provided compile input",
                 code="PIPELINE_EMPTY_SOURCE_SET",
             )
-        if len(source_paths) > 1:
-            raise CompilerInputError(
-                message="multi-file source discovery is available in Phase 4D, but semantic multi-file merge is deferred to later Phase 4 work",
-                code="PIPELINE_MULTIFILE_NOT_IMPLEMENTED",
+        source_files = tuple(self._load_source_file(path) for path in source_paths)
+        if len(source_files) == 1:
+            checked = _analyze_source_file(
+                source_files[0],
+                host_contract=self._host_contract,
             )
-        return self.compile_file(source_paths[0])
+            return replace(checked, source_files=source_files)
+
+        parsed_programs = tuple(
+            Parser(lex_source(source_file)).parse()
+            for source_file in source_files
+        )
+        merged_program = self._merge_programs(parsed_programs)
+        checked = _analyze_program(
+            merged_program,
+            host_contract=self._host_contract,
+        )
+        return replace(checked, source_files=source_files)
 
     def compile_file(
         self,
         file_path: str | Path,
     ) -> CheckedProgram:
-        resolved_path = self._validate_source_file(Path(file_path))
-        source_text = resolved_path.read_text(encoding="utf-8")
-        source_file = SourceFile(str(resolved_path), text=source_text)
-        return _analyze_source_file(
+        source_file = self._load_source_file(Path(file_path))
+        checked = _analyze_source_file(
             source_file,
             host_contract=self._host_contract,
         )
+        return replace(checked, source_files=(source_file,))
 
     def _normalize_inputs(self, input_path: str | Path | Iterable[str | Path]) -> tuple[Path, ...]:
         resolved_files: dict[str, Path] = {}
@@ -91,6 +106,44 @@ class NicoleCompiler:
                 if resolved.suffix == ".nic":
                     discovered[str(resolved)] = resolved
         return tuple(sorted(discovered.values(), key=lambda path: str(path)))
+
+    def _load_source_file(self, file_path: Path) -> SourceFile:
+        resolved_path = self._validate_source_file(file_path)
+        source_text = resolved_path.read_text(encoding="utf-8")
+        return SourceFile(str(resolved_path), text=source_text)
+
+    @staticmethod
+    def _merge_programs(programs: tuple[ProgramNode, ...]) -> ProgramNode:
+        if not programs:
+            raise CompilerInputError(
+                message="no parsed programs were available for merge",
+                code="PIPELINE_EMPTY_SOURCE_SET",
+            )
+        if len(programs) == 1:
+            return programs[0]
+
+        declarations: list[ASTNode] = []
+        words: list[WordDefNode] = []
+        for program in programs:
+            declarations.extend(program.declarations)
+            words.extend(NicoleCompiler._module_words(program.declarations))
+
+        return ProgramNode(
+            span=programs[0].span,
+            declarations=tuple(declarations),
+            words=tuple(words),
+        )
+
+    @staticmethod
+    def _module_words(declarations: tuple[ASTNode, ...]) -> tuple[WordDefNode, ...]:
+        words: list[WordDefNode] = []
+        for declaration in declarations:
+            if not isinstance(declaration, ModuleDeclaration):
+                continue
+            for item in declaration.items:
+                if isinstance(item, WordDefNode):
+                    words.append(item)
+        return tuple(words)
 
     def _validate_source_file(self, source_path: Path) -> Path:
         if not source_path.exists() or not source_path.is_file():
