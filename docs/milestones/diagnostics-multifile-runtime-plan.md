@@ -317,7 +317,7 @@ Possible phase states:
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
 | 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
-| 4. Multi-file compiler | in_progress | `30cfeab08d8743f41d0f844bb4c56853f9696788` | Phase 4C completed: explicit file compiler skeleton added on top of physical `SourceFile` compilation flow | `5 passed`; `811 passed` | Phase 4A freeze integrated; Phase 4D recursive directory loader and input normalization is next |
+| 4. Multi-file compiler | in_progress | `da0cc8523f808a8fac824c385b1361d710f6c2b8` | Phase 4D completed: compiler input normalization and recursive directory discovery added ahead of later semantic merge work | `10 passed`; `816 passed` | Phase 4A freeze integrated; Phase 4E AST merge and full pipeline reuse is next |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
 | 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
@@ -338,7 +338,7 @@ Possible phase states:
 - Checker-internal `HostABIError` validation paths remain remapped to public `CheckerError` on checker entry points; user-visible checker behavior is unchanged.
 - Renderer API decision for Phase 3 remains module-level import (`nicole.diagnostic_renderer`) with no package-level re-export.
 - Multi-file compiler work is in progress for Phase 4.
-- `NicoleCompiler` now exists for explicit file compilation only.
+- `NicoleCompiler` now supports explicit files, explicit directories, and mixed iterables through normalized source discovery.
 - No real `NicoleInterpreter` API exists yet.
 - Runtime diagnostics remain pending for Phase 5; runtime errors still lack structured span/operation/stack trace diagnostics.
 - Documentation target references for the diagnostic phases are now aligned through Phase 3F planning.
@@ -453,15 +453,15 @@ Phase 4 non-goals:
 
 ## Next patch
 
-Phase 4D — recursive directory loader and input normalization
+Phase 4E — AST merge and full pipeline reuse
 
 Scope:
-- add recursive directory loading for `.nic` inputs
-- normalize explicit file and directory inputs into deterministic file lists
+- merge normalized multi-file programs without concatenating source text
+- reuse existing pipeline stages on merged declarations
 - keep parser, runtime, and language semantics unchanged
 
 Non-goals:
-- no AST merge yet
+- no include semantics yet
 - no runtime diagnostics yet
 - no interpreter API yet
 - no host method binding yet
@@ -638,6 +638,23 @@ Known deferred work:
 - Parser behavior, language semantics, runtime behavior, diagnostic structure, and exception identities remain unchanged.
 - Phase 4D recursive directory loader and input normalization work is next.
 
+## Phase 4D post-audit notes
+
+- Phase 4D implementation passed post-commit audit with result `PASS_READY_FOR_TRACKING`.
+- No fixes are required before tracking update.
+- `NicoleCompiler.compile(...)` now accepts `str | Path | Iterable[str | Path]`.
+- Recursive directory discovery for `*.nic` inputs was added.
+- Input ordering is deterministic by resolved path.
+- Duplicate inputs are deduplicated by `Path.resolve()`.
+- Symlink-directory traversal is blocked.
+- Symlinked `.nic` files are accepted by the implementation/design.
+- Structured `PIPELINE_*` diagnostics cover missing source, unsupported explicit extension, and empty source set.
+- A temporary `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` gate now blocks multiple discovered files until later Phase 4 semantic merge work.
+- Phase 4D intentionally did not add AST merge, source concatenation, include semantics, `CheckedProgram.source_files`, runtime diagnostics, interpreter API, user class API, or host method binding.
+- `analyze_program(...)` remains compatible.
+- Residual risk: symlinked `.nic` file acceptance is implemented by design but is not yet directly tested.
+- Phase 4E AST merge and full pipeline reuse work is next.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -709,3 +726,4 @@ Before Phase 8:
 | 2026-05-24 | - | Phase 4A tracking freeze integrated: scope limited to multi-file compiler/loader, Phase 4B-4H breakdown recorded, invariants and non-goals documented | `python -m pytest -q` failed: `No module named pytest` | Documentation-only update; implementation remains pending |
 | 2026-05-24 | `267ea2fc20b5696b15b744566620452c6833feb9` | Phase 4B implemented and committed: source-aware lexer entrypoint added with `lex_source(source_file: SourceFile)`, `Lexer.tokenize_source(source_file: SourceFile)`, and preserved `lex(source: str)` / `Lexer.tokenize(source: str)` compatibility | `./.venv/bin/python -m pytest tests/test_lexer.py -q`: 37 passed; `./.venv/bin/python -m pytest -q`: 806 passed | Commit `feat: add source-aware lexer entrypoint`; Phase 4C compiler skeleton for explicit files is next |
 | 2026-05-24 | `30cfeab08d8743f41d0f844bb4c56853f9696788` | Phase 4C implemented and committed: explicit file compiler skeleton added with `src/nicole/compiler.py`, `NicoleCompiler`, `NicoleCompiler.compile(input_path)`, `NicoleCompiler.compile_file(file_path)`, `compile_path(input_path, *, host_contract=None)`, physical `SourceFile` compilation flow, and structured `PIPELINE_*` input diagnostics | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 5 passed; `./.venv/bin/python -m pytest -q`: 811 passed | Commit `feat: add explicit file compiler skeleton`; Phase 4D recursive directory loader and input normalization is next |
+| 2026-05-24 | `da0cc8523f808a8fac824c385b1361d710f6c2b8` | Phase 4D implemented and committed: compiler input normalization added with `NicoleCompiler.compile(...)` accepting `str | Path | Iterable[str | Path]`, recursive `*.nic` discovery, deterministic resolved-path ordering, `Path.resolve()` deduplication, blocked symlink-directory traversal, accepted symlinked `.nic` files by design, structured `PIPELINE_*` input diagnostics, and temporary `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` gate for multiple discovered files | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 10 passed; `./.venv/bin/python -m pytest -q`: 816 passed | Commit `feat: add compiler input normalization`; post-commit audit `PASS_READY_FOR_TRACKING`; residual risk: symlinked `.nic` file acceptance is not yet directly tested; Phase 4E AST merge and full pipeline reuse is next |
