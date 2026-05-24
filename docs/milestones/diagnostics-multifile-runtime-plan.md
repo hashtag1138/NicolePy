@@ -723,6 +723,134 @@ Residual risks to record:
 - Phase 6 still owns stack trace design
 - adding context across many runtime branches can accidentally change legacy messages if not tested carefully
 
+## Decision freeze before Phase 5E
+
+Phase title:
+
+- Runtime diagnostic rendering
+
+Audit result:
+
+- `RUNTIME_RENDERING_READY_FOR_FREEZE`
+
+Observed current state:
+
+- `RuntimeDiagnostic` exists
+- `RuntimeError` carries diagnostic(s)
+- runtime diagnostics already have:
+- `code`
+- `message`
+- `span`
+- `operation`
+- `notes`
+- `cause`
+- no runtime renderer exists
+- no stack trace exists
+- no frame objects exist
+- diagnostics are currently raw objects only
+
+Rendering responsibilities:
+
+- transform `RuntimeDiagnostic` into readable output only
+- preserve `RuntimeDiagnostic` as source of truth
+- rendering layer must be pure presentation
+- renderer must never modify diagnostics
+
+Renderer output shape:
+
+Required sections:
+
+1.
+Error header:
+
+example:
+
+`RuntimeError[RUNTIME_DIVIDE_BY_ZERO]`
+
+2.
+message
+
+example:
+
+`Division by zero.`
+
+3.
+location block if span exists:
+
+example:
+
+`file.nic:42:17`
+
+4.
+operation block if available:
+
+example:
+
+`Operation: divide`
+
+5.
+notes block if notes exist
+
+6.
+cause block if cause exists
+
+Rules:
+
+- absent fields produce no output section
+- no empty placeholders
+- no synthetic data generation
+- preserve message exactly
+- preserve code exactly
+
+Phase 5E scope:
+
+- add renderer only
+- add renderer tests
+- add formatting tests
+- support `RuntimeDiagnostic` and `RuntimeError`
+
+Phase 5E non-goals:
+
+- no stack traces
+- no frame model
+- no locals snapshots
+- no colored terminal output
+- no ANSI formatting
+- no rich library
+- no IDE integration
+- no interpreter API
+- no logging framework
+- no semantic runtime changes
+
+Implementation constraints:
+
+- renderer must be deterministic
+- renderer must be side-effect free
+- renderer must not mutate `RuntimeDiagnostic`
+- renderer must not inspect `RuntimeOpaqueValue.payload`
+- renderer must not synthesize spans
+- renderer must not create frame information
+
+Recommended future implementation files:
+
+- `src/nicole/runtime.py`
+- `tests/test_runtime.py`
+
+Required future tests:
+
+- render diagnostic with all fields
+- render diagnostic without optional fields
+- render `RuntimeError`
+- verify exact message preservation
+- verify deterministic output
+- verify no payload leakage
+- verify no mutation
+
+Residual risks:
+
+- rendering layout decisions may affect future stack-trace integration
+- Phase 6 owns stack-frame design
+
 ## Next patch
 
 Phase 5E — runtime diagnostic rendering
