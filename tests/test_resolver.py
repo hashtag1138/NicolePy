@@ -5,6 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from nicole.errors import DiagnosticPhase
 from nicole.ast_nodes import IdentifierNode, ModuleDeclaration, WordDefNode
 from nicole.host_abi import BindingAvailability, HostEffect, HostWord, host_contract_from_words
 from nicole.lexer import lex
@@ -302,3 +303,112 @@ def test_rejects_duplicate_import_alias() -> None:
             "module @app\n"
             "end-module\n"
         )
+
+
+def test_symbol_error_exposes_structured_diagnostic() -> None:
+    with pytest.raises(SymbolError) as exc_info:
+        resolve_source(
+            "import @math as list\n"
+            "module @app\n"
+            "end-module\n"
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.SYMBOLS
+    assert error.diagnostic.code == "SYMBOLS_RESERVED_IMPORT_ALIAS"
+    assert error.message == "cannot use reserved root as import alias: list"
+    assert error.line == error.diagnostic.span.line
+    assert error.column == error.diagnostic.span.column
+
+
+def test_resolver_unresolved_name_exposes_structured_diagnostic() -> None:
+    source = (
+        "module @app\n"
+        "  : run { -- }\n"
+        "    missing\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(ResolutionError) as exc_info:
+        resolve_source(source)
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.RESOLVER
+    assert error.diagnostic.code == "RESOLVER_UNRESOLVED_NAME"
+    assert error.message == "unresolved name"
+    assert error.diagnostic.span is not None
+    assert error.line == error.diagnostic.span.line
+    assert error.column == error.diagnostic.span.column
+
+
+def test_resolver_host_contract_required_exposes_structured_diagnostic() -> None:
+    with pytest.raises(ResolutionError) as exc_info:
+        resolve_source(
+            "module @app\n"
+            "  : run { msg:String -- }\n"
+            "    msg host.log\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.RESOLVER
+    assert error.diagnostic.code == "RESOLVER_HOST_CONTRACT_REQUIRED"
+    assert error.message == "host contract required for host.* reference"
+
+
+def test_resolver_unknown_host_word_exposes_structured_diagnostic() -> None:
+    hostsig = signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    with pytest.raises(ResolutionError) as exc_info:
+        resolve_source_with_host_contract(
+            "module @app\n"
+            "  : run { msg:String -- }\n"
+            "    msg host.log\n"
+            "  ;\n"
+            "end-module\n",
+            [HostWord(name="host.print", signature=hostsig, effect=HostEffect.PURE)],
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.RESOLVER
+    assert error.diagnostic.code == "RESOLVER_UNKNOWN_HOST_WORD"
+    assert error.message == "unknown host word"
+
+
+def test_resolver_optional_host_word_direct_call_exposes_structured_diagnostic() -> None:
+    hostsig = signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    with pytest.raises(ResolutionError) as exc_info:
+        resolve_source_with_host_contract(
+            "module @app\n"
+            "  : run { msg:String -- }\n"
+            "    msg host.log\n"
+            "  ;\n"
+            "end-module\n",
+            [
+                HostWord(
+                    name="host.log",
+                    signature=hostsig,
+                    availability=BindingAvailability.OPTIONAL,
+                    effect=HostEffect.PURE,
+                )
+            ],
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.RESOLVER
+    assert error.diagnostic.code == "RESOLVER_OPTIONAL_HOST_WORD_DIRECT_CALL"
+    assert error.message == "optional host word cannot be called directly in v1"

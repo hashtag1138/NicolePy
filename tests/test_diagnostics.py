@@ -147,6 +147,18 @@ def test_parse_error_legacy_message_line_column_and_str_are_compatible() -> None
     assert str(error) == "unexpected token at 7:2"
 
 
+def test_checker_error_legacy_message_line_column_and_str_are_compatible() -> None:
+    error = CheckerError(message="insufficient stack", line=4, column=9)
+
+    assert len(error.diagnostics) == 1
+    assert error.diagnostic.phase is DiagnosticPhase.CHECKER
+    assert error.diagnostic.code == "CHECKER_ERROR"
+    assert error.message == "insufficient stack"
+    assert error.line == 4
+    assert error.column == 9
+    assert str(error) == "insufficient stack at 4:9"
+
+
 def test_locationless_errors_keep_legacy_string_behavior() -> None:
     host_error = HostABIError("type is not ABI-compatible in v1: Foo")
     builtin_error = StandardSymbolError("cannot redefine standard builtin: map.get")

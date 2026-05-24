@@ -59,6 +59,8 @@ class SymbolTable:
                     message=f"duplicate visible name: {symbol.name}",
                     line=symbol.span.line,
                     column=symbol.span.column,
+                    span=symbol.span,
+                    code="SYMBOLS_DUPLICATE_VISIBLE_NAME",
                 )
         self.words.setdefault(symbol.name, []).append(symbol)
 
@@ -69,12 +71,16 @@ class SymbolTable:
                 message=f"cannot use reserved root as module name: @{module_name}",
                 line=span.line,
                 column=span.column,
+                span=span,
+                code="SYMBOLS_RESERVED_MODULE_ROOT",
             )
         if module_name in self.modules:
             raise SymbolError(
                 message=f"duplicate module declaration: {module_name}",
                 line=span.line,
                 column=span.column,
+                span=span,
+                code="SYMBOLS_DUPLICATE_MODULE_DECLARATION",
             )
         self.modules[module_name] = span
 
@@ -89,12 +95,16 @@ class SymbolTable:
                 message=f"cannot use reserved root as import alias: {alias}",
                 line=span.line,
                 column=span.column,
+                span=span,
+                code="SYMBOLS_RESERVED_IMPORT_ALIAS",
             )
         if alias in self.aliases:
             raise SymbolError(
                 message=f"duplicate import alias: {alias}",
                 line=span.line,
                 column=span.column,
+                span=span,
+                code="SYMBOLS_DUPLICATE_IMPORT_ALIAS",
             )
         self.aliases[alias] = metadata
 

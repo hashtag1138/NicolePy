@@ -4,10 +4,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from nicole.ast_nodes import CaseNode, IdentifierNode, IfNode, ModuleDeclaration, QuoteNode, WordDefNode
 from nicole.checker import Checker, CheckerError, check_program
+from nicole.errors import DiagnosticPhase
 from nicole.host_abi import HostEffect, HostOpaqueType, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.resolver import resolve
+from nicole.source import MEMORY_SOURCE_PATH, SYNTHETIC_SOURCE_PATH
 from nicole.signature_collector import collect_signatures
 from nicole.standard_symbols import with_standard_symbols
 
@@ -94,6 +96,38 @@ def _marked_calls(block) -> list[IdentifierNode]:
         if isinstance(item, QuoteNode):
             marked.extend(_marked_calls(item.body))
     return marked
+
+
+def _find_identifier(block, name: str) -> IdentifierNode:
+    for item in block.items:
+        if isinstance(item, IdentifierNode) and item.name == name:
+            return item
+        if isinstance(item, IfNode):
+            try:
+                return _find_identifier(item.then_block, name)
+            except AssertionError:
+                pass
+            try:
+                return _find_identifier(item.else_block, name)
+            except AssertionError:
+                pass
+        if isinstance(item, CaseNode):
+            for branch in item.branches:
+                if branch.guard is not None:
+                    try:
+                        return _find_identifier(branch.guard, name)
+                    except AssertionError:
+                        pass
+                try:
+                    return _find_identifier(branch.body, name)
+                except AssertionError:
+                    pass
+        if isinstance(item, QuoteNode):
+            try:
+                return _find_identifier(item.body, name)
+            except AssertionError:
+                pass
+    raise AssertionError(f"identifier '{name}' not found")
 
 def test_checker_accepts_simple_add():
     check_source('module @app\n  : add { x:Int y:Int -- z:Int }\n    x y +\n  ;\nend-module\n')
@@ -1039,3 +1073,127 @@ def test_checker_phase5_graph_case4_pure_words_with_dirty_quote_path_fail_missin
 def test_checker_phase5_graph_case5_nested_quotes_propagate_dirty() -> None:
     host_signature = signature_from_source('module @app\n  : hostsig { msg:String -- } ;\nend-module\n')
     check_source_with_host_contract('module @app\n  dirty : b { -- }\n    "x" host.log\n  ;\n  dirty : a { -- }\n    :[ | -- |\n      :[ | -- |\n        b\n      ;]\n      call\n    ;]\n    call\n  ;\nend-module\n', [HostWord(name='host.log', signature=host_signature, effect=HostEffect.DIRTY)])
+
+
+def test_checker_if_condition_error_exposes_structured_diagnostic() -> None:
+    source = (
+        "module @app\n"
+        "  : bad { x:Int -- y:Int }\n"
+        "    x if\n"
+        "      1\n"
+        "    else\n"
+        "      2\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(CheckerError) as exc_info:
+        check_source(source)
+    error = exc_info.value
+    program = _parse_source(source)
+    word = get_module_word(program, module_name="app", word_name="bad")
+    if_node = next(item for item in word.body.items if isinstance(item, IfNode))
+    diagnostic_span = error.diagnostic.span
+    assert diagnostic_span is not None
+    assert error.diagnostic.phase is DiagnosticPhase.CHECKER
+    assert error.diagnostic.code == "CHECKER_IF_CONDITION_NOT_BOOL"
+    assert error.message == "if condition must be Bool"
+    assert diagnostic_span == if_node.span
+    assert diagnostic_span.source.path == MEMORY_SOURCE_PATH
+    assert diagnostic_span.source.path != SYNTHETIC_SOURCE_PATH
+    assert error.line == diagnostic_span.line
+    assert error.column == diagnostic_span.column
+
+
+def test_checker_list_append_value_mismatch_exposes_structured_diagnostic() -> None:
+    source = (
+        "module @app\n"
+        "  : bad { -- xs:List<Int> }\n"
+        "    [1, 2] \"oops\" list.append\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(CheckerError) as exc_info:
+        check_source(source)
+    error = exc_info.value
+    program = _parse_source(source)
+    word = get_module_word(program, module_name="app", word_name="bad")
+    list_append = _find_identifier(word.body, "list.append")
+    diagnostic_span = error.diagnostic.span
+    assert diagnostic_span is not None
+    assert error.diagnostic.phase is DiagnosticPhase.CHECKER
+    assert error.diagnostic.code == "CHECKER_LIST_APPEND_VALUE_TYPE_MISMATCH"
+    assert error.message == "list.append value type does not match list element type"
+    assert diagnostic_span == list_append.span
+    assert diagnostic_span.source.path == MEMORY_SOURCE_PATH
+    assert diagnostic_span.source.path != SYNTHETIC_SOURCE_PATH
+    assert error.line == diagnostic_span.line
+    assert error.column == diagnostic_span.column
+
+
+def test_checker_case_pattern_mismatch_exposes_structured_diagnostic() -> None:
+    with pytest.raises(CheckerError) as exc_info:
+        check_source(
+            "module @app\n"
+            "  : bad { b:Bool -- n:Int }\n"
+            "    b case\n"
+            "      1 => 1\n"
+            "      _ => 0\n"
+            "    end\n"
+            "  ;\n"
+            "end-module\n"
+        )
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.CHECKER
+    assert error.diagnostic.code == "CHECKER_CASE_PATTERN_TYPE_MISMATCH"
+    assert error.message == "case pattern does not match scrutinee type"
+
+
+def test_checker_case_guard_dirty_call_exposes_structured_diagnostic() -> None:
+    host_signature = signature_from_source('module @app\n  : hostsig { msg:String -- } ;\nend-module\n')
+    source = (
+        "module @app\n"
+        "  dirty : use-guard { r:Result<Int,MapError> -- n:Int }\n"
+        "    r case\n"
+        "      Ok(v) when \"x\" host.log true => v\n"
+        "      _ => 0\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(CheckerError) as exc_info:
+        check_source_with_host_contract(
+            source,
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+    error = exc_info.value
+    program = _parse_source(source)
+    word = get_module_word(program, module_name="app", word_name="use-guard")
+    host_call = _find_identifier(word.body, "host.log")
+    diagnostic_span = error.diagnostic.span
+    assert diagnostic_span is not None
+    assert error.diagnostic.phase is DiagnosticPhase.CHECKER
+    assert error.diagnostic.code == "CHECKER_CASE_GUARD_CALLS_DIRTY_CODE"
+    assert error.message == "case guard cannot call dirty code"
+    assert diagnostic_span == host_call.span
+    assert diagnostic_span.source.path == MEMORY_SOURCE_PATH
+    assert diagnostic_span.source.path != SYNTHETIC_SOURCE_PATH
+    assert error.line == diagnostic_span.line
+    assert error.column == diagnostic_span.column
+
+
+def test_checker_dirty_annotation_missing_exposes_structured_diagnostic() -> None:
+    host_signature = signature_from_source('module @app\n  : hostsig { msg:String -- } ;\nend-module\n')
+    with pytest.raises(CheckerError) as exc_info:
+        check_source_with_host_contract(
+            "module @app\n"
+            "  : write-log { msg:String -- }\n"
+            "    msg host.log\n"
+            "  ;\n"
+            "end-module\n",
+            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+        )
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.CHECKER
+    assert error.diagnostic.code == "CHECKER_DIRTY_ANNOTATION_MISSING"
+    assert "missing dirty annotation" in error.message

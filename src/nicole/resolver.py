@@ -52,7 +52,13 @@ class Resolver:
     ) -> None:
         symbol = self._find_definition_symbol(word, lexical_owner, current_module=current_module)
         if symbol is None:
-            self._raise_error("unresolved word definition", word.span.line, word.span.column)
+            self._raise_error(
+                "unresolved word definition",
+                word.span.line,
+                word.span.column,
+                code="RESOLVER_UNRESOLVED_WORD_DEFINITION",
+                span=word.span,
+            )
 
         current_scope = symbol.qualified_name
         current_locals = {parameter.name for parameter in word.signature.inputs}
@@ -262,7 +268,13 @@ class Resolver:
             current_module=current_module,
         )
         if symbol is None:
-            self._raise_error("unresolved name", node.span.line, node.span.column)
+            self._raise_error(
+                "unresolved name",
+                node.span.line,
+                node.span.column,
+                code="RESOLVER_UNRESOLVED_NAME",
+                span=node.span,
+            )
 
         self._annotate_symbol_node(
             node,
@@ -393,15 +405,29 @@ class Resolver:
 
     def _annotate_host(self, node: IdentifierNode) -> None:
         if self._host_contract is None:
-            self._raise_error("host contract required for host.* reference", node.span.line, node.span.column)
+            self._raise_error(
+                "host contract required for host.* reference",
+                node.span.line,
+                node.span.column,
+                code="RESOLVER_HOST_CONTRACT_REQUIRED",
+                span=node.span,
+            )
         host_word = self._host_contract.words.get(node.name)
         if host_word is None:
-            self._raise_error("unknown host word", node.span.line, node.span.column)
+            self._raise_error(
+                "unknown host word",
+                node.span.line,
+                node.span.column,
+                code="RESOLVER_UNKNOWN_HOST_WORD",
+                span=node.span,
+            )
         if host_word.availability is BindingAvailability.OPTIONAL:
             self._raise_error(
                 "optional host word cannot be called directly in v1",
                 node.span.line,
                 node.span.column,
+                code="RESOLVER_OPTIONAL_HOST_WORD_DIRECT_CALL",
+                span=node.span,
             )
         node.resolution = ResolutionInfo(
             resolved_symbol=host_word,
@@ -412,8 +438,24 @@ class Resolver:
             host_effect=host_word.effect,
         )
 
-    def _raise_error(self, message: str, line: int, column: int) -> None:
-        raise ResolutionError(message=message, line=line, column=column)
+    def _raise_error(
+        self,
+        message: str,
+        line: int,
+        column: int,
+        *,
+        code: str,
+        span=None,
+        suggestion: str | None = None,
+    ) -> None:
+        raise ResolutionError(
+            message=message,
+            line=line,
+            column=column,
+            code=code,
+            span=span,
+            suggestion=suggestion,
+        )
 
 
 def resolve(program: ProgramNode, symbols: SymbolTable, host_contract: HostContract | None = None) -> ProgramNode:
