@@ -318,7 +318,7 @@ Possible phase states:
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
 | 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
 | 4. Multi-file compiler | completed | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4 completed: source-aware lexing, explicit file compile, recursive input normalization, and merged multi-file AST analysis are implemented | `13 passed`; `30 passed`; `821 passed` | Phase 4A and Phase 4E freezes integrated; Phase 5 runtime diagnostics is next |
-| 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
+| 5. Runtime diagnostics | in_progress | `39012f3bab7b73db9c39d00005ff0b4c0033f0f8` | Phase 5C implemented: runtime raise sites now attach structured diagnostics | `205 passed`; `829 passed` | Depends on phase 3 and 4; Phase 5D runtime diagnostic context enrichment is next |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
 | 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
 | 8. User class API | pending | - | Add ergonomic app-level wrapper usage patterns | - | Thin convenience layer |
@@ -343,7 +343,12 @@ Possible phase states:
 - `CheckedProgram.source_files` now exists as a backward-compatible field; `NicoleCompiler` fills physical source files while `analyze_program(...)` remains compatible with `source_files=()`.
 - `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` has been removed because merged AST reuse now implements multi-file compilation.
 - No real `NicoleInterpreter` API exists yet.
-- Runtime diagnostics remain pending for Phase 5; runtime errors still lack structured span/operation/stack trace diagnostics.
+- Runtime raise sites now attach structured diagnostics for Phase 5.
+- `RuntimeError` preserves legacy message behavior while carrying diagnostics.
+- Runtime diagnostics preserve host cause chaining.
+- Runtime diagnostics preserve opaque payload masking.
+- Runtime behavior remains unchanged.
+- Runtime stack traces remain deferred.
 - Documentation target references for the diagnostic phases are now aligned through Phase 3F planning.
 
 ## Compatibility constraints already observed
@@ -610,19 +615,21 @@ Phase 5 non-goals:
 
 ## Next patch
 
-Phase 5C — convert runtime raise sites
+Phase 5D — runtime diagnostic context enrichment
 
 Scope:
-- convert runtime raise sites to attach structured runtime diagnostics
-- preserve existing runtime messages while adding codes and carrier data
-- keep runtime stack and execution model unchanged
+- enrich `RuntimeDiagnostic` payloads
+- attach operation context where naturally available
+- attach source spans where naturally available
+- preserve existing messages
+- preserve runtime behavior
 
 Non-goals:
-- no Nicole stack trace yet
-- no frame history yet
-- no locals snapshots yet
-- no interpreter API yet
-- no host method binding yet
+- no stack traces yet
+- no frame snapshots
+- no locals snapshots
+- no `NicoleInterpreter`
+- no renderer
 
 ## Phase 1A detailed sequence
 
@@ -880,6 +887,21 @@ Notes:
 - runtime stack model remains unchanged
 - runtime frame model remains deferred to Phase 6
 
+## Phase 5C post-audit notes
+
+- Phase 5C implementation passed post-audit
+- Result: `PASS_READY_FOR_TRACKING`
+- Runtime behavior unchanged
+- Tail-call behavior unchanged
+- No synthetic spans introduced
+- No opaque payload exposure detected
+- Existing `RuntimeError` compatibility preserved
+- Residual test coverage gap only:
+- direct diagnostic assertions still missing for `RUNTIME_INVALID_COMPARISON`
+- direct diagnostic assertions still missing for `RUNTIME_INVALID_QUOTATION`
+- direct diagnostic assertions still missing for `RUNTIME_UNSUPPORTED_OPERATION`
+- direct diagnostic assertions still missing for representative `RUNTIME_RUNTIME_TYPE_ERROR` paths
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -956,3 +978,4 @@ Before Phase 8:
 | 2026-05-24 | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4E implemented and committed: each source file is parsed independently, merged `ProgramNode` analysis is enabled without source concatenation, merged declarations preserve normalized order, `ProgramNode.words` is rebuilt, original declaration/node provenance is preserved, representative multi-file `ProgramNode.span` is used, `_analyze_program(...)` reuses the pipeline, `CheckedProgram.source_files` was added, `NicoleCompiler` retains physical source files, `analyze_program(...)` remains backward compatible with `source_files=()`, include declarations remain inert, duplicate module/name/export behavior remains unchanged, and `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` was removed | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 13 passed; `./.venv/bin/python -m pytest tests/test_pipeline.py -q`: 30 passed; `./.venv/bin/python -m pytest -q`: 821 passed | Commit `feat: merge compiler source programs`; residual risk: representative multi-file `ProgramNode.span` is not authoritative and declaration spans remain authoritative for diagnostics; Phase 5 runtime diagnostics is next |
 | 2026-05-24 | - | Phase 5A runtime audit accepted and architecture freeze recorded: runtime diagnostics remain structured-data only, `RuntimeError` stays public as a compatibility-wrapper carrier, `RUNTIME` phase/codes and span policy are frozen, and stack traces/frame history/locals snapshots remain out of scope for Phase 5 | - | Tracking-only freeze after audit result `RUNTIME_READY_FOR_DESIGN_FREEZE`; Phase 5B runtime diagnostic foundation is next |
 | 2026-05-24 | `10d186b146eb986b6abe5e7b76698fa72c089553` | Phase 5B implemented and committed: `RuntimeDiagnosticSeverity`, `RuntimeDiagnosticPhase`, `RuntimeDiagnostic`, and `runtime_diagnostic(...)` were added; `RuntimeError` remains public and string-compatible while now carrying `diagnostic`, `diagnostics`, and `message`; default runtime diagnostics use `ERROR`, `RUNTIME`, `RUNTIME_ERROR`, and `span=None` | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 201 passed; `./.venv/bin/python -m pytest -q`: 825 passed | Commit `feat: add runtime diagnostic foundation`; runtime execution, runtime raise-site behavior, host behavior, and tail-call behavior remain unchanged; no stack traces, frame objects, or locals snapshots were added; Phase 5C convert runtime raise sites is next |
+| 2026-05-24 | `39012f3bab7b73db9c39d00005ff0b4c0033f0f8` | Phase 5C implementation completed: runtime raise sites now attach structured diagnostics | `205 passed`; `829 passed` | Post-audit passed; residual coverage gaps deferred |
