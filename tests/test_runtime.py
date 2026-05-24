@@ -26,9 +26,12 @@ from nicole.runtime import (
     _execute_call,
     _execute_identifier,
     _execute_operator,
+    render_runtime_diagnostic,
+    render_runtime_error,
     runtime_diagnostic,
     run_export,
 )
+from nicole.source import SourceFile, SourceLocation, SourceSpan
 
 
 def signature_from_source(source: str):
@@ -96,6 +99,124 @@ def test_runtime_diagnostic_helper_builds_expected_object() -> None:
     assert diagnostic.suggestion == "push before drop"
     assert diagnostic.notes == ("n1", "n2")
     assert diagnostic.cause is cause
+
+
+def test_render_runtime_diagnostic_minimal() -> None:
+    diagnostic = runtime_diagnostic(code="RUNTIME_X", message="hello")
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert rendered == "RuntimeError[RUNTIME_X]\nhello"
+    assert "at " not in rendered
+    assert "Operation:" not in rendered
+    assert "Notes:" not in rendered
+    assert "Cause:" not in rendered
+
+
+def test_render_runtime_diagnostic_with_span() -> None:
+    span = SourceSpan(
+        source=SourceFile("file.nic", text=""),
+        start=SourceLocation(line=42, column=17, offset=0),
+        end=SourceLocation(line=42, column=18, offset=1),
+    )
+    diagnostic = runtime_diagnostic(code="RUNTIME_SPAN", message="with span", span=span)
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "RuntimeError[RUNTIME_SPAN]" in rendered
+    assert "with span" in rendered
+    assert "at file.nic:42:17" in rendered
+    assert "^" not in rendered
+
+
+def test_render_runtime_diagnostic_with_operation() -> None:
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_OP",
+        message="op message",
+        operation="divide",
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "Operation: divide" in rendered
+
+
+def test_render_runtime_diagnostic_with_notes() -> None:
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_NOTES",
+        message="note message",
+        notes=("a", "b"),
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "Notes:" in rendered
+    assert "- a" in rendered
+    assert "- b" in rendered
+
+
+def test_render_runtime_diagnostic_with_cause() -> None:
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_CAUSE",
+        message="cause message",
+        cause=ValueError("boom"),
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "Cause: ValueError: boom" in rendered
+
+
+def test_render_runtime_error_uses_attached_diagnostic_and_preserves_str() -> None:
+    diagnostic = runtime_diagnostic(code="RUNTIME_ERR", message="diag message")
+    error = RuntimeError("legacy message", diagnostic=diagnostic)
+
+    rendered = render_runtime_error(error)
+
+    assert rendered.startswith("RuntimeError[RUNTIME_ERR]")
+    assert "diag message" in rendered
+    assert str(error) == "legacy message"
+
+
+def test_render_runtime_diagnostic_is_deterministic() -> None:
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_DETERMINISTIC",
+        message="deterministic",
+        operation="divide",
+        notes=("n1",),
+    )
+
+    first = render_runtime_diagnostic(diagnostic)
+    second = render_runtime_diagnostic(diagnostic)
+
+    assert first == second
+
+
+def test_render_runtime_diagnostic_does_not_mutate() -> None:
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_IMMUTABLE",
+        message="immutable",
+        notes=("n1", "n2"),
+    )
+
+    before = diagnostic
+    _ = render_runtime_diagnostic(diagnostic)
+
+    assert diagnostic == before
+
+
+def test_render_runtime_diagnostic_does_not_leak_opaque_payload() -> None:
+    secret_payload = "secret-render-payload"
+    _opaque = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=secret_payload)
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_OPAQUE",
+        message="opaque failure",
+        notes=("safe note",),
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert secret_payload not in rendered
 
 
 def test_runtime_missing_export_error_has_structured_diagnostic() -> None:

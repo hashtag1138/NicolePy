@@ -44,6 +44,8 @@ __all__ = [
     "RuntimeOpaqueValue",
     "RuntimeQuote",
     "runtime_diagnostic",
+    "render_runtime_diagnostic",
+    "render_runtime_error",
     "run_export",
 ]
 
@@ -128,6 +130,29 @@ class RuntimeError(Exception):
 
     def __str__(self) -> str:
         return self.message
+
+
+def render_runtime_diagnostic(diagnostic: RuntimeDiagnostic) -> str:
+    lines = [f"RuntimeError[{diagnostic.code}]", diagnostic.message]
+    if diagnostic.span is not None:
+        lines.append(
+            f"at {diagnostic.span.source.path}:{diagnostic.span.line}:{diagnostic.span.column}"
+        )
+    if diagnostic.operation is not None:
+        lines.append(f"Operation: {diagnostic.operation}")
+    if diagnostic.notes:
+        lines.append("Notes:")
+        for note in diagnostic.notes:
+            lines.append(f"- {note}")
+    if diagnostic.cause is not None:
+        lines.append(
+            f"Cause: {diagnostic.cause.__class__.__name__}: {diagnostic.cause}"
+        )
+    return "\n".join(lines)
+
+
+def render_runtime_error(error: RuntimeError) -> str:
+    return render_runtime_diagnostic(error.diagnostic)
 
 
 def _runtime_error(
