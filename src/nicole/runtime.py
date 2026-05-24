@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from enum import Enum
 from types import MappingProxyType
 from typing import Any
 
@@ -28,8 +29,12 @@ from .ast_nodes import (
 )
 from .pipeline import CheckedProgram
 from .symbols import SymbolSource, WordSymbol
+from .tokens import SourceSpan
 
 __all__ = [
+    "RuntimeDiagnosticSeverity",
+    "RuntimeDiagnosticPhase",
+    "RuntimeDiagnostic",
     "RuntimeError",
     "RuntimeStack",
     "RuntimeHostBindings",
@@ -38,6 +43,7 @@ __all__ = [
     "Err",
     "RuntimeOpaqueValue",
     "RuntimeQuote",
+    "runtime_diagnostic",
     "run_export",
 ]
 
@@ -52,9 +58,73 @@ class _UnitValue:
 UNIT = _UnitValue()
 
 
-@dataclass(slots=True)
-class RuntimeError(Exception):
+class RuntimeDiagnosticSeverity(Enum):
+    ERROR = "error"
+
+
+class RuntimeDiagnosticPhase(Enum):
+    RUNTIME = "runtime"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeDiagnostic:
+    severity: RuntimeDiagnosticSeverity
+    phase: RuntimeDiagnosticPhase
+    code: str
     message: str
+    span: SourceSpan | None = None
+    operation: str | None = None
+    suggestion: str | None = None
+    notes: tuple[str, ...] = ()
+    cause: BaseException | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "notes", tuple(self.notes))
+
+
+def runtime_diagnostic(
+    code: str,
+    message: str,
+    *,
+    span: SourceSpan | None = None,
+    operation: str | None = None,
+    suggestion: str | None = None,
+    notes: Iterable[str] = (),
+    cause: BaseException | None = None,
+) -> RuntimeDiagnostic:
+    return RuntimeDiagnostic(
+        severity=RuntimeDiagnosticSeverity.ERROR,
+        phase=RuntimeDiagnosticPhase.RUNTIME,
+        code=code,
+        message=message,
+        span=span,
+        operation=operation,
+        suggestion=suggestion,
+        notes=tuple(notes),
+        cause=cause,
+    )
+
+
+class RuntimeError(Exception):
+    __slots__ = ("message", "diagnostics")
+
+    message: str
+    diagnostics: tuple[RuntimeDiagnostic, ...]
+
+    def __init__(self, message: str, *, diagnostic: RuntimeDiagnostic | None = None) -> None:
+        self.message = message
+        effective_diagnostic = diagnostic
+        if effective_diagnostic is None:
+            effective_diagnostic = runtime_diagnostic(
+                code="RUNTIME_ERROR",
+                message=message,
+            )
+        self.diagnostics = (effective_diagnostic,)
+        super().__init__(message)
+
+    @property
+    def diagnostic(self) -> RuntimeDiagnostic:
+        return self.diagnostics[0]
 
     def __str__(self) -> str:
         return self.message

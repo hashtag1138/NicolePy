@@ -14,6 +14,9 @@ from nicole.resolver import ResolutionError
 from nicole.runtime import (
     Err,
     Ok,
+    RuntimeDiagnostic,
+    RuntimeDiagnosticPhase,
+    RuntimeDiagnosticSeverity,
     RuntimeError,
     RuntimeHostBindings,
     RuntimeOpaqueValue,
@@ -23,6 +26,7 @@ from nicole.runtime import (
     _execute_call,
     _execute_identifier,
     _execute_operator,
+    runtime_diagnostic,
     run_export,
 )
 
@@ -36,6 +40,62 @@ def host_contract_with_opaque(*type_names: str, words: list[HostWord] | None = N
         [] if words is None else words,
         opaque_types=[HostOpaqueType(name=type_name) for type_name in type_names],
     )
+
+
+def test_runtime_error_string_compatibility_is_preserved() -> None:
+    error = RuntimeError("x")
+
+    assert str(error) == "x"
+    assert error.message == "x"
+
+
+def test_runtime_error_default_diagnostic_is_attached() -> None:
+    error = RuntimeError("x")
+
+    assert len(error.diagnostics) == 1
+    diagnostic = error.diagnostic
+    assert diagnostic.severity is RuntimeDiagnosticSeverity.ERROR
+    assert diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert diagnostic.code == "RUNTIME_ERROR"
+    assert diagnostic.message == "x"
+    assert diagnostic.span is None
+
+
+def test_runtime_error_accepts_explicit_diagnostic() -> None:
+    diagnostic = RuntimeDiagnostic(
+        severity=RuntimeDiagnosticSeverity.ERROR,
+        phase=RuntimeDiagnosticPhase.RUNTIME,
+        code="RUNTIME_EXPLICIT",
+        message="diagnostic message",
+    )
+    error = RuntimeError("legacy message", diagnostic=diagnostic)
+
+    assert error.diagnostic is diagnostic
+    assert error.diagnostics == (diagnostic,)
+    assert str(error) == "legacy message"
+
+
+def test_runtime_diagnostic_helper_builds_expected_object() -> None:
+    cause = ValueError("boom")
+
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_STACK_UNDERFLOW",
+        message="runtime stack underflow",
+        operation="drop",
+        suggestion="push before drop",
+        notes=["n1", "n2"],
+        cause=cause,
+    )
+
+    assert diagnostic.severity is RuntimeDiagnosticSeverity.ERROR
+    assert diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert diagnostic.code == "RUNTIME_STACK_UNDERFLOW"
+    assert diagnostic.message == "runtime stack underflow"
+    assert diagnostic.span is None
+    assert diagnostic.operation == "drop"
+    assert diagnostic.suggestion == "push before drop"
+    assert diagnostic.notes == ("n1", "n2")
+    assert diagnostic.cause is cause
 
 
 def test_runtime_valid_host_call() -> None:
