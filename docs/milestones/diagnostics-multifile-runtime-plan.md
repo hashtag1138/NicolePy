@@ -317,7 +317,7 @@ Possible phase states:
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
 | 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
-| 4. Multi-file compiler | in_progress | `da0cc8523f808a8fac824c385b1361d710f6c2b8` | Phase 4D completed: compiler input normalization and recursive directory discovery added ahead of later semantic merge work | `10 passed`; `816 passed` | Phase 4A freeze integrated; Phase 4E AST merge and full pipeline reuse is next |
+| 4. Multi-file compiler | completed | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4 completed: source-aware lexing, explicit file compile, recursive input normalization, and merged multi-file AST analysis are implemented | `13 passed`; `30 passed`; `821 passed` | Phase 4A and Phase 4E freezes integrated; Phase 5 runtime diagnostics is next |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
 | 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
@@ -337,8 +337,11 @@ Possible phase states:
 - Remaining export-related `SymbolError` and `StandardSymbolError` legacy-only assumptions are now covered with explicit `SYMBOLS` codes and focused regression tests.
 - Checker-internal `HostABIError` validation paths remain remapped to public `CheckerError` on checker entry points; user-visible checker behavior is unchanged.
 - Renderer API decision for Phase 3 remains module-level import (`nicole.diagnostic_renderer`) with no package-level re-export.
-- Multi-file compiler work is in progress for Phase 4.
+- Multi-file compiler work is completed for Phase 4.
 - `NicoleCompiler` now supports explicit files, explicit directories, and mixed iterables through normalized source discovery.
+- Multi-file compilation now parses each source file independently, merges `ProgramNode` declarations in normalized order, rebuilds `ProgramNode.words`, and reuses the static analysis pipeline through `_analyze_program(...)`.
+- `CheckedProgram.source_files` now exists as a backward-compatible field; `NicoleCompiler` fills physical source files while `analyze_program(...)` remains compatible with `source_files=()`.
+- `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` has been removed because merged AST reuse now implements multi-file compilation.
 - No real `NicoleInterpreter` API exists yet.
 - Runtime diagnostics remain pending for Phase 5; runtime errors still lack structured span/operation/stack trace diagnostics.
 - Documentation target references for the diagnostic phases are now aligned through Phase 3F planning.
@@ -513,17 +516,15 @@ Phase 4E residual risks:
 
 ## Next patch
 
-Phase 4E — AST merge and full pipeline reuse
+Phase 5 — Runtime diagnostics
 
 Scope:
-- merge normalized multi-file programs without concatenating source text
-- rebuild merged `ProgramNode.words`
-- reuse existing pipeline stages through `_analyze_program(...)`
-- keep parser, runtime, and language semantics unchanged
+- add structured runtime diagnostic payloads
+- preserve compiler/runtime separation after completed Phase 4 multi-file compiler work
+- define authoritative runtime diagnostic provenance and operation reporting
 
 Non-goals:
-- no include semantics yet
-- no runtime diagnostics yet
+- no Nicole stack trace yet
 - no interpreter API yet
 - no host method binding yet
 
@@ -728,6 +729,25 @@ Known deferred work:
 - Cross-file duplicate module, duplicate visible-name, and duplicate export behavior should continue using current diagnostics.
 - Phase 4E implementation is next.
 
+## Phase 4E post-audit notes
+
+- Phase 4E implementation passed accepted validation and is complete.
+- No fixes are required before tracking update.
+- Each source file is now parsed independently before merge.
+- Multi-file compilation now constructs one merged `ProgramNode` without source concatenation.
+- Merged declarations preserve normalized file order.
+- `ProgramNode.words` is rebuilt from merged module declarations.
+- Original declaration and nested node provenance is preserved.
+- Multi-file `ProgramNode.span` remains representative only; declaration spans remain authoritative for diagnostics.
+- `_analyze_program(program, *, host_contract=None)` was introduced to reuse the existing pipeline.
+- `CheckedProgram.source_files` was added as backward-compatible `tuple[SourceFile, ...] = ()`.
+- `NicoleCompiler` retains physical source files on compiled programs.
+- `analyze_program(...)` remains backward compatible and keeps `source_files=()`.
+- Include declarations remain inert.
+- Duplicate module, duplicate visible-name, and duplicate export behavior remains unchanged.
+- `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` was removed because merged AST reuse now supports multi-file compilation.
+- Phase 5 runtime diagnostics work is next.
+
 ## Runtime trace constraint
 
 Future Nicole stack traces must not break existing self-tail-call behavior.
@@ -801,3 +821,4 @@ Before Phase 8:
 | 2026-05-24 | `30cfeab08d8743f41d0f844bb4c56853f9696788` | Phase 4C implemented and committed: explicit file compiler skeleton added with `src/nicole/compiler.py`, `NicoleCompiler`, `NicoleCompiler.compile(input_path)`, `NicoleCompiler.compile_file(file_path)`, `compile_path(input_path, *, host_contract=None)`, physical `SourceFile` compilation flow, and structured `PIPELINE_*` input diagnostics | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 5 passed; `./.venv/bin/python -m pytest -q`: 811 passed | Commit `feat: add explicit file compiler skeleton`; Phase 4D recursive directory loader and input normalization is next |
 | 2026-05-24 | `da0cc8523f808a8fac824c385b1361d710f6c2b8` | Phase 4D implemented and committed: compiler input normalization added with `NicoleCompiler.compile(...)` accepting `str | Path | Iterable[str | Path]`, recursive `*.nic` discovery, deterministic resolved-path ordering, `Path.resolve()` deduplication, blocked symlink-directory traversal, accepted symlinked `.nic` files by design, structured `PIPELINE_*` input diagnostics, and temporary `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` gate for multiple discovered files | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 10 passed; `./.venv/bin/python -m pytest -q`: 816 passed | Commit `feat: add compiler input normalization`; post-commit audit `PASS_READY_FOR_TRACKING`; residual risk: symlinked `.nic` file acceptance is not yet directly tested; Phase 4E AST merge and full pipeline reuse is next |
 | 2026-05-24 | - | Phase 4E design freeze corrected after repository audit: merge by declarations in normalized file order, rebuild `ProgramNode.words`, keep representative multi-file `ProgramNode.span`, add `_analyze_program(...)`, keep `analyze_program(...)` compatibility with `source_files=()`, and preserve current duplicate/import/export behavior | - | Tracking-only design correction after audit result `DESIGN_NEEDS_CORRECTION_BEFORE_IMPLEMENTATION`; Phase 4E implementation remains next |
+| 2026-05-24 | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4E implemented and committed: each source file is parsed independently, merged `ProgramNode` analysis is enabled without source concatenation, merged declarations preserve normalized order, `ProgramNode.words` is rebuilt, original declaration/node provenance is preserved, representative multi-file `ProgramNode.span` is used, `_analyze_program(...)` reuses the pipeline, `CheckedProgram.source_files` was added, `NicoleCompiler` retains physical source files, `analyze_program(...)` remains backward compatible with `source_files=()`, include declarations remain inert, duplicate module/name/export behavior remains unchanged, and `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` was removed | `./.venv/bin/python -m pytest tests/test_compiler.py -q`: 13 passed; `./.venv/bin/python -m pytest tests/test_pipeline.py -q`: 30 passed; `./.venv/bin/python -m pytest -q`: 821 passed | Commit `feat: merge compiler source programs`; residual risk: representative multi-file `ProgramNode.span` is not authoritative and declaration spans remain authoritative for diagnostics; Phase 5 runtime diagnostics is next |
