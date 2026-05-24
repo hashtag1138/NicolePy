@@ -316,7 +316,7 @@ Possible phase states:
 | 0. Audit préalable | completed | `9f7e3279b6c9a703a051dad345643b38b5b4b08c` | Initial implementation audit completed and baseline captured | 699 passed | Audit-only step |
 | 1. Source model | completed | `13e81bf865c1a9c86f32e47c350b1154fd6061aa` | Phase 1A completed: source primitives, compatible SourceSpan, lexer range spans | 707 passed | Committed and post-commit validated |
 | 2. Tokens + AST spans | completed | `ca63c59fb5866e9da567f64b5f8824be50550c1f` | Phase 2 completed: AST spans and symbol provenance are range/source-aware | 750 passed | Completion audit passed; ready for Phase 3 diagnostics planning |
-| 3. Structured compilation diagnostics | in_progress | `51a3f1aa88e80ee9df9d4de1c8a1a9e390bbbe50` | Phase 3B-3F committed; Phase 3G cleanup prepared: structured compile diagnostics and renderer completed with legacy assumption cleanup | 802 passed | Phase 3G implementation prepared; commit and tracking closure pending |
+| 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
 | 4. Multi-file compiler | pending | - | Add explicit compiler/loader API for files and directories | - | Keep include semantics deferred |
 | 5. Runtime diagnostics | pending | - | Add structured runtime diagnostic payloads | - | Depends on phase 3 and 4 |
 | 6. Nicole stack trace | pending | - | Add Nicole runtime frame stack trace model | - | Depends on phase 5 |
@@ -332,14 +332,15 @@ Possible phase states:
 - Builtin symbols and builtin helper nodes use `<builtin>` provenance.
 - Host provenance remains resolver/contract-owned and deferred.
 - Lexer and parser now attach structured diagnostics (phase/code/span) while preserving legacy exception compatibility.
-- Symbol collection, resolver, checker, and Host ABI now attach structured diagnostics; runtime diagnostics are still pending follow-up phases.
-- Compile-time diagnostics now include structured payloads and renderer support while preserving legacy exception string compatibility.
+- Symbol collection, resolver, checker, and Host ABI now attach structured diagnostics; compile-time structured diagnostics are complete through Phase 3.
+- Compile-time diagnostics now include structured payloads and renderer support while preserving legacy exception string compatibility; renderer support is complete.
 - Remaining export-related `SymbolError` and `StandardSymbolError` legacy-only assumptions are now covered with explicit `SYMBOLS` codes and focused regression tests.
 - Checker-internal `HostABIError` validation paths remain remapped to public `CheckerError` on checker entry points; user-visible checker behavior is unchanged.
 - Renderer API decision for Phase 3 remains module-level import (`nicole.diagnostic_renderer`) with no package-level re-export.
+- Multi-file compiler work remains pending for Phase 4.
 - No `NicoleCompiler` exists yet.
 - No real `NicoleInterpreter` API exists yet.
-- Runtime errors still lack structured span/operation/stack trace diagnostics.
+- Runtime diagnostics remain pending for Phase 5; runtime errors still lack structured span/operation/stack trace diagnostics.
 - Documentation target references for the diagnostic phases are now aligned through Phase 3F planning.
 
 ## Compatibility constraints already observed
@@ -361,18 +362,21 @@ Possible phase states:
 
 ## Next patch
 
-Phase 4 — multi-file compiler planning/implementation, only after Phase 3G is committed and tracked.
+Phase 4 — Multi-file compiler
 
 Scope:
-- freeze and implement compiler-side multi-file loading/merge policy
-- keep runtime diagnostics and interpreter API work out of scope
+- freeze multi-file compiler decisions before implementation
+- add explicit compiler/loader API for files and directories
+- load `.nic` files from explicit file and directory inputs
+- preserve current `analyze_program(...)` compatibility
+- keep include semantics deferred unless explicitly approved
 
 Non-goals:
 - no runtime diagnostics yet
+- no Nicole stack trace yet
 - no interpreter API yet
+- no user class API yet
 - no host method binding yet
-- no diagnostic aggregation
-- no changes to `SourceSpan`/source primitives
 
 ## Phase 1A detailed sequence
 
@@ -584,4 +588,5 @@ Before Phase 8:
 | 2026-05-23 | `8c78bf445a5f1bd86ec0546b67da68906912e779` | Phase 3D implemented and committed: SymbolError, ResolutionError and CheckerError now attach structured diagnostics with stable codes and source-aware spans while preserving legacy compatibility | 781 passed | Commit `feat: attach static analysis diagnostics`; Phase 3 remains in progress |
 | 2026-05-24 | `ee527a3ded498517118feec06367f74d9ee964c6` | Phase 3E implemented and committed: HostABIError paths now attach structured diagnostics with explicit ABI codes and source-aware spans while preserving legacy compatibility | 785 passed | Commit `feat: attach host abi diagnostics`; Phase 3 remains in progress |
 | 2026-05-23 | `51a3f1aa88e80ee9df9d4de1c8a1a9e390bbbe50` | Phase 3F implemented and committed: diagnostic renderer with excerpts, caret formatting, clipping and compatibility-preserving presentation support | 799 passed | Commit `feat: add diagnostic renderer`; Phase 3 remains in progress and Phase 3G is next |
-| 2026-05-24 | pending | Phase 3G implementation prepared: export diagnostics use explicit SYMBOLS codes, StandardSymbolError default code is explicit, checker HostABI remap behavior is documented by tests, and tracking cleanup is aligned | 802 passed | Commit pending; Phase 3 remains in progress until Phase 3G commit and tracking closure |
+| 2026-05-24 | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3G implemented and committed: remaining legacy compile-time diagnostic assumptions cleaned up and Phase 3 structured diagnostics finalized | 802 passed | Commit `chore: finalize phase3 diagnostic cleanup`; Phase 3 ready for closure tracking |
+| 2026-05-24 | - | Phase 3 closed after tracking update; Phase 4 is next | 802 passed | Tracking-only closure after Phase 3G commit |
