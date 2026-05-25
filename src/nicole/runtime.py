@@ -108,6 +108,14 @@ class RuntimeStackTrace:
         return iter(self._frames)
 
 
+def _next_trace(
+    current_trace: RuntimeStackTrace | None,
+    frame: RuntimeFrame,
+) -> RuntimeStackTrace:
+    base_trace = RuntimeStackTrace() if current_trace is None else current_trace
+    return base_trace.append(frame)
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeDiagnostic:
     severity: RuntimeDiagnosticSeverity
@@ -375,10 +383,19 @@ def _invoke_word(
     args: tuple[object, ...],
     *,
     current_word_name: str | None = None,
+    current_trace: RuntimeStackTrace | None = None,
 ) -> object:
     expected_inputs = word.signature.inputs
     outputs = word.signature.outputs
     frame_word_name = current_word_name if current_word_name is not None else word.name
+    word_trace = _next_trace(
+        current_trace,
+        RuntimeFrame(
+            call_kind=RuntimeFrameKind.WORD,
+            name=frame_word_name,
+            span=word.span,
+        ),
+    )
     current_args = args
 
     while True:
@@ -405,6 +422,7 @@ def _invoke_word(
                 word_index,
                 runtime_bindings,
                 current_word_name=frame_word_name,
+                current_trace=word_trace,
             )
             result_values = stack.values()
         except _SelfTailCallSignal as signal:
@@ -441,6 +459,7 @@ def _execute_block(
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
     current_word_name: str | None = None,
+    current_trace: RuntimeStackTrace | None = None,
 ) -> None:
     for item in block.items:
         if isinstance(item, LiteralNode):
@@ -479,10 +498,11 @@ def _execute_block(
                     locals_env,
                     stack,
                     word_index,
-                    runtime_bindings,
-                    current_word_name=current_word_name,
-                    span=item.span,
-                )
+                runtime_bindings,
+                current_word_name=current_word_name,
+                current_trace=current_trace,
+                span=item.span,
+            )
                 continue
             if item.operator == "?":
                 result_value = stack.pop()
@@ -508,6 +528,7 @@ def _execute_block(
                 word_index,
                 runtime_bindings,
                 current_word_name=current_word_name,
+                current_trace=current_trace,
             )
             continue
         if isinstance(item, IfNode):
@@ -518,6 +539,7 @@ def _execute_block(
                 word_index,
                 runtime_bindings,
                 current_word_name=current_word_name,
+                current_trace=current_trace,
             )
             continue
         if isinstance(item, CaseNode):
@@ -528,6 +550,7 @@ def _execute_block(
                 word_index,
                 runtime_bindings,
                 current_word_name=current_word_name,
+                current_trace=current_trace,
             )
             continue
         message = f"runtime feature not supported: {type(item).__name__}"
@@ -546,6 +569,7 @@ def _execute_identifier(
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
     current_word_name: str | None = None,
+    current_trace: RuntimeStackTrace | None = None,
 ) -> None:
     qualified_name = node.resolution.qualified_name
     if qualified_name is not None and qualified_name.startswith("local:"):
@@ -554,7 +578,7 @@ def _execute_identifier(
         return
 
     if node.resolution.owner_scope == "host":
-        _execute_host_call(node, stack, runtime_bindings)
+        _execute_host_call(node, stack, runtime_bindings, current_trace=current_trace)
         return
 
     if node.name == "map.get":
@@ -712,6 +736,7 @@ def _execute_identifier(
                 (item,),
                 word_index,
                 runtime_bindings,
+                current_trace=current_trace,
             )
             if len(outputs) != 1:
                 message = (
@@ -739,6 +764,7 @@ def _execute_identifier(
                 (item,),
                 word_index,
                 runtime_bindings,
+                current_trace=current_trace,
             )
             if len(outputs) != 1:
                 message = (
@@ -769,6 +795,7 @@ def _execute_identifier(
                 (accumulator, item),
                 word_index,
                 runtime_bindings,
+                current_trace=current_trace,
             )
             if len(outputs) != 1:
                 message = (
@@ -803,6 +830,7 @@ def _execute_identifier(
                 (accumulator, item),
                 word_index,
                 runtime_bindings,
+                current_trace=current_trace,
             )
             if len(outputs) != 1:
                 message = (
@@ -866,6 +894,7 @@ def _execute_identifier(
         runtime_bindings,
         next_args,
         current_word_name=runtime_name,
+        current_trace=current_trace,
     )
 
     if len(word.signature.outputs) == 0:
@@ -896,7 +925,22 @@ def _runtime_symbol_name(symbol: WordSymbol) -> str:
     return f"@{symbol.module}.{symbol.qualified_name}"
 
 
-def _execute_host_call(node: IdentifierNode, stack: RuntimeStack, runtime_bindings: RuntimeHostBindings) -> None:
+def _execute_host_call(
+    node: IdentifierNode,
+    stack: RuntimeStack,
+    runtime_bindings: RuntimeHostBindings,
+    *,
+    current_trace: RuntimeStackTrace | None = None,
+) -> None:
+    host_name = node.name[5:] if node.name.startswith("host.") else node.name
+    _next_trace(
+        current_trace,
+        RuntimeFrame(
+            call_kind=RuntimeFrameKind.HOST,
+            name=f"host:{host_name}",
+            span=node.span,
+        ),
+    )
     signature = node.resolution.signature_reference
     if signature is None:
         message = f"missing runtime signature for host word: {node.name}"
@@ -975,6 +1019,7 @@ def _execute_if(
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
     current_word_name: str | None = None,
+    current_trace: RuntimeStackTrace | None = None,
 ) -> None:
     condition = stack.pop()
     _ensure_matches_type(condition, "Bool", context="if condition")
@@ -986,6 +1031,7 @@ def _execute_if(
             word_index,
             runtime_bindings,
             current_word_name=current_word_name,
+            current_trace=current_trace,
         )
         return
     _execute_block(
@@ -995,6 +1041,7 @@ def _execute_if(
         word_index,
         runtime_bindings,
         current_word_name=current_word_name,
+        current_trace=current_trace,
     )
 
 
@@ -1005,6 +1052,7 @@ def _execute_case(
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
     current_word_name: str | None = None,
+    current_trace: RuntimeStackTrace | None = None,
 ) -> None:
     scrutinee = stack.pop()
     for branch in node.branches:
@@ -1024,6 +1072,7 @@ def _execute_case(
                     word_index,
                     runtime_bindings,
                     current_word_name=current_word_name,
+                    current_trace=current_trace,
                 )
             except _FramePropagationSignal as signal:
                 raise _runtime_error(
@@ -1058,6 +1107,7 @@ def _execute_case(
             word_index,
             runtime_bindings,
             current_word_name=current_word_name,
+            current_trace=current_trace,
         )
         return
     raise _runtime_error(
@@ -1083,6 +1133,7 @@ def _execute_call(
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
     current_word_name: str | None = None,
+    current_trace: RuntimeStackTrace | None = None,
     span: SourceSpan | None = None,
 ) -> None:
     quote_value = stack.pop()
@@ -1103,6 +1154,7 @@ def _execute_call(
         tuple(input_values),
         word_index,
         runtime_bindings,
+        current_trace=current_trace,
     )
     for value in result_values:
         stack.push(value)
@@ -1112,8 +1164,18 @@ def _invoke_runtime_quote_value(
     input_values: tuple[object, ...],
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
+    *,
+    current_trace: RuntimeStackTrace | None = None,
 ) -> tuple[object, ...]:
     quote = quote_value.node
+    quote_trace = _next_trace(
+        current_trace,
+        RuntimeFrame(
+            call_kind=RuntimeFrameKind.QUOTATION,
+            name="quotation",
+            span=quote.span,
+        ),
+    )
     if len(input_values) != len(quote.inputs):
         message = (
             "wrong runtime signature for quotation: "
@@ -1134,7 +1196,14 @@ def _invoke_runtime_quote_value(
 
     quote_stack = RuntimeStack()
     try:
-        _execute_block(quote.body, quote_locals, quote_stack, word_index, runtime_bindings)
+        _execute_block(
+            quote.body,
+            quote_locals,
+            quote_stack,
+            word_index,
+            runtime_bindings,
+            current_trace=quote_trace,
+        )
         result_values = quote_stack.values()
     except _FramePropagationSignal as signal:
         result_values = (Err(signal.error),)
@@ -1161,6 +1230,7 @@ def _execute_list_literal(
     word_index: dict[str, WordDefNode],
     runtime_bindings: RuntimeHostBindings,
     current_word_name: str | None = None,
+    current_trace: RuntimeStackTrace | None = None,
 ) -> None:
     values: list[object] = []
     for element in node.elements:
@@ -1172,6 +1242,7 @@ def _execute_list_literal(
             word_index,
             runtime_bindings,
             current_word_name=current_word_name,
+            current_trace=current_trace,
         )
         element_values = element_stack.values()
         if len(element_values) != 1:

@@ -12,6 +12,7 @@ from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.pipeline import analyze_program
 from nicole.resolver import ResolutionError
+import nicole.runtime as runtime_module
 from nicole.runtime import (
     Err,
     Ok,
@@ -122,6 +123,103 @@ def test_runtime_stack_trace_iteration_and_len() -> None:
 
     assert len(trace) == 2
     assert list(trace) == [first, second]
+
+
+def test_runtime_trace_lifecycle_creates_word_host_and_quotation_frames_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    trace_events: list[tuple[RuntimeStackTrace | None, RuntimeFrame, RuntimeStackTrace]] = []
+    original_next_trace = runtime_module._next_trace
+
+    def recording_next_trace(
+        current_trace: RuntimeStackTrace | None,
+        frame: RuntimeFrame,
+    ) -> RuntimeStackTrace:
+        new_trace = original_next_trace(current_trace, frame)
+        trace_events.append((current_trace, frame, new_trace))
+        return new_trace
+
+    monkeypatch.setattr(runtime_module, "_next_trace", recording_next_trace)
+
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
+    host_contract = host_contract_from_words([HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)])
+    checked = analyze_program(
+        """module @app
+  : run { -- n:Int }
+    "x"
+    :[ | msg:String -- out:Int |
+      msg host.log
+      1
+    ;]
+    call
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract,
+    )
+
+    seen: list[str] = []
+    result = run_export(checked, "@app.run", RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}))
+
+    assert seen == ["x"]
+    assert result == 1
+
+    frame_names = [frame.name for _, frame, _ in trace_events]
+    frame_kinds = [frame.call_kind for _, frame, _ in trace_events]
+    assert frame_names[:3] == ["@app.run", "quotation", "host:log"]
+    assert frame_kinds[:3] == [
+        RuntimeFrameKind.WORD,
+        RuntimeFrameKind.QUOTATION,
+        RuntimeFrameKind.HOST,
+    ]
+
+    # each lifecycle step must return a new immutable trace object
+    for previous, frame, updated in trace_events:
+        if previous is not None:
+            assert previous is not updated
+            assert len(updated) == len(previous) + 1
+            assert previous.frames == updated.frames[:-1]
+        assert updated.frames[-1] == frame
+
+
+def test_runtime_trace_word_frames_remain_compact_for_self_tail_recursion(monkeypatch: pytest.MonkeyPatch) -> None:
+    word_frames: list[str] = []
+    original_next_trace = runtime_module._next_trace
+
+    def recording_next_trace(
+        current_trace: RuntimeStackTrace | None,
+        frame: RuntimeFrame,
+    ) -> RuntimeStackTrace:
+        if frame.call_kind is RuntimeFrameKind.WORD:
+            word_frames.append(frame.name)
+        return original_next_trace(current_trace, frame)
+
+    monkeypatch.setattr(runtime_module, "_next_trace", recording_next_trace)
+
+    checked = analyze_program(
+        """module @app
+  : countdown { n:Int -- out:Int }
+    n 0 = if
+      0
+    else
+      n 1 - countdown
+    end
+  ;
+  : run { n:Int -- out:Int }
+    n countdown
+  ;
+  export : run
+end-module
+"""
+    )
+
+    assert run_export(checked, "@app.run", RuntimeHostBindings({}), 2000) == 0
+
+    # direct self-tail recursion keeps lifecycle compact: one frame creation per word entry
+    assert word_frames.count("@app.run") == 1
+    assert word_frames.count("@app.countdown") == 1
 
 
 def test_runtime_error_default_diagnostic_is_attached() -> None:
