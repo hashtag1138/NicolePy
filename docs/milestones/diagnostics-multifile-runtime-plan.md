@@ -322,7 +322,7 @@ Possible phase states:
 | 6. Nicole stack trace | completed | `59166a394f9615a13dd2e0ddb7877ee2b3573708`; cleanup `2ebf6485e77cd84491dd526038fec1380505bede` | Phase 6 completed: runtime stack trace system is implemented and cleanup closeout is complete | `248 passed`; `872 passed` | Runtime stack trace system completed; immutable RuntimeStackTrace lifecycle implemented; RuntimeDiagnostic / RuntimeError trace attachment implemented; deterministic trace rendering implemented; RuntimeError.__str__ compatibility preserved; checker/runtime separation clarified and cleanup completed; renderer remains presentation-only; no semantic runtime changes introduced |
 | 7. Interpreter API | completed | `6cf78848f7cdac9d24487783093366a0df4978d1` | Phase 7A implemented: `NicoleInterpreter` introduced, `run_export(...)` compatibility preserved, interpreter remains minimal, and `CheckedProgram` remains passive | PASS_READY_FOR_TRACKING | No runtime redesign introduced; no VM/session semantics introduced; package-root export decision deferred to Phase 8 |
 | 8. User class API | completed | `484925f136bfab7145405deb133689987999482d` | Phase 8 closed: `NicoleApplication` validated as a thin orchestration facade with lazy compile, application-level `CheckedProgram` caching, and fresh `NicoleInterpreter` creation per run | `11 passed`; `888 passed`; `PASS_PHASE_READY_TO_CLOSE` | Layering preserved; runtime/checker separation preserved; no VM/session semantics, debugger/profiler/renderer semantics, host ABI inference, reflection-based behavior, or implicit entrypoint behavior introduced; package-root exports remain unchanged |
-| 9. Tested examples corpus | in_progress | - | Phase 9 freeze recorded: a small, automatically tested corpus of realistic Nicole programs executed end-to-end through `NicoleApplication` is approved | `READY_FOR_PHASE9_FREEZE` | Frozen examples: `birthday_cli`, `file_report`, `http_status_checker`, `time_tracker`; `csv_contact_import` deferred; Phase 9 implementation is next |
+| 9. Tested examples corpus | paused | - | Phase 9 is intentionally paused pending Nicole specification work around host dependency declarations, builtin dependency declarations, import ergonomics, host ABI visibility, and capability/module structure | `READY_FOR_PHASE9_FREEZE`; architecture pause recorded | Current spec and implementation still rely on external `HostContract` and external `RuntimeHostBindings`; no further Phase 9 example implementation should continue until specification work is completed |
 
 ## Audit findings summary
 
@@ -1758,6 +1758,35 @@ Before Phase 9:
 - no examples relying on unimplemented text/date semantics
 - audit result: `READY_FOR_PHASE9_FREEZE`
 
+Phase 9 pause:
+
+- Phase 9 is paused intentionally
+- this is NOT a runtime bug
+- this is NOT a failed implementation
+- this is a specification evolution decision
+- Phase 9 examples exposed a specification and architecture issue around:
+- host dependency declarations
+- builtin dependency declarations
+- import ergonomics
+- host ABI visibility
+- capability/module structure
+- current Nicole specification and NicolePy implementation currently rely on:
+- external `HostContract`
+- external `RuntimeHostBindings`
+- potential future direction under investigation:
+- `@host.*` modules
+- `@builtin.*` modules
+- explicit imports
+- module aliasing
+- source-visible dependency declarations
+- compile-time capability checking
+- no implementation changes should continue for Phase 9 examples until the specification work is completed
+- the current `birthday_cli` example successfully demonstrated:
+- `NicoleApplication` integration
+- deterministic end-to-end testing
+- business logic kept in Nicole
+- current architecture limitations
+
 ## Change log
 
 | Date | Commit | Change | Tests | Notes |
@@ -1803,3 +1832,4 @@ Before Phase 9:
 | 2026-05-25 | `484925f136bfab7145405deb133689987999482d` | Phase 8A audit acceptance recorded: `NicoleApplication` introduced; orchestration-only architecture preserved; constructor remains lazy; application-level `CheckedProgram` caching added; fresh `NicoleInterpreter` is created per run; runtime/checker separation preserved; no VM/session semantics or host ABI inference were introduced; package-root exports remain unchanged | `./.venv/bin/python -m pytest tests/test_application.py -q`: 11 passed; `./.venv/bin/python -m pytest -q`: 888 passed; `PASS_READY_FOR_TRACKING` | Tracking-only acceptance for implementation commit `484925f136bfab7145405deb133689987999482d`; residual non-blocking test-depth gaps: `checked` read-only behavior not explicitly asserted and `host_contract` forwarding not explicitly asserted |
 | 2026-05-25 | `6090f9b2f61ac26388909ccae57f6208a20ff463` | Phase 8 closed after final closeout audit: `NicoleApplication` validated as a thin orchestration facade; layering preserved as `NicoleCompiler -> CheckedProgram -> NicoleInterpreter -> NicoleApplication`; runtime/checker separation preserved; `CheckedProgram` remains passive; fresh `NicoleInterpreter` per run preserved; no VM/session semantics, debugger/profiler/renderer semantics, host ABI inference, reflection-based behavior, or implicit entrypoint behavior were introduced | `./.venv/bin/python -m pytest -q`: 888 passed; `PASS_PHASE_READY_TO_CLOSE` | Tracking-only closeout after final audit; residual non-blocking risks remain limited to missing explicit assertions for `checked` read-only behavior and `host_contract` forwarding |
 | 2026-05-25 | - | Phase 9 freeze recorded: tested end-to-end examples corpus approved as a small, realistic, automatically tested set of Nicole programs executed through `NicoleApplication` to expose ergonomics and semantic friction | `READY_FOR_PHASE9_FREEZE` | Tracking-only freeze; frozen examples: `birthday_cli`, `file_report`, `http_status_checker`, `time_tracker`; `csv_contact_import` deferred; host bindings remain environment-only with business logic forbidden in Python; examples stay in the normal pytest suite with deterministic local test controls and no shared framework; for Phase 9 examples/tests specifically, all Nicole source must live in `.nic` files and inline Nicole source strings in Python are forbidden for auditability |
+| 2026-05-25 | - | Phase 9 paused intentionally after `birthday_cli` exposed a specification-level architecture issue around host dependency declarations, builtin dependency declarations, import ergonomics, host ABI visibility, and capability/module structure | - | Tracking-only pause decision; current spec and implementation still rely on external `HostContract` and external `RuntimeHostBindings`; no further Phase 9 example implementation should continue until the specification work is completed; this is not a runtime bug and not a failed implementation |
