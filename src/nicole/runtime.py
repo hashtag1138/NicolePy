@@ -32,6 +32,9 @@ from .symbols import SymbolSource, WordSymbol
 from .tokens import SourceSpan
 
 __all__ = [
+    "RuntimeFrameKind",
+    "RuntimeFrame",
+    "RuntimeStackTrace",
     "RuntimeDiagnosticSeverity",
     "RuntimeDiagnosticPhase",
     "RuntimeDiagnostic",
@@ -66,6 +69,43 @@ class RuntimeDiagnosticSeverity(Enum):
 
 class RuntimeDiagnosticPhase(Enum):
     RUNTIME = "runtime"
+
+
+class RuntimeFrameKind(Enum):
+    WORD = "word"
+    QUOTATION = "quotation"
+    HOST = "host"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeFrame:
+    call_kind: RuntimeFrameKind
+    name: str
+    span: SourceSpan | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeStackTrace:
+    _frames: tuple[RuntimeFrame, ...] = ()
+
+    def __init__(self, frames: Iterable[RuntimeFrame] = ()) -> None:
+        object.__setattr__(self, "_frames", tuple(frames))
+
+    @property
+    def frames(self) -> tuple[RuntimeFrame, ...]:
+        return self._frames
+
+    def append(self, frame: RuntimeFrame) -> RuntimeStackTrace:
+        return RuntimeStackTrace((*self._frames, frame))
+
+    def extend(self, frames: Iterable[RuntimeFrame]) -> RuntimeStackTrace:
+        return RuntimeStackTrace((*self._frames, *tuple(frames)))
+
+    def __len__(self) -> int:
+        return len(self._frames)
+
+    def __iter__(self):
+        return iter(self._frames)
 
 
 @dataclass(frozen=True, slots=True)

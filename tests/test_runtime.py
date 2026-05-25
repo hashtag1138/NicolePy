@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -14,6 +15,8 @@ from nicole.resolver import ResolutionError
 from nicole.runtime import (
     Err,
     Ok,
+    RuntimeFrame,
+    RuntimeFrameKind,
     RuntimeDiagnostic,
     RuntimeDiagnosticPhase,
     RuntimeDiagnosticSeverity,
@@ -22,6 +25,7 @@ from nicole.runtime import (
     RuntimeOpaqueValue,
     RuntimeQuote,
     RuntimeStack,
+    RuntimeStackTrace,
     UNIT,
     _execute_call,
     _execute_identifier,
@@ -50,6 +54,74 @@ def test_runtime_error_string_compatibility_is_preserved() -> None:
 
     assert str(error) == "x"
     assert error.message == "x"
+
+
+def test_runtime_frame_creation_with_optional_span() -> None:
+    span = SourceSpan(
+        source=SourceFile("file.nic", text=""),
+        start=SourceLocation(line=1, column=1, offset=0),
+        end=SourceLocation(line=1, column=2, offset=1),
+    )
+    frame_with_span = RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run", span=span)
+    frame_without_span = RuntimeFrame(call_kind=RuntimeFrameKind.HOST, name="host.log")
+
+    assert frame_with_span.call_kind is RuntimeFrameKind.WORD
+    assert frame_with_span.name == "@app.run"
+    assert frame_with_span.span == span
+    assert frame_without_span.call_kind is RuntimeFrameKind.HOST
+    assert frame_without_span.name == "host.log"
+    assert frame_without_span.span is None
+
+
+def test_runtime_frame_is_immutable() -> None:
+    frame = RuntimeFrame(call_kind=RuntimeFrameKind.QUOTATION, name="quote.call")
+
+    with pytest.raises(FrozenInstanceError):
+        frame.name = "other"
+
+
+def test_runtime_stack_trace_empty_constructor() -> None:
+    trace = RuntimeStackTrace()
+
+    assert trace.frames == ()
+    assert len(trace) == 0
+    assert tuple(trace) == ()
+
+
+def test_runtime_stack_trace_append_returns_new_instance() -> None:
+    base = RuntimeStackTrace()
+    frame = RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run")
+
+    updated = base.append(frame)
+
+    assert base is not updated
+    assert base.frames == ()
+    assert updated.frames == (frame,)
+    assert len(base) == 0
+    assert len(updated) == 1
+
+
+def test_runtime_stack_trace_extend_returns_new_instance() -> None:
+    first = RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.a")
+    second = RuntimeFrame(call_kind=RuntimeFrameKind.HOST, name="host.log")
+    base = RuntimeStackTrace((first,))
+
+    updated = base.extend((second,))
+
+    assert base is not updated
+    assert base.frames == (first,)
+    assert updated.frames == (first, second)
+    assert tuple(base) == (first,)
+    assert tuple(updated) == (first, second)
+
+
+def test_runtime_stack_trace_iteration_and_len() -> None:
+    first = RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.a")
+    second = RuntimeFrame(call_kind=RuntimeFrameKind.QUOTATION, name="quote.call")
+    trace = RuntimeStackTrace((first, second))
+
+    assert len(trace) == 2
+    assert list(trace) == [first, second]
 
 
 def test_runtime_error_default_diagnostic_is_attached() -> None:
