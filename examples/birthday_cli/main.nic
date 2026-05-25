@@ -1,0 +1,65 @@
+module @app
+  : birthday-today { birth_month:Int birth_day:Int current_month:Int current_day:Int -- is_today:Bool }
+    current_month birth_month =
+    current_day birth_day =
+    and
+  ;
+
+  : birthday-passed { birth_month:Int birth_day:Int current_month:Int current_day:Int -- passed:Bool }
+    current_month birth_month > if
+      true
+    else
+      current_month birth_month < if
+        false
+      else
+        current_day birth_day >=
+      end
+    end
+  ;
+
+  : age-now { birth_year:Int passed:Bool current_year:Int -- age:Int }
+    passed if
+      current_year birth_year -
+    else
+      current_year birth_year - 1 -
+    end
+  ;
+
+  : compute { name:String birth_year:Int birth_month:Int birth_day:Int current_year:Int current_month:Int current_day:Int -- is_today:Bool age_now:Int next_age:Int name_out:String }
+    birth_month birth_day current_month current_day birthday-today
+    birth_month birth_day current_month current_day birthday-passed
+    birth_year swap current_year age-now
+    dup 1 +
+    name
+  ;
+
+  dirty : emit-message { is_today:Bool age_now:Int next_age:Int name:String -- }
+    is_today if
+      "Joyeux " host.out.text
+      age_now host.out.int
+      "e anniversaire " host.out.text
+      name host.out.text
+      " !" host.out.text
+    else
+      "Bonjour " host.out.text
+      name host.out.text
+      ", l'année prochaine vous aurez " host.out.text
+      next_age host.out.int
+      " ans." host.out.text
+    end
+  ;
+
+  dirty : run { -- }
+    host.console.read
+    host.console.read host.parse.int
+    host.console.read host.parse.int
+    host.console.read host.parse.int
+    host.now.year
+    host.now.month
+    host.now.day
+    compute
+    emit-message
+  ;
+
+  export : run
+end-module
