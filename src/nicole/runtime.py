@@ -127,6 +127,7 @@ class RuntimeDiagnostic:
     suggestion: str | None = None
     notes: tuple[str, ...] = ()
     cause: BaseException | None = None
+    trace: RuntimeStackTrace | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "notes", tuple(self.notes))
@@ -141,6 +142,7 @@ def runtime_diagnostic(
     suggestion: str | None = None,
     notes: Iterable[str] = (),
     cause: BaseException | None = None,
+    trace: RuntimeStackTrace | None = None,
 ) -> RuntimeDiagnostic:
     return RuntimeDiagnostic(
         severity=RuntimeDiagnosticSeverity.ERROR,
@@ -152,6 +154,7 @@ def runtime_diagnostic(
         suggestion=suggestion,
         notes=tuple(notes),
         cause=cause,
+        trace=trace,
     )
 
 
@@ -212,6 +215,7 @@ def _runtime_error(
     suggestion: str | None = None,
     notes: Iterable[str] = (),
     cause: BaseException | None = None,
+    trace: RuntimeStackTrace | None = None,
 ) -> RuntimeError:
     return RuntimeError(
         message,
@@ -223,6 +227,7 @@ def _runtime_error(
             suggestion=suggestion,
             notes=notes,
             cause=cause,
+            trace=trace,
         ),
     )
 
@@ -406,11 +411,17 @@ def _invoke_word(
                 code="RUNTIME_RUNTIME_TYPE_ERROR",
                 span=word.span,
                 operation=word.name,
+                trace=word_trace,
             )
 
         locals_env: dict[str, object] = {}
         for parameter, value in zip(expected_inputs, current_args):
-            _ensure_matches_type(value, parameter.type_node, context=f"input '{parameter.name}'")
+            _ensure_matches_type(
+                value,
+                parameter.type_node,
+                context=f"input '{parameter.name}'",
+                trace=word_trace,
+            )
             locals_env[parameter.name] = value
 
         stack = RuntimeStack()
@@ -441,9 +452,15 @@ def _invoke_word(
                 code="RUNTIME_RUNTIME_TYPE_ERROR",
                 span=word.span,
                 operation=word.name,
+                trace=word_trace,
             )
         for parameter, value in zip(outputs, result_values):
-            _ensure_matches_type(value, parameter.type_node, context=f"output '{parameter.name}'")
+            _ensure_matches_type(
+                value,
+                parameter.type_node,
+                context=f"output '{parameter.name}'",
+                trace=word_trace,
+            )
 
         if len(result_values) == 0:
             return None
@@ -479,6 +496,7 @@ def _execute_block(
                 word_index,
                 runtime_bindings,
                 current_word_name=current_word_name,
+                current_trace=current_trace,
             )
             continue
         if isinstance(item, ResultOkNode):
@@ -490,7 +508,7 @@ def _execute_block(
             stack.push(Err(error))
             continue
         if isinstance(item, QuoteNode):
-            stack.push(_create_runtime_quote(item, stack))
+            stack.push(_create_runtime_quote(item, stack, current_trace=current_trace))
             continue
         if isinstance(item, OperatorNode):
             if item.operator == "call":
@@ -506,16 +524,31 @@ def _execute_block(
                 continue
             if item.operator == "?":
                 result_value = stack.pop()
-                _ensure_matches_type(result_value, "Result", context="? input")
+                _ensure_matches_type(
+                    result_value,
+                    "Result",
+                    context="? input",
+                    trace=current_trace,
+                )
                 if isinstance(result_value, Ok):
                     stack.push(result_value.value)
                     continue
                 raise _FramePropagationSignal(result_value.error)
-            _execute_operator(item.operator, stack, span=item.span)
+            _execute_operator(
+                item.operator,
+                stack,
+                span=item.span,
+                current_trace=current_trace,
+            )
             continue
         if isinstance(item, PropagateNode):
             result_value = stack.pop()
-            _ensure_matches_type(result_value, "Result", context="? input")
+            _ensure_matches_type(
+                result_value,
+                "Result",
+                context="? input",
+                trace=current_trace,
+            )
             if isinstance(result_value, Ok):
                 stack.push(result_value.value)
                 continue
@@ -559,6 +592,7 @@ def _execute_block(
             code="RUNTIME_UNSUPPORTED_OPERATION",
             span=item.span,
             operation=type(item).__name__,
+            trace=current_trace,
         )
 
 
@@ -584,8 +618,8 @@ def _execute_identifier(
     if node.name == "map.get":
         key = stack.pop()
         map_value = stack.pop()
-        _ensure_matches_type(map_value, "Map", context="map.get map")
-        _ensure_supported_map_key(key, context="map.get key")
+        _ensure_matches_type(map_value, "Map", context="map.get map", trace=current_trace)
+        _ensure_supported_map_key(key, context="map.get key", trace=current_trace)
         if key in map_value:
             stack.push(Ok(map_value[key]))
         else:
@@ -594,16 +628,16 @@ def _execute_identifier(
     if node.name == "map.contains":
         key = stack.pop()
         map_value = stack.pop()
-        _ensure_matches_type(map_value, "Map", context="map.contains map")
-        _ensure_supported_map_key(key, context="map.contains key")
+        _ensure_matches_type(map_value, "Map", context="map.contains map", trace=current_trace)
+        _ensure_supported_map_key(key, context="map.contains key", trace=current_trace)
         stack.push(key in map_value)
         return
     if node.name == "map.set":
         value = stack.pop()
         key = stack.pop()
         map_value = stack.pop()
-        _ensure_matches_type(map_value, "Map", context="map.set map")
-        _ensure_supported_map_key(key, context="map.set key")
+        _ensure_matches_type(map_value, "Map", context="map.set map", trace=current_trace)
+        _ensure_supported_map_key(key, context="map.set key", trace=current_trace)
         new_map = dict(map_value)
         new_map[key] = value
         stack.push(new_map)
@@ -611,8 +645,8 @@ def _execute_identifier(
     if node.name == "map.remove":
         key = stack.pop()
         map_value = stack.pop()
-        _ensure_matches_type(map_value, "Map", context="map.remove map")
-        _ensure_supported_map_key(key, context="map.remove key")
+        _ensure_matches_type(map_value, "Map", context="map.remove map", trace=current_trace)
+        _ensure_supported_map_key(key, context="map.remove key", trace=current_trace)
         if key in map_value:
             new_map = dict(map_value)
             del new_map[key]
@@ -622,38 +656,38 @@ def _execute_identifier(
         return
     if node.name == "map.len":
         map_value = stack.pop()
-        _ensure_matches_type(map_value, "Map", context="map.len map")
+        _ensure_matches_type(map_value, "Map", context="map.len map", trace=current_trace)
         stack.push(len(map_value))
         return
     if node.name == "map.is-empty":
         map_value = stack.pop()
-        _ensure_matches_type(map_value, "Map", context="map.is-empty map")
+        _ensure_matches_type(map_value, "Map", context="map.is-empty map", trace=current_trace)
         stack.push(len(map_value) == 0)
         return
     if node.name == "map.keys":
         map_value = stack.pop()
-        _ensure_matches_type(map_value, "Map", context="map.keys map")
+        _ensure_matches_type(map_value, "Map", context="map.keys map", trace=current_trace)
         stack.push(tuple(map_value.keys()))
         return
     if node.name == "map.values":
         map_value = stack.pop()
-        _ensure_matches_type(map_value, "Map", context="map.values map")
+        _ensure_matches_type(map_value, "Map", context="map.values map", trace=current_trace)
         stack.push(tuple(map_value.values()))
         return
     if node.name == "result.is-ok":
         result_value = stack.pop()
-        _ensure_matches_type(result_value, "Result", context="result.is-ok input")
+        _ensure_matches_type(result_value, "Result", context="result.is-ok input", trace=current_trace)
         stack.push(isinstance(result_value, Ok))
         return
     if node.name == "result.is-err":
         result_value = stack.pop()
-        _ensure_matches_type(result_value, "Result", context="result.is-err input")
+        _ensure_matches_type(result_value, "Result", context="result.is-err input", trace=current_trace)
         stack.push(isinstance(result_value, Err))
         return
     if node.name == "result.unwrap-or":
         fallback = stack.pop()
         result_value = stack.pop()
-        _ensure_matches_type(result_value, "Result", context="result.unwrap-or input")
+        _ensure_matches_type(result_value, "Result", context="result.unwrap-or input", trace=current_trace)
         if isinstance(result_value, Ok):
             stack.push(result_value.value)
         else:
@@ -661,17 +695,17 @@ def _execute_identifier(
         return
     if node.name == "list.len":
         value = stack.pop()
-        _ensure_matches_type(value, "List", context="list.len input")
+        _ensure_matches_type(value, "List", context="list.len input", trace=current_trace)
         stack.push(len(value))
         return
     if node.name == "list.is-empty":
         value = stack.pop()
-        _ensure_matches_type(value, "List", context="list.is-empty input")
+        _ensure_matches_type(value, "List", context="list.is-empty input", trace=current_trace)
         stack.push(len(value) == 0)
         return
     if node.name == "list.first":
         list_value = stack.pop()
-        _ensure_matches_type(list_value, "List", context="list.first list")
+        _ensure_matches_type(list_value, "List", context="list.first list", trace=current_trace)
         if len(list_value) == 0:
             stack.push(Err("OutOfBounds"))
             return
@@ -679,7 +713,7 @@ def _execute_identifier(
         return
     if node.name == "list.last":
         list_value = stack.pop()
-        _ensure_matches_type(list_value, "List", context="list.last list")
+        _ensure_matches_type(list_value, "List", context="list.last list", trace=current_trace)
         if len(list_value) == 0:
             stack.push(Err("OutOfBounds"))
             return
@@ -688,20 +722,20 @@ def _execute_identifier(
     if node.name == "list.append":
         value = stack.pop()
         list_value = stack.pop()
-        _ensure_matches_type(list_value, "List", context="list.append list")
+        _ensure_matches_type(list_value, "List", context="list.append list", trace=current_trace)
         stack.push(list_value + (value,))
         return
     if node.name == "list.reverse":
         list_value = stack.pop()
-        _ensure_matches_type(list_value, "List", context="list.reverse list")
+        _ensure_matches_type(list_value, "List", context="list.reverse list", trace=current_trace)
         stack.push(tuple(reversed(list_value)))
         return
     if node.name == "list.set":
         value = stack.pop()
         index = stack.pop()
         list_value = stack.pop()
-        _ensure_matches_type(index, "Int", context="list.set index")
-        _ensure_matches_type(list_value, "List", context="list.set list")
+        _ensure_matches_type(index, "Int", context="list.set index", trace=current_trace)
+        _ensure_matches_type(list_value, "List", context="list.set list", trace=current_trace)
         if 0 <= index < len(list_value):
             stack.push(Ok(list_value[:index] + (value,) + list_value[index + 1 :]))
         else:
@@ -710,8 +744,8 @@ def _execute_identifier(
     if node.name == "list.get":
         index = stack.pop()
         list_value = stack.pop()
-        _ensure_matches_type(index, "Int", context="list.get index")
-        _ensure_matches_type(list_value, "List", context="list.get list")
+        _ensure_matches_type(index, "Int", context="list.get index", trace=current_trace)
+        _ensure_matches_type(list_value, "List", context="list.get list", trace=current_trace)
         if 0 <= index < len(list_value):
             stack.push(Ok(list_value[index]))
         else:
@@ -720,15 +754,15 @@ def _execute_identifier(
     if node.name == "list.concat":
         right = stack.pop()
         left = stack.pop()
-        _ensure_matches_type(left, "List", context="list.concat left input")
-        _ensure_matches_type(right, "List", context="list.concat right input")
+        _ensure_matches_type(left, "List", context="list.concat left input", trace=current_trace)
+        _ensure_matches_type(right, "List", context="list.concat right input", trace=current_trace)
         stack.push(left + right)
         return
     if node.name == "list.map":
         quote_value = stack.pop()
         list_value = stack.pop()
-        _ensure_matches_type(list_value, "List", context="list.map list")
-        _ensure_matches_type(quote_value, "Quote", context="list.map quotation")
+        _ensure_matches_type(list_value, "List", context="list.map list", trace=current_trace)
+        _ensure_matches_type(quote_value, "Quote", context="list.map quotation", trace=current_trace)
         mapped: list[object] = []
         for item in list_value:
             outputs = _invoke_runtime_quote_value(
@@ -748,6 +782,7 @@ def _execute_identifier(
                     code="RUNTIME_RUNTIME_TYPE_ERROR",
                     span=node.span,
                     operation="list.map",
+                    trace=current_trace,
                 )
             mapped.append(outputs[0])
         stack.push(tuple(mapped))
@@ -755,8 +790,8 @@ def _execute_identifier(
     if node.name == "list.filter":
         quote_value = stack.pop()
         list_value = stack.pop()
-        _ensure_matches_type(list_value, "List", context="list.filter list")
-        _ensure_matches_type(quote_value, "Quote", context="list.filter quotation")
+        _ensure_matches_type(list_value, "List", context="list.filter list", trace=current_trace)
+        _ensure_matches_type(quote_value, "Quote", context="list.filter quotation", trace=current_trace)
         filtered: list[object] = []
         for item in list_value:
             outputs = _invoke_runtime_quote_value(
@@ -776,9 +811,15 @@ def _execute_identifier(
                     code="RUNTIME_RUNTIME_TYPE_ERROR",
                     span=node.span,
                     operation="list.filter",
+                    trace=current_trace,
                 )
             decision = outputs[0]
-            _ensure_matches_type(decision, "Bool", context="list.filter quotation output")
+            _ensure_matches_type(
+                decision,
+                "Bool",
+                context="list.filter quotation output",
+                trace=current_trace,
+            )
             if decision:
                 filtered.append(item)
         stack.push(tuple(filtered))
@@ -787,8 +828,8 @@ def _execute_identifier(
         quote_value = stack.pop()
         accumulator = stack.pop()
         list_value = stack.pop()
-        _ensure_matches_type(list_value, "List", context="list.fold list")
-        _ensure_matches_type(quote_value, "Quote", context="list.fold quotation")
+        _ensure_matches_type(list_value, "List", context="list.fold list", trace=current_trace)
+        _ensure_matches_type(quote_value, "Quote", context="list.fold quotation", trace=current_trace)
         for item in list_value:
             outputs = _invoke_runtime_quote_value(
                 quote_value,
@@ -807,6 +848,7 @@ def _execute_identifier(
                     code="RUNTIME_RUNTIME_TYPE_ERROR",
                     span=node.span,
                     operation="list.fold",
+                    trace=current_trace,
                 )
             accumulator = outputs[0]
         stack.push(accumulator)
@@ -814,14 +856,15 @@ def _execute_identifier(
     if node.name == "list.reduce":
         quote_value = stack.pop()
         list_value = stack.pop()
-        _ensure_matches_type(list_value, "List", context="list.reduce list")
-        _ensure_matches_type(quote_value, "Quote", context="list.reduce quotation")
+        _ensure_matches_type(list_value, "List", context="list.reduce list", trace=current_trace)
+        _ensure_matches_type(quote_value, "Quote", context="list.reduce quotation", trace=current_trace)
         if len(list_value) == 0:
             raise _runtime_error(
                 "list.reduce cannot be applied to empty list at runtime",
                 code="RUNTIME_RUNTIME_TYPE_ERROR",
                 span=node.span,
                 operation="list.reduce",
+                trace=current_trace,
             )
         accumulator = list_value[0]
         for item in list_value[1:]:
@@ -842,6 +885,7 @@ def _execute_identifier(
                     code="RUNTIME_RUNTIME_TYPE_ERROR",
                     span=node.span,
                     operation="list.reduce",
+                    trace=current_trace,
                 )
             accumulator = outputs[0]
         stack.push(accumulator)
@@ -855,6 +899,7 @@ def _execute_identifier(
             code="RUNTIME_UNSUPPORTED_OPERATION",
             span=node.span,
             operation=node.name,
+            trace=current_trace,
         )
     if isinstance(symbol, WordSymbol) and symbol.source is SymbolSource.BUILTIN:
         message = f"runtime feature not supported: builtin {node.name}"
@@ -863,6 +908,7 @@ def _execute_identifier(
             code="RUNTIME_UNSUPPORTED_OPERATION",
             span=node.span,
             operation=node.name,
+            trace=current_trace,
         )
 
     runtime_name = _runtime_symbol_name(symbol)
@@ -874,6 +920,7 @@ def _execute_identifier(
             code="RUNTIME_UNSUPPORTED_OPERATION",
             span=node.span,
             operation=runtime_name,
+            trace=current_trace,
         )
 
     input_values: list[object] = []
@@ -909,6 +956,7 @@ def _execute_identifier(
             code="RUNTIME_RUNTIME_TYPE_ERROR",
             span=node.span,
             operation=word.name,
+            trace=current_trace,
         )
     for value in result:
         stack.push(value)
@@ -933,7 +981,7 @@ def _execute_host_call(
     current_trace: RuntimeStackTrace | None = None,
 ) -> None:
     host_name = node.name[5:] if node.name.startswith("host.") else node.name
-    _next_trace(
+    host_trace = _next_trace(
         current_trace,
         RuntimeFrame(
             call_kind=RuntimeFrameKind.HOST,
@@ -949,6 +997,7 @@ def _execute_host_call(
             code="RUNTIME_UNSUPPORTED_OPERATION",
             span=node.span,
             operation=node.name,
+            trace=host_trace,
         )
 
     binding = runtime_bindings.words.get(node.name)
@@ -959,12 +1008,18 @@ def _execute_host_call(
             code="RUNTIME_HOST_BINDING_MISSING",
             span=node.span,
             operation=node.name,
+            trace=host_trace,
         )
 
     input_values: list[object] = []
     for parameter in reversed(signature.inputs):
         value = stack.pop()
-        _ensure_matches_type(value, parameter.type_node, context=f"host input '{parameter.name}'")
+        _ensure_matches_type(
+            value,
+            parameter.type_node,
+            context=f"host input '{parameter.name}'",
+            trace=host_trace,
+        )
         input_values.append(value)
     input_values.reverse()
 
@@ -978,13 +1033,19 @@ def _execute_host_call(
             span=node.span,
             operation=node.name,
             cause=exc,
+            trace=host_trace,
         ) from exc
     output_count = len(signature.outputs)
     if output_count == 0:
         return
     if output_count == 1:
         parameter = signature.outputs[0]
-        _ensure_matches_type(result, parameter.type_node, context=f"host output '{parameter.name}'")
+        _ensure_matches_type(
+            result,
+            parameter.type_node,
+            context=f"host output '{parameter.name}'",
+            trace=host_trace,
+        )
         stack.push(result)
         return
 
@@ -995,6 +1056,7 @@ def _execute_host_call(
             code="RUNTIME_RUNTIME_TYPE_ERROR",
             span=node.span,
             operation=node.name,
+            trace=host_trace,
         )
     if len(result) != output_count:
         message = (
@@ -1006,9 +1068,15 @@ def _execute_host_call(
             code="RUNTIME_RUNTIME_TYPE_ERROR",
             span=node.span,
             operation=node.name,
+            trace=host_trace,
         )
     for parameter, value in zip(signature.outputs, result):
-        _ensure_matches_type(value, parameter.type_node, context=f"host output '{parameter.name}'")
+        _ensure_matches_type(
+            value,
+            parameter.type_node,
+            context=f"host output '{parameter.name}'",
+            trace=host_trace,
+        )
         stack.push(value)
 
 
@@ -1022,7 +1090,7 @@ def _execute_if(
     current_trace: RuntimeStackTrace | None = None,
 ) -> None:
     condition = stack.pop()
-    _ensure_matches_type(condition, "Bool", context="if condition")
+    _ensure_matches_type(condition, "Bool", context="if condition", trace=current_trace)
     if condition:
         _execute_block(
             node.then_block,
@@ -1081,6 +1149,7 @@ def _execute_case(
                     span=branch.guard.span,
                     operation="case.guard",
                     cause=signal,
+                    trace=current_trace,
                 ) from signal
             guard_values = guard_stack.values()
             if len(guard_values) != 1:
@@ -1089,6 +1158,7 @@ def _execute_case(
                     code="RUNTIME_RUNTIME_TYPE_ERROR",
                     span=branch.guard.span,
                     operation="case.guard",
+                    trace=current_trace,
                 )
             guard_value = guard_values[0]
             if not isinstance(guard_value, bool):
@@ -1097,6 +1167,7 @@ def _execute_case(
                     code="RUNTIME_RUNTIME_TYPE_ERROR",
                     span=branch.guard.span,
                     operation="case.guard",
+                    trace=current_trace,
                 )
             if not guard_value:
                 continue
@@ -1115,14 +1186,25 @@ def _execute_case(
         code="RUNTIME_CASE_MATCH_FAILURE",
         span=node.span,
         operation="case",
+        trace=current_trace,
     )
 
 
-def _create_runtime_quote(node: QuoteNode, stack: RuntimeStack) -> RuntimeQuote:
+def _create_runtime_quote(
+    node: QuoteNode,
+    stack: RuntimeStack,
+    *,
+    current_trace: RuntimeStackTrace | None = None,
+) -> RuntimeQuote:
     captured: dict[str, object] = {}
     for parameter in reversed(node.captures):
         value = stack.pop()
-        _ensure_matches_type(value, parameter.type_node, context=f"quotation capture '{parameter.name}'")
+        _ensure_matches_type(
+            value,
+            parameter.type_node,
+            context=f"quotation capture '{parameter.name}'",
+            trace=current_trace,
+        )
         captured[parameter.name] = value
     return RuntimeQuote(node=node, captured_locals=MappingProxyType(captured))
 
@@ -1143,6 +1225,7 @@ def _execute_call(
             code="RUNTIME_INVALID_QUOTATION",
             span=span,
             operation="call",
+            trace=current_trace,
         )
 
     input_values: list[object] = []
@@ -1186,9 +1269,15 @@ def _invoke_runtime_quote_value(
             code="RUNTIME_INVALID_QUOTATION",
             span=quote.span,
             operation="quote.call",
+            trace=quote_trace,
         )
     for parameter, value in zip(quote.inputs, input_values):
-        _ensure_matches_type(value, parameter.type_node, context=f"quotation input '{parameter.name}'")
+        _ensure_matches_type(
+            value,
+            parameter.type_node,
+            context=f"quotation input '{parameter.name}'",
+            trace=quote_trace,
+        )
 
     quote_locals = dict(quote_value.captured_locals)
     for parameter, value in zip(quote.inputs, input_values):
@@ -1217,9 +1306,15 @@ def _invoke_runtime_quote_value(
             code="RUNTIME_INVALID_QUOTATION",
             span=quote.span,
             operation="quote.call",
+            trace=quote_trace,
         )
     for parameter, value in zip(quote.outputs, result_values):
-        _ensure_matches_type(value, parameter.type_node, context=f"quotation output '{parameter.name}'")
+        _ensure_matches_type(
+            value,
+            parameter.type_node,
+            context=f"quotation output '{parameter.name}'",
+            trace=quote_trace,
+        )
     return result_values
 
 
@@ -1251,6 +1346,7 @@ def _execute_list_literal(
                 code="RUNTIME_RUNTIME_TYPE_ERROR",
                 span=node.span,
                 operation="list.literal",
+                trace=current_trace,
             )
         values.append(element_values[0])
     stack.push(tuple(values))
@@ -1287,7 +1383,13 @@ def _match_case_pattern(
     return False, None, None
 
 
-def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | None = None) -> None:
+def _execute_operator(
+    operator: str,
+    stack: RuntimeStack,
+    *,
+    span: SourceSpan | None = None,
+    current_trace: RuntimeStackTrace | None = None,
+) -> None:
     if operator == "drop":
         stack.pop()
         return
@@ -1322,8 +1424,22 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
         right = stack.pop()
         left = stack.pop()
         operation = "divide" if operator == "div" else "modulo" if operator == "mod" else "arithmetic"
-        _ensure_matches_type(left, "Int", context="left operand", span=span, operation=operation)
-        _ensure_matches_type(right, "Int", context="right operand", span=span, operation=operation)
+        _ensure_matches_type(
+            left,
+            "Int",
+            context="left operand",
+            span=span,
+            operation=operation,
+            trace=current_trace,
+        )
+        _ensure_matches_type(
+            right,
+            "Int",
+            context="right operand",
+            span=span,
+            operation=operation,
+            trace=current_trace,
+        )
         try:
             if operator == "+":
                 stack.push(left + right)
@@ -1344,14 +1460,29 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
                 span=span,
                 operation=operation,
                 cause=exc,
+                trace=current_trace,
             ) from exc
         return
 
     if operator in {"+.", "-.", "*.", "/."}:
         right = stack.pop()
         left = stack.pop()
-        _ensure_matches_type(left, "Float", context="left operand", span=span, operation="divide")
-        _ensure_matches_type(right, "Float", context="right operand", span=span, operation="divide")
+        _ensure_matches_type(
+            left,
+            "Float",
+            context="left operand",
+            span=span,
+            operation="divide",
+            trace=current_trace,
+        )
+        _ensure_matches_type(
+            right,
+            "Float",
+            context="right operand",
+            span=span,
+            operation="divide",
+            trace=current_trace,
+        )
         try:
             if operator == "+.":
                 stack.push(left + right)
@@ -1369,6 +1500,7 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
                 span=span,
                 operation="divide",
                 cause=exc,
+                trace=current_trace,
             ) from exc
         return
 
@@ -1400,6 +1532,7 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
             code="RUNTIME_INVALID_COMPARISON",
             span=span,
             operation="compare",
+            trace=current_trace,
         )
 
     if operator in {"=", "!="}:
@@ -1411,6 +1544,7 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
                 code="RUNTIME_INVALID_COMPARISON",
                 span=span,
                 operation="compare",
+                trace=current_trace,
             )
         if type(left) is not type(right):
             raise _runtime_error(
@@ -1418,6 +1552,7 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
                 code="RUNTIME_INVALID_COMPARISON",
                 span=span,
                 operation="compare",
+                trace=current_trace,
             )
         if operator == "=":
             stack.push(left == right)
@@ -1428,8 +1563,22 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
     if operator in {"and", "or"}:
         right = stack.pop()
         left = stack.pop()
-        _ensure_matches_type(left, "Bool", context="left operand", span=span, operation=operator)
-        _ensure_matches_type(right, "Bool", context="right operand", span=span, operation=operator)
+        _ensure_matches_type(
+            left,
+            "Bool",
+            context="left operand",
+            span=span,
+            operation=operator,
+            trace=current_trace,
+        )
+        _ensure_matches_type(
+            right,
+            "Bool",
+            context="right operand",
+            span=span,
+            operation=operator,
+            trace=current_trace,
+        )
         if operator == "and":
             stack.push(left and right)
         else:
@@ -1438,7 +1587,14 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
 
     if operator == "not":
         value = stack.pop()
-        _ensure_matches_type(value, "Bool", context="operand", span=span, operation=operator)
+        _ensure_matches_type(
+            value,
+            "Bool",
+            context="operand",
+            span=span,
+            operation=operator,
+            trace=current_trace,
+        )
         stack.push(not value)
         return
 
@@ -1448,6 +1604,7 @@ def _execute_operator(operator: str, stack: RuntimeStack, *, span: SourceSpan | 
         code="RUNTIME_UNSUPPORTED_OPERATION",
         span=span,
         operation=operator,
+        trace=current_trace,
     )
 
 
@@ -1458,9 +1615,10 @@ def _ensure_matches_type(
     context: str,
     span: SourceSpan | None = None,
     operation: str | None = None,
+    trace: RuntimeStackTrace | None = None,
 ) -> None:
     expected = _describe_type(type_spec)
-    if _matches_type(value, type_spec):
+    if _matches_type(value, type_spec, trace=trace):
         return
     message = f"wrong runtime signature for {context}: expected {expected}"
     raise _runtime_error(
@@ -1468,32 +1626,40 @@ def _ensure_matches_type(
         code="RUNTIME_RUNTIME_TYPE_ERROR",
         span=span,
         operation=operation if operation is not None else context,
+        trace=trace,
     )
 
 
-def _matches_type(value: object, type_spec: str | TypeNode) -> bool:
+def _matches_type(
+    value: object,
+    type_spec: str | TypeNode,
+    *,
+    trace: RuntimeStackTrace | None = None,
+) -> bool:
     if isinstance(type_spec, TypeNode):
         type_name = type_spec.name
         if type_name == "List":
-            if not _matches_type_name(value, "List"):
+            if not _matches_type_name(value, "List", trace=trace):
                 return False
             if len(type_spec.args) != 1 or not isinstance(type_spec.args[0], TypeNode):
                 raise _runtime_error(
                     "runtime feature not supported: type List",
                     code="RUNTIME_UNSUPPORTED_OPERATION",
                     operation="type.List",
+                    trace=trace,
                 )
             item_type = type_spec.args[0]
-            return all(_matches_type(item, item_type) for item in value)
+            return all(_matches_type(item, item_type, trace=trace) for item in value)
 
         if type_name == "Map":
-            if not _matches_type_name(value, "Map"):
+            if not _matches_type_name(value, "Map", trace=trace):
                 return False
             if len(type_spec.args) != 2:
                 raise _runtime_error(
                     "runtime feature not supported: type Map",
                     code="RUNTIME_UNSUPPORTED_OPERATION",
                     operation="type.Map",
+                    trace=trace,
                 )
             key_type = type_spec.args[0]
             value_type = type_spec.args[1]
@@ -1502,8 +1668,12 @@ def _matches_type(value: object, type_spec: str | TypeNode) -> bool:
                     "runtime feature not supported: type Map",
                     code="RUNTIME_UNSUPPORTED_OPERATION",
                     operation="type.Map",
+                    trace=trace,
                 )
-            return all(_matches_type(k, key_type) and _matches_type(v, value_type) for k, v in value.items())
+            return all(
+                _matches_type(k, key_type, trace=trace) and _matches_type(v, value_type, trace=trace)
+                for k, v in value.items()
+            )
 
         if type_name == "Result":
             if len(type_spec.args) != 2:
@@ -1511,6 +1681,7 @@ def _matches_type(value: object, type_spec: str | TypeNode) -> bool:
                     "runtime feature not supported: type Result",
                     code="RUNTIME_UNSUPPORTED_OPERATION",
                     operation="type.Result",
+                    trace=trace,
                 )
             ok_type = type_spec.args[0]
             err_type = type_spec.args[1]
@@ -1519,19 +1690,25 @@ def _matches_type(value: object, type_spec: str | TypeNode) -> bool:
                     "runtime feature not supported: type Result",
                     code="RUNTIME_UNSUPPORTED_OPERATION",
                     operation="type.Result",
+                    trace=trace,
                 )
             if isinstance(value, Ok):
-                return _matches_type(value.value, ok_type)
+                return _matches_type(value.value, ok_type, trace=trace)
             if isinstance(value, Err):
-                return _matches_type(value.error, err_type)
+                return _matches_type(value.error, err_type, trace=trace)
             return False
 
-        return _matches_type_name(value, type_name)
+        return _matches_type_name(value, type_name, trace=trace)
 
-    return _matches_type_name(value, type_spec)
+    return _matches_type_name(value, type_spec, trace=trace)
 
 
-def _matches_type_name(value: object, type_name: str) -> bool:
+def _matches_type_name(
+    value: object,
+    type_name: str,
+    *,
+    trace: RuntimeStackTrace | None = None,
+) -> bool:
     if type_name == "Int":
         return type(value) is int
     if type_name == "Float":
@@ -1561,6 +1738,7 @@ def _matches_type_name(value: object, type_name: str) -> bool:
         message,
         code="RUNTIME_UNSUPPORTED_OPERATION",
         operation=f"type.{type_name}",
+        trace=trace,
     )
 
 
@@ -1578,7 +1756,12 @@ def _describe_type(type_spec: str | TypeNode) -> str:
     return f"{type_spec.name}<{', '.join(rendered_args)}>"
 
 
-def _ensure_supported_map_key(value: object, *, context: str) -> None:
+def _ensure_supported_map_key(
+    value: object,
+    *,
+    context: str,
+    trace: RuntimeStackTrace | None = None,
+) -> None:
     if type(value) is int:
         return
     if isinstance(value, str):
@@ -1590,6 +1773,7 @@ def _ensure_supported_map_key(value: object, *, context: str) -> None:
         message,
         code="RUNTIME_RUNTIME_TYPE_ERROR",
         operation=context,
+        trace=trace,
     )
 
 

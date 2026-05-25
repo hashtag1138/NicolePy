@@ -12,6 +12,7 @@ from nicole.lexer import lex
 from nicole.parser import Parser
 from nicole.pipeline import analyze_program
 from nicole.resolver import ResolutionError
+from nicole.ast_nodes import TypeNode
 import nicole.runtime as runtime_module
 from nicole.runtime import (
     Err,
@@ -31,6 +32,8 @@ from nicole.runtime import (
     _execute_call,
     _execute_identifier,
     _execute_operator,
+    _ensure_matches_type,
+    _ensure_supported_map_key,
     render_runtime_diagnostic,
     render_runtime_error,
     runtime_diagnostic,
@@ -232,6 +235,7 @@ def test_runtime_error_default_diagnostic_is_attached() -> None:
     assert diagnostic.code == "RUNTIME_ERROR"
     assert diagnostic.message == "x"
     assert diagnostic.span is None
+    assert diagnostic.trace is None
 
 
 def test_runtime_error_accepts_explicit_diagnostic() -> None:
@@ -246,6 +250,22 @@ def test_runtime_error_accepts_explicit_diagnostic() -> None:
     assert error.diagnostic is diagnostic
     assert error.diagnostics == (diagnostic,)
     assert str(error) == "legacy message"
+
+
+def test_runtime_diagnostic_can_carry_trace_data() -> None:
+    frame = RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run")
+    trace = RuntimeStackTrace((frame,))
+    diagnostic = RuntimeDiagnostic(
+        severity=RuntimeDiagnosticSeverity.ERROR,
+        phase=RuntimeDiagnosticPhase.RUNTIME,
+        code="RUNTIME_EXPLICIT_TRACE",
+        message="diagnostic message",
+        trace=trace,
+    )
+
+    assert diagnostic.trace is trace
+    assert diagnostic.trace is not None
+    assert diagnostic.trace.frames == (frame,)
 
 
 def test_runtime_diagnostic_helper_builds_expected_object() -> None:
@@ -269,6 +289,36 @@ def test_runtime_diagnostic_helper_builds_expected_object() -> None:
     assert diagnostic.suggestion == "push before drop"
     assert diagnostic.notes == ("n1", "n2")
     assert diagnostic.cause is cause
+    assert diagnostic.trace is None
+
+
+def test_runtime_diagnostic_helper_accepts_trace_data() -> None:
+    frame = RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run")
+    trace = RuntimeStackTrace((frame,))
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_WITH_TRACE",
+        message="runtime with trace",
+        trace=trace,
+    )
+
+    assert diagnostic.trace is trace
+    assert diagnostic.trace is not None
+    assert diagnostic.trace.frames == (frame,)
+
+
+def test_runtime_error_preserves_diagnostic_trace_data_and_str_compatibility() -> None:
+    frame = RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run")
+    trace = RuntimeStackTrace((frame,))
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_TRACE",
+        message="trace diagnostic",
+        trace=trace,
+    )
+    error = RuntimeError("legacy message", diagnostic=diagnostic)
+
+    assert str(error) == "legacy message"
+    assert error.diagnostic.trace is trace
+    assert error.diagnostics[0].trace is trace
 
 
 def test_render_runtime_diagnostic_minimal() -> None:
@@ -335,6 +385,21 @@ def test_render_runtime_diagnostic_with_cause() -> None:
     rendered = render_runtime_diagnostic(diagnostic)
 
     assert "Cause: ValueError: boom" in rendered
+
+
+def test_render_runtime_diagnostic_does_not_render_trace_data() -> None:
+    trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_TRACE_RENDER",
+        message="trace remains structured",
+        trace=trace,
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "RuntimeError[RUNTIME_TRACE_RENDER]" in rendered
+    assert "trace remains structured" in rendered
+    assert "@app.run" not in rendered
 
 
 def test_render_runtime_error_uses_attached_diagnostic_and_preserves_str() -> None:
@@ -424,6 +489,27 @@ def test_runtime_division_by_zero_has_structured_diagnostic() -> None:
     assert error.diagnostic.message == "runtime arithmetic error: div by zero"
 
 
+def test_runtime_division_by_zero_via_execution_attaches_trace() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { -- n:Int }
+    1 0 div
+  ;
+  export : run
+end-module
+"""
+    )
+
+    with pytest.raises(RuntimeError, match="runtime arithmetic error: div by zero") as exc_info:
+        run_export(checked, "@app.run", RuntimeHostBindings({}))
+
+    error = exc_info.value
+    assert error.diagnostic.code == "RUNTIME_DIVISION_BY_ZERO"
+    assert error.diagnostic.trace is not None
+    assert error.diagnostic.trace.frames[0].call_kind is RuntimeFrameKind.WORD
+    assert error.diagnostic.trace.frames[0].name == "@app.run"
+
+
 def test_runtime_host_failure_keeps_message_and_attaches_cause() -> None:
     host_signature = signature_from_source("""module @app
   : hostsig { msg:String -- } ;
@@ -453,6 +539,9 @@ end-module
     assert isinstance(error.diagnostic.cause, ValueError)
     assert error.diagnostic.code == "RUNTIME_HOST_FAILURE"
     assert isinstance(error.__cause__, ValueError)
+    assert error.diagnostic.trace is not None
+    assert error.diagnostic.trace.frames[-1].call_kind is RuntimeFrameKind.HOST
+    assert error.diagnostic.trace.frames[-1].name == "host:log"
 
 
 def test_runtime_stack_underflow_error_has_structured_diagnostic_without_span() -> None:
@@ -544,6 +633,173 @@ def test_runtime_type_error_has_diagnostic_context() -> None:
     assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
     assert error.diagnostic.operation == "and"
     assert error.diagnostic.span is None
+
+
+def test_runtime_word_input_type_mismatch_attaches_word_trace() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { n:Int -- out:Int }
+    n
+  ;
+  export : run
+end-module
+"""
+    )
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for input 'n': expected Int") as exc_info:
+        run_export(checked, "@app.run", RuntimeHostBindings({}), True)
+
+    error = exc_info.value
+    assert error.diagnostic.code == "RUNTIME_RUNTIME_TYPE_ERROR"
+    assert error.diagnostic.trace is not None
+    assert error.diagnostic.trace.frames[-1].call_kind is RuntimeFrameKind.WORD
+    assert error.diagnostic.trace.frames[-1].name == "@app.run"
+
+
+def test_runtime_host_output_type_mismatch_attaches_host_trace() -> None:
+    host_signature = signature_from_source("""module @app
+  : hostsig { -- out:Int } ;
+end-module
+""")
+    host_contract = host_contract_from_words([HostWord(name="host.out", signature=host_signature, effect=HostEffect.PURE)])
+    checked = analyze_program(
+        """module @app
+  : run { -- out:Int }
+    host.out
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract,
+    )
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for host output 'out': expected Int") as exc_info:
+        run_export(checked, "@app.run", RuntimeHostBindings({"host.out": lambda: "x"}))
+
+    error = exc_info.value
+    assert error.diagnostic.code == "RUNTIME_RUNTIME_TYPE_ERROR"
+    assert error.diagnostic.trace is not None
+    assert error.diagnostic.trace.frames[-1].call_kind is RuntimeFrameKind.HOST
+    assert error.diagnostic.trace.frames[-1].name == "host:out"
+
+
+def test_runtime_quotation_output_type_mismatch_attaches_quotation_trace() -> None:
+    quote_trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.QUOTATION, name="quotation"),))
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for quotation output 'out': expected Int") as exc_info:
+        _ensure_matches_type(
+            "x",
+            "Int",
+            context="quotation output 'out'",
+            trace=quote_trace,
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.code == "RUNTIME_RUNTIME_TYPE_ERROR"
+    assert error.diagnostic.trace is quote_trace
+    assert error.diagnostic.trace.frames[-1].call_kind is RuntimeFrameKind.QUOTATION
+
+
+def test_runtime_builtin_type_mismatch_attaches_word_trace() -> None:
+    word_trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for list.len input: expected List") as exc_info:
+        _ensure_matches_type(
+            1,
+            "List",
+            context="list.len input",
+            trace=word_trace,
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.trace is word_trace
+    assert error.diagnostic.trace.frames[-1].name == "@app.run"
+
+
+def test_runtime_map_key_validation_error_attaches_word_trace() -> None:
+    word_trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+
+    with pytest.raises(
+        RuntimeError,
+        match="wrong runtime signature for map.contains key: expected Int/String/Bool",
+    ) as exc_info:
+        _ensure_supported_map_key(1.5, context="map.contains key", trace=word_trace)
+
+    error = exc_info.value
+    assert error.diagnostic.trace is word_trace
+    assert error.diagnostic.trace.frames[-1].name == "@app.run"
+
+
+def test_runtime_propagate_input_type_mismatch_attaches_word_trace() -> None:
+    word_trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for \\? input: expected Result") as exc_info:
+        _ensure_matches_type(
+            1,
+            "Result",
+            context="? input",
+            trace=word_trace,
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.trace is word_trace
+    assert error.diagnostic.trace.frames[-1].name == "@app.run"
+
+
+def test_runtime_if_condition_type_mismatch_attaches_word_trace() -> None:
+    word_trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+
+    with pytest.raises(RuntimeError, match="wrong runtime signature for if condition: expected Bool") as exc_info:
+        _ensure_matches_type(
+            1,
+            "Bool",
+            context="if condition",
+            trace=word_trace,
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.trace is word_trace
+    assert error.diagnostic.trace.frames[-1].name == "@app.run"
+
+
+def test_runtime_quotation_capture_type_mismatch_attaches_word_trace() -> None:
+    word_trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+
+    with pytest.raises(
+        RuntimeError,
+        match="wrong runtime signature for quotation capture 'captured': expected Int",
+    ) as exc_info:
+        _ensure_matches_type(
+            "x",
+            "Int",
+            context="quotation capture 'captured'",
+            trace=word_trace,
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.trace is word_trace
+    assert error.diagnostic.trace.frames[-1].name == "@app.run"
+
+
+def test_runtime_unsupported_nested_list_type_error_carries_trace() -> None:
+    trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+    unsupported_list_type = TypeNode(
+        span=SourceSpan(line=0, column=0, offset=0),
+        name="List",
+        args=(),
+    )
+
+    with pytest.raises(RuntimeError, match="runtime feature not supported: type List") as exc_info:
+        _ensure_matches_type(
+            (),
+            unsupported_list_type,
+            context="unsupported nested type",
+            trace=trace,
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.code == "RUNTIME_UNSUPPORTED_OPERATION"
+    assert error.diagnostic.trace is trace
 
 
 def test_runtime_valid_host_call() -> None:
