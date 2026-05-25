@@ -709,33 +709,30 @@ def test_runtime_stack_underflow_error_has_structured_diagnostic_without_span() 
     assert error.diagnostic.span is None
 
 
-def test_runtime_invalid_comparison_has_diagnostic_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _passthrough_check(program, symbols, **_kwargs):
-        return program
-
-    monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)
-    checked = analyze_program(
-        """module @app
-  : run { -- b:Bool }
-    1 2.0 <
-  ;
-  export : run
-end-module
-"""
+def test_runtime_invalid_comparison_has_diagnostic_context() -> None:
+    span = SourceSpan(
+        source=SourceFile("main.nic", text=""),
+        start=SourceLocation(line=7, column=5, offset=0),
+        end=SourceLocation(line=7, column=6, offset=1),
     )
+    trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+    stack = RuntimeStack()
+    stack.push(1)
+    stack.push(2.0)
 
     with pytest.raises(
         RuntimeError,
         match="wrong runtime signature for comparison operands: expected Int/Int or Float/Float",
     ) as exc_info:
-        run_export(checked, "@app.run", RuntimeHostBindings({}))
+        _execute_operator("<", stack, span=span, current_trace=trace)
 
     error = exc_info.value
     assert str(error) == "wrong runtime signature for comparison operands: expected Int/Int or Float/Float"
     assert error.diagnostic.code == "RUNTIME_INVALID_COMPARISON"
     assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
     assert error.diagnostic.operation == "compare"
-    assert error.diagnostic.span is not None
+    assert error.diagnostic.span == span
+    assert error.diagnostic.trace is trace
 
 
 def test_runtime_invalid_quotation_has_diagnostic_context() -> None:
@@ -1368,58 +1365,55 @@ end-module
         run_export(checked, "@app.run", RuntimeHostBindings({}), file_handle)
 
 
-def test_runtime_rejects_equality_on_host_opaque_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _passthrough_check(program, symbols, **_kwargs):
-        return program
-
-    monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)
-    checked = analyze_program(
-        """module @app
-  : run { a:host.io.FileHandle b:host.io.FileHandle -- out:Bool }
-    a b =
-  ;
-  export : run
-end-module
-""",
-        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+def test_runtime_rejects_equality_on_host_opaque_values() -> None:
+    span = SourceSpan(
+        source=SourceFile("main.nic", text=""),
+        start=SourceLocation(line=11, column=3, offset=0),
+        end=SourceLocation(line=11, column=4, offset=1),
     )
-
+    trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
     secret_payload = "secret-token-opaque"
     a = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=secret_payload)
     b = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload=secret_payload)
+    stack = RuntimeStack()
+    stack.push(a)
+    stack.push(b)
+
     with pytest.raises(RuntimeError, match="equality is not supported for host opaque values") as exc_info:
-        run_export(checked, "@app.run", RuntimeHostBindings({}), a, b)
+        _execute_operator("=", stack, span=span, current_trace=trace)
 
     error = exc_info.value
     assert str(error) == "equality is not supported for host opaque values"
     assert error.diagnostic.code == "RUNTIME_INVALID_COMPARISON"
     assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
     assert error.diagnostic.operation == "compare"
-    assert error.diagnostic.span is not None
+    assert error.diagnostic.span == span
+    assert error.diagnostic.trace is trace
     assert secret_payload not in error.diagnostic.message
     assert all(secret_payload not in note for note in error.diagnostic.notes)
 
 
-def test_runtime_rejects_inequality_on_host_opaque_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _passthrough_check(program, symbols, **_kwargs):
-        return program
-
-    monkeypatch.setattr("nicole.pipeline.check_program", _passthrough_check)
-    checked = analyze_program(
-        """module @app
-  : run { a:host.io.FileHandle b:host.io.FileHandle -- out:Bool }
-    a b !=
-  ;
-  export : run
-end-module
-""",
-        host_contract=host_contract_with_opaque("host.io.FileHandle"),
+def test_runtime_rejects_inequality_on_host_opaque_values() -> None:
+    span = SourceSpan(
+        source=SourceFile("main.nic", text=""),
+        start=SourceLocation(line=12, column=3, offset=0),
+        end=SourceLocation(line=12, column=5, offset=2),
     )
-
+    trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
     a = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="a")
     b = RuntimeOpaqueValue(type_name="host.io.FileHandle", payload="b")
-    with pytest.raises(RuntimeError, match="equality is not supported for host opaque values"):
-        run_export(checked, "@app.run", RuntimeHostBindings({}), a, b)
+    stack = RuntimeStack()
+    stack.push(a)
+    stack.push(b)
+    with pytest.raises(RuntimeError, match="equality is not supported for host opaque values") as exc_info:
+        _execute_operator("!=", stack, span=span, current_trace=trace)
+
+    error = exc_info.value
+    assert error.diagnostic.code == "RUNTIME_INVALID_COMPARISON"
+    assert error.diagnostic.phase is RuntimeDiagnosticPhase.RUNTIME
+    assert error.diagnostic.operation == "compare"
+    assert error.diagnostic.span == span
+    assert error.diagnostic.trace is trace
 
 
 def test_runtime_typed_arithmetic_export() -> None:
