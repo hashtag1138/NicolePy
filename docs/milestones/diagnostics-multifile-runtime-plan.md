@@ -320,7 +320,7 @@ Possible phase states:
 | 4. Multi-file compiler | completed | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4 completed: source-aware lexing, explicit file compile, recursive input normalization, and merged multi-file AST analysis are implemented | `13 passed`; `30 passed`; `821 passed` | Phase 4A and Phase 4E freezes integrated; Phase 5 runtime diagnostics is next |
 | 5. Runtime diagnostics | completed | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5 completed: runtime diagnostics architecture freeze, RuntimeDiagnostic foundation, raise-site conversion, context enrichment, and pure runtime diagnostic rendering are implemented | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; Phase 6A stack trace architecture audit is next |
 | 6. Nicole stack trace | completed | `59166a394f9615a13dd2e0ddb7877ee2b3573708`; cleanup `2ebf6485e77cd84491dd526038fec1380505bede` | Phase 6 completed: runtime stack trace system is implemented and cleanup closeout is complete | `248 passed`; `872 passed` | Runtime stack trace system completed; immutable RuntimeStackTrace lifecycle implemented; RuntimeDiagnostic / RuntimeError trace attachment implemented; deterministic trace rendering implemented; RuntimeError.__str__ compatibility preserved; checker/runtime separation clarified and cleanup completed; renderer remains presentation-only; no semantic runtime changes introduced |
-| 7. Interpreter API | in_progress | - | Phase 7 architecture freeze completed: minimal Interpreter API approved; implementation pending | - | Preserve `run_export(...)` compatibility and compiler/runtime separation |
+| 7. Interpreter API | completed | `6cf78848f7cdac9d24487783093366a0df4978d1` | Phase 7A implemented: `NicoleInterpreter` introduced, `run_export(...)` compatibility preserved, interpreter remains minimal, and `CheckedProgram` remains passive | PASS_READY_FOR_TRACKING | No runtime redesign introduced; no VM/session semantics introduced; package-root export decision deferred to Phase 8 |
 | 8. User class API | pending | - | Add ergonomic app-level wrapper usage patterns | - | Thin convenience layer |
 | 9. Optional host method binding | deferred | - | Optional decorator/introspection binding model | - | Deferred by decision |
 
@@ -342,7 +342,7 @@ Possible phase states:
 - Multi-file compilation now parses each source file independently, merges `ProgramNode` declarations in normalized order, rebuilds `ProgramNode.words`, and reuses the static analysis pipeline through `_analyze_program(...)`.
 - `CheckedProgram.source_files` now exists as a backward-compatible field; `NicoleCompiler` fills physical source files while `analyze_program(...)` remains compatible with `source_files=()`.
 - `PIPELINE_MULTIFILE_NOT_IMPLEMENTED` has been removed because merged AST reuse now implements multi-file compilation.
-- No real `NicoleInterpreter` API exists yet.
+- Phase 7A introduced a minimal `NicoleInterpreter` API while preserving runtime semantics and compiler/runtime separation.
 - Runtime raise sites now attach structured diagnostics for Phase 5.
 - `RuntimeError` preserves legacy message behavior while carrying diagnostics.
 - Runtime diagnostics preserve host cause chaining.
@@ -1102,6 +1102,18 @@ Non-goals:
 - no reflection APIs
 - no persistent runtime state
 
+Tracking:
+- implementation commit: `6cf78848f7cdac9d24487783093366a0df4978d1`
+- Phase 7A implemented
+- `NicoleInterpreter` introduced
+- `run_export(...)` compatibility preserved
+- interpreter remains minimal
+- `CheckedProgram` remains passive
+- no runtime redesign introduced
+- no VM/session semantics introduced
+- audit result: `PASS_READY_FOR_TRACKING`
+- residual note: package-root export decision deferred to Phase 8
+
 Phase 6 subphases:
 
 6A:
@@ -1647,3 +1659,4 @@ Before Phase 8:
 | 2026-05-25 | `72b63fb01d70d4ee8e12db19b0ab752c7f7fcd86` | Phase 6D implemented and committed: RuntimeDiagnostic and RuntimeError now carry structured RuntimeStackTrace attachment without changing legacy RuntimeError string behavior | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 240 passed; `./.venv/bin/python -m pytest -q`: 864 passed | Commit `feat: attach traces to runtime diagnostics`; RuntimeDiagnostic carries optional RuntimeStackTrace metadata; `runtime_diagnostic(...)` accepts optional trace data; RuntimeError preserves diagnostic trace through diagnostics tuple; renderer does not render traces; traces remain structured-only metadata; trace is attached only where natural runtime trace context exists; no fake traces for stack pop/peek, host binding constructor validation, or missing export API errors; checker/runtime separation preserved after test rewrite; defensive runtime guards remain, but statically invalid Nicole programs are not tested via checker bypass in Phase 6D tests; Phase 6E runtime trace rendering integration is next |
 | 2026-05-25 | `59166a394f9615a13dd2e0ddb7877ee2b3573708` | Phase 6E implemented and committed: runtime diagnostic renderer now renders RuntimeStackTrace when present using frozen deterministic trace formatting while preserving legacy RuntimeError compatibility and no-trace rendering behavior | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 248 passed; `./.venv/bin/python -m pytest -q`: 872 passed | Commit `feat: render runtime stack traces`; trace rendering integrated; no ANSI; no locals snapshots; no frame history; no semantic changes; renderer remains presentation-only; Phase 6F final audit and closeout is next |
 | 2026-05-25 | `2ebf6485e77cd84491dd526038fec1380505bede` | Phase 6F cleanup completed: runtime trace tests aligned with checker/runtime boundary policy by removing checker-bypass execution of statically invalid Nicole programs through run_export(...) | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 248 passed; `./.venv/bin/python -m pytest -q`: 872 passed | Commit `test: align runtime trace tests with checker boundaries`; helper-level runtime defensive tests preserved; runtime-boundary tests preserved; host-boundary tests preserved; Phase 6 officially ready to close |
+| 2026-05-25 | `6cf78848f7cdac9d24487783093366a0df4978d1` | Phase 7A audit acceptance recorded: `NicoleInterpreter` introduced, `run_export(...)` compatibility preserved, interpreter remains minimal, `CheckedProgram` remains passive, and no runtime redesign or VM/session semantics were introduced | `PASS_READY_FOR_TRACKING` | Tracking-only acceptance for implementation commit `6cf78848f7cdac9d24487783093366a0df4978d1`; package-root export decision deferred to Phase 8 |
