@@ -1730,6 +1730,16 @@ Before Phase 9:
 - console input/output must be simulated
 - tests must assert actual Nicole-produced behavior
 - examples must fail if Nicole logic does not execute
+- Phase 9 example auditability rule:
+- this rule applies to Phase 9 examples/tests specifically
+- no inline Nicole source strings in Python tests or example drivers
+- all Nicole code used by an example must reside in `.nic` files
+- Python tests may read `.nic` files
+- Python tests may build `HostContract` objects
+- Python tests must not embed Nicole modules, words, signatures, or fragments as strings
+- temporary parser fragments in tests are forbidden for examples
+- host signatures for example tests must be constructed without inline Nicole source strings
+- this rule preserves auditability and keeps examples inspectable
 - repository structure freeze:
 - `examples/<example_name>/main.nic`
 - `examples/<example_name>/README.md`
@@ -1792,4 +1802,4 @@ Before Phase 9:
 | 2026-05-25 | - | Phase 8 architecture freeze recorded: thin `NicoleApplication` facade approved as orchestration-only convenience over `NicoleCompiler`, `CheckedProgram`, and `NicoleInterpreter` with lazy compile-on-run behavior and unchanged error propagation | - | Tracking-only freeze; no host ABI inference; no signature reflection; no debugger/session/VM/profiler/renderer behavior; package-root export allowed only for `NicoleApplication` if needed; Phase 8A implementation is next |
 | 2026-05-25 | `484925f136bfab7145405deb133689987999482d` | Phase 8A audit acceptance recorded: `NicoleApplication` introduced; orchestration-only architecture preserved; constructor remains lazy; application-level `CheckedProgram` caching added; fresh `NicoleInterpreter` is created per run; runtime/checker separation preserved; no VM/session semantics or host ABI inference were introduced; package-root exports remain unchanged | `./.venv/bin/python -m pytest tests/test_application.py -q`: 11 passed; `./.venv/bin/python -m pytest -q`: 888 passed; `PASS_READY_FOR_TRACKING` | Tracking-only acceptance for implementation commit `484925f136bfab7145405deb133689987999482d`; residual non-blocking test-depth gaps: `checked` read-only behavior not explicitly asserted and `host_contract` forwarding not explicitly asserted |
 | 2026-05-25 | `6090f9b2f61ac26388909ccae57f6208a20ff463` | Phase 8 closed after final closeout audit: `NicoleApplication` validated as a thin orchestration facade; layering preserved as `NicoleCompiler -> CheckedProgram -> NicoleInterpreter -> NicoleApplication`; runtime/checker separation preserved; `CheckedProgram` remains passive; fresh `NicoleInterpreter` per run preserved; no VM/session semantics, debugger/profiler/renderer semantics, host ABI inference, reflection-based behavior, or implicit entrypoint behavior were introduced | `./.venv/bin/python -m pytest -q`: 888 passed; `PASS_PHASE_READY_TO_CLOSE` | Tracking-only closeout after final audit; residual non-blocking risks remain limited to missing explicit assertions for `checked` read-only behavior and `host_contract` forwarding |
-| 2026-05-25 | - | Phase 9 freeze recorded: tested end-to-end examples corpus approved as a small, realistic, automatically tested set of Nicole programs executed through `NicoleApplication` to expose ergonomics and semantic friction | `READY_FOR_PHASE9_FREEZE` | Tracking-only freeze; frozen examples: `birthday_cli`, `file_report`, `http_status_checker`, `time_tracker`; `csv_contact_import` deferred; host bindings remain environment-only with business logic forbidden in Python; examples stay in the normal pytest suite with deterministic local test controls and no shared framework |
+| 2026-05-25 | - | Phase 9 freeze recorded: tested end-to-end examples corpus approved as a small, realistic, automatically tested set of Nicole programs executed through `NicoleApplication` to expose ergonomics and semantic friction | `READY_FOR_PHASE9_FREEZE` | Tracking-only freeze; frozen examples: `birthday_cli`, `file_report`, `http_status_checker`, `time_tracker`; `csv_contact_import` deferred; host bindings remain environment-only with business logic forbidden in Python; examples stay in the normal pytest suite with deterministic local test controls and no shared framework; for Phase 9 examples/tests specifically, all Nicole source must live in `.nic` files and inline Nicole source strings in Python are forbidden for auditability |
