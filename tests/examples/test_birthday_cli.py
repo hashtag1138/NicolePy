@@ -4,78 +4,44 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from nicole.application import NicoleApplication
-from nicole.ast_nodes import ParameterNode, SignatureNode, TypeNode
 from nicole.host_abi import HostEffect, HostWord, host_contract_from_words
+from nicole.lexer import lex
+from nicole.parser import Parser
 from nicole.runtime import RuntimeHostBindings
-from nicole.source import SourceSpan
 
 
 EXAMPLE_PATH = Path(__file__).resolve().parents[2] / "examples" / "birthday_cli" / "main.nic"
-_SYNTHETIC_SPAN = SourceSpan(0, 0, 0)
 
 
-def _type(type_name: str) -> TypeNode:
-    return TypeNode(span=_SYNTHETIC_SPAN, name=type_name)
-
-
-def _param(name: str, type_name: str) -> ParameterNode:
-    return ParameterNode(
-        span=_SYNTHETIC_SPAN,
-        name=name,
-        type_node=_type(type_name),
-    )
-
-
-def _signature(
-    *,
-    inputs: tuple[tuple[str, str], ...],
-    outputs: tuple[tuple[str, str], ...],
-) -> SignatureNode:
-    return SignatureNode(
-        span=_SYNTHETIC_SPAN,
-        inputs=tuple(_param(param_name, type_name) for param_name, type_name in inputs),
-        outputs=tuple(_param(param_name, type_name) for param_name, type_name in outputs),
-    )
+def _signature_from_source(source: str):
+    return Parser(lex(source)).parse().words[0].signature
 
 
 def _birthday_host_contract():
+    read_signature = _signature_from_source(
+        "module @sig\n  : hostsig { -- text:String } ;\nend-module\n"
+    )
+    parse_int_signature = _signature_from_source(
+        "module @sig\n  : hostsig { text:String -- value:Int } ;\nend-module\n"
+    )
+    now_int_signature = _signature_from_source(
+        "module @sig\n  : hostsig { -- value:Int } ;\nend-module\n"
+    )
+    out_text_signature = _signature_from_source(
+        "module @sig\n  : hostsig { text:String -- } ;\nend-module\n"
+    )
+    out_int_signature = _signature_from_source(
+        "module @sig\n  : hostsig { value:Int -- } ;\nend-module\n"
+    )
     return host_contract_from_words(
         [
-            HostWord(
-                name="host.console.read",
-                signature=_signature(inputs=(), outputs=(("text", "String"),)),
-                effect=HostEffect.DIRTY,
-            ),
-            HostWord(
-                name="host.parse.int",
-                signature=_signature(inputs=(("text", "String"),), outputs=(("value", "Int"),)),
-                effect=HostEffect.PURE,
-            ),
-            HostWord(
-                name="host.now.year",
-                signature=_signature(inputs=(), outputs=(("value", "Int"),)),
-                effect=HostEffect.PURE,
-            ),
-            HostWord(
-                name="host.now.month",
-                signature=_signature(inputs=(), outputs=(("value", "Int"),)),
-                effect=HostEffect.PURE,
-            ),
-            HostWord(
-                name="host.now.day",
-                signature=_signature(inputs=(), outputs=(("value", "Int"),)),
-                effect=HostEffect.PURE,
-            ),
-            HostWord(
-                name="host.out.text",
-                signature=_signature(inputs=(("text", "String"),), outputs=()),
-                effect=HostEffect.DIRTY,
-            ),
-            HostWord(
-                name="host.out.int",
-                signature=_signature(inputs=(("value", "Int"),), outputs=()),
-                effect=HostEffect.DIRTY,
-            ),
+            HostWord(name="host.console.read", signature=read_signature, effect=HostEffect.DIRTY),
+            HostWord(name="host.parse.int", signature=parse_int_signature, effect=HostEffect.PURE),
+            HostWord(name="host.now.year", signature=now_int_signature, effect=HostEffect.PURE),
+            HostWord(name="host.now.month", signature=now_int_signature, effect=HostEffect.PURE),
+            HostWord(name="host.now.day", signature=now_int_signature, effect=HostEffect.PURE),
+            HostWord(name="host.out.text", signature=out_text_signature, effect=HostEffect.DIRTY),
+            HostWord(name="host.out.int", signature=out_int_signature, effect=HostEffect.DIRTY),
         ]
     )
 
