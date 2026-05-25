@@ -191,6 +191,15 @@ def render_runtime_diagnostic(diagnostic: RuntimeDiagnostic) -> str:
         )
     if diagnostic.operation is not None:
         lines.append(f"Operation: {diagnostic.operation}")
+    if diagnostic.trace is not None and len(diagnostic.trace) > 0:
+        lines.append("Stack trace:")
+        for frame in diagnostic.trace:
+            frame_line = f"at {frame.name}"
+            if frame.span is not None:
+                frame_line += (
+                    f" ({frame.span.source.path}:{frame.span.line}:{frame.span.column})"
+                )
+            lines.append(frame_line)
     if diagnostic.notes:
         lines.append("Notes:")
         for note in diagnostic.notes:

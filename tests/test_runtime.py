@@ -387,19 +387,105 @@ def test_render_runtime_diagnostic_with_cause() -> None:
     assert "Cause: ValueError: boom" in rendered
 
 
-def test_render_runtime_diagnostic_does_not_render_trace_data() -> None:
-    trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+def test_render_runtime_diagnostic_with_trace_section_and_order() -> None:
+    diagnostic_span = SourceSpan(
+        source=SourceFile("diag.nic", text=""),
+        start=SourceLocation(line=5, column=7, offset=0),
+        end=SourceLocation(line=5, column=8, offset=1),
+    )
+    frame_span = SourceSpan(
+        source=SourceFile("main.nic", text=""),
+        start=SourceLocation(line=12, column=3, offset=0),
+        end=SourceLocation(line=12, column=4, offset=1),
+    )
+    trace = RuntimeStackTrace(
+        (
+            RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),
+            RuntimeFrame(call_kind=RuntimeFrameKind.HOST, name="host:print", span=frame_span),
+        )
+    )
     diagnostic = runtime_diagnostic(
         code="RUNTIME_TRACE_RENDER",
         message="trace remains structured",
+        span=diagnostic_span,
+        operation="divide",
+        notes=("n1",),
+        cause=ValueError("boom"),
         trace=trace,
     )
 
     rendered = render_runtime_diagnostic(diagnostic)
 
-    assert "RuntimeError[RUNTIME_TRACE_RENDER]" in rendered
-    assert "trace remains structured" in rendered
-    assert "@app.run" not in rendered
+    assert rendered.splitlines() == [
+        "RuntimeError[RUNTIME_TRACE_RENDER]",
+        "trace remains structured",
+        "at diag.nic:5:7",
+        "Operation: divide",
+        "Stack trace:",
+        "at @app.run",
+        "at host:print (main.nic:12:3)",
+        "Notes:",
+        "- n1",
+        "Cause: ValueError: boom",
+    ]
+
+
+def test_render_runtime_diagnostic_trace_none_renders_nothing_extra() -> None:
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_TRACE_NONE",
+        message="no trace section",
+        trace=None,
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "Stack trace:" not in rendered
+
+
+def test_render_runtime_diagnostic_empty_trace_renders_nothing_extra() -> None:
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_TRACE_EMPTY",
+        message="empty trace section",
+        trace=RuntimeStackTrace(),
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "Stack trace:" not in rendered
+
+
+def test_render_runtime_diagnostic_trace_frame_without_span_has_no_placeholder() -> None:
+    trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_TRACE_NO_SPAN",
+        message="trace frame without span",
+        trace=trace,
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "at @app.run" in rendered
+    assert "at @app.run (" not in rendered
+
+
+def test_render_runtime_diagnostic_trace_frame_with_span_renders_inline_location() -> None:
+    frame_span = SourceSpan(
+        source=SourceFile("frame.nic", text=""),
+        start=SourceLocation(line=3, column=9, offset=0),
+        end=SourceLocation(line=3, column=10, offset=1),
+    )
+    trace = RuntimeStackTrace(
+        (RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run", span=frame_span),)
+    )
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_TRACE_WITH_SPAN",
+        message="trace frame with span",
+        trace=trace,
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "at @app.run (frame.nic:3:9)" in rendered
 
 
 def test_render_runtime_error_uses_attached_diagnostic_and_preserves_str() -> None:
@@ -410,6 +496,22 @@ def test_render_runtime_error_uses_attached_diagnostic_and_preserves_str() -> No
 
     assert rendered.startswith("RuntimeError[RUNTIME_ERR]")
     assert "diag message" in rendered
+    assert str(error) == "legacy message"
+
+
+def test_render_runtime_error_includes_trace_via_diagnostic() -> None:
+    trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_ERR_TRACE",
+        message="diag trace message",
+        trace=trace,
+    )
+    error = RuntimeError("legacy message", diagnostic=diagnostic)
+
+    rendered = render_runtime_error(error)
+
+    assert "Stack trace:" in rendered
+    assert "at @app.run" in rendered
     assert str(error) == "legacy message"
 
 
@@ -427,6 +529,32 @@ def test_render_runtime_diagnostic_is_deterministic() -> None:
     assert first == second
 
 
+def test_render_runtime_diagnostic_trace_order_is_deterministic() -> None:
+    trace = RuntimeStackTrace(
+        (
+            RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.outer"),
+            RuntimeFrame(call_kind=RuntimeFrameKind.QUOTATION, name="quotation"),
+            RuntimeFrame(call_kind=RuntimeFrameKind.HOST, name="host:print"),
+        )
+    )
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_TRACE_ORDER",
+        message="trace order",
+        trace=trace,
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert rendered.splitlines() == [
+        "RuntimeError[RUNTIME_TRACE_ORDER]",
+        "trace order",
+        "Stack trace:",
+        "at @app.outer",
+        "at quotation",
+        "at host:print",
+    ]
+
+
 def test_render_runtime_diagnostic_does_not_mutate() -> None:
     diagnostic = runtime_diagnostic(
         code="RUNTIME_IMMUTABLE",
@@ -438,6 +566,34 @@ def test_render_runtime_diagnostic_does_not_mutate() -> None:
     _ = render_runtime_diagnostic(diagnostic)
 
     assert diagnostic == before
+
+
+def test_render_runtime_diagnostic_does_not_mutate_trace() -> None:
+    frame = RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run")
+    trace = RuntimeStackTrace((frame,))
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_TRACE_IMMUTABLE",
+        message="trace immutable",
+        trace=trace,
+    )
+
+    before_frames = trace.frames
+    _ = render_runtime_diagnostic(diagnostic)
+
+    assert trace.frames == before_frames
+
+
+def test_render_runtime_diagnostic_trace_rendering_remains_ansi_free() -> None:
+    trace = RuntimeStackTrace((RuntimeFrame(call_kind=RuntimeFrameKind.WORD, name="@app.run"),))
+    diagnostic = runtime_diagnostic(
+        code="RUNTIME_TRACE_ANSI",
+        message="ansi free",
+        trace=trace,
+    )
+
+    rendered = render_runtime_diagnostic(diagnostic)
+
+    assert "\x1b[" not in rendered
 
 
 def test_render_runtime_diagnostic_does_not_leak_opaque_payload() -> None:
