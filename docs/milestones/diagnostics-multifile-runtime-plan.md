@@ -864,6 +864,86 @@ Residual risks:
 - rendering layout decisions may affect future stack-trace integration
 - Phase 6 owns stack-frame design
 
+## Decision freeze before Phase 6E
+
+Phase 6E title:
+
+- runtime trace rendering integration
+
+Audit result:
+
+- RUNTIME_TRACE_RENDERING_READY_FOR_FREEZE
+
+Rendering order:
+
+- render trace after operation
+- render trace before notes and cause
+
+Section order:
+
+1. header/code
+2. message
+3. location
+4. operation
+5. trace
+6. notes
+7. cause
+
+Trace section header:
+
+- use `Stack trace:`
+
+Frame rendering format:
+
+- render frames as:
+  `at <frame.name>`
+
+Frame location rendering:
+
+- if frame.span exists:
+  append:
+  ` (<file>:<line>:<column>)`
+- if frame.span is absent:
+  omit location entirely
+
+Frame order:
+
+- render outermost caller first
+- render innermost failing frame last
+
+Empty trace behavior:
+
+- if trace is None:
+  render nothing
+- if trace exists but is empty:
+  render nothing
+
+Compatibility rules:
+
+- diagnostics without trace must render exactly as before
+- RuntimeError rendering without trace must render exactly as before
+- RuntimeError.__str__ must remain unchanged
+
+Non-goals:
+
+- no ANSI formatting
+- no colors
+- no IDE integration
+- no locals snapshots
+- no frame history
+- no JSON renderer
+- no logging framework
+- no semantic runtime changes
+- no compiler/checker/parser changes
+
+Renderer constraints:
+
+- renderer remains deterministic
+- renderer remains mutation-free
+- renderer must not inspect RuntimeOpaqueValue.payload
+- renderer must not mutate RuntimeDiagnostic
+- renderer must not mutate RuntimeStackTrace
+
 ## Next patch
 
 Phase 6E
@@ -880,6 +960,21 @@ Scope:
 - no frame history
 - no IDE integration
 - no Nicole semantic changes
+
+Phase 6E recommended tests:
+
+- diagnostic without trace renders exactly as before
+- diagnostic with trace renders trace section
+- RuntimeError rendering includes trace through diagnostic
+- deterministic trace ordering
+- frame without span renders without placeholder
+- frame with span renders inline location
+- trace=None renders nothing extra
+- empty trace renders nothing extra
+- renderer does not mutate RuntimeDiagnostic
+- renderer does not mutate RuntimeStackTrace
+- renderer remains ANSI-free
+- renderer does not expose opaque payload internals
 
 Phase 6 subphases:
 
