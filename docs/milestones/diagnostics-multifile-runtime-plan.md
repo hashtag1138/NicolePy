@@ -319,7 +319,7 @@ Possible phase states:
 | 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
 | 4. Multi-file compiler | completed | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4 completed: source-aware lexing, explicit file compile, recursive input normalization, and merged multi-file AST analysis are implemented | `13 passed`; `30 passed`; `821 passed` | Phase 4A and Phase 4E freezes integrated; Phase 5 runtime diagnostics is next |
 | 5. Runtime diagnostics | completed | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5 completed: runtime diagnostics architecture freeze, RuntimeDiagnostic foundation, raise-site conversion, context enrichment, and pure runtime diagnostic rendering are implemented | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; Phase 6A stack trace architecture audit is next |
-| 6. Nicole stack trace | in_progress | `72b63fb01d70d4ee8e12db19b0ab752c7f7fcd86` | Phase 6D completed: RuntimeDiagnostic and RuntimeError trace attachment is implemented | `240 passed`; `864 passed` | RuntimeDiagnostic now carries optional RuntimeStackTrace metadata; `runtime_diagnostic(...)` accepts optional trace data; RuntimeError preserves diagnostic trace through diagnostics tuple; RuntimeError.__str__ compatibility preserved; renderer does not render traces; traces remain structured-only metadata; trace is attached only where natural runtime trace context exists; no fake traces for stack pop/peek, host binding constructor validation, or missing export API errors; checker/runtime separation preserved after test rewrite; defensive runtime guards remain, but statically invalid Nicole programs are not tested via checker bypass in Phase 6D tests; Phase 6E is next |
+| 6. Nicole stack trace | in_progress | `59166a394f9615a13dd2e0ddb7877ee2b3573708` | Phase 6E completed: runtime stack trace rendering integrated into runtime diagnostics renderer | `248 passed`; `872 passed` | Renderer now renders a trace section when RuntimeStackTrace exists; renderer remains deterministic, mutation-free, and ANSI-free; RuntimeError.__str__ compatibility preserved; diagnostics without trace render exactly as before; trace rendering remains presentation-only; no semantic runtime changes introduced; Phase 6F is next |
 | 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
 | 8. User class API | pending | - | Add ergonomic app-level wrapper usage patterns | - | Thin convenience layer |
 | 9. Optional host method binding | deferred | - | Optional decorator/introspection binding model | - | Deferred by decision |
@@ -946,35 +946,29 @@ Renderer constraints:
 
 ## Next patch
 
-Phase 6E
+Phase 6F
 
 Name:
 
-runtime trace rendering integration
+final audit, cleanup, closure
 
 Scope:
-- render RuntimeStackTrace when present on RuntimeDiagnostic / RuntimeError
-- preserve existing message/code/location/operation/notes/cause sections
+- complete full Phase 6 audit
+- verify checker/runtime separation
+- verify rendering compatibility
+- verify trace propagation coverage
+- review suspicious legacy tests
+- cleanup remaining non-essential drift if needed
+- close Phase 6 milestone
+
+Non-goals:
+- no new runtime features
+- no new renderer features
 - no ANSI formatting
 - no locals snapshots
 - no frame history
 - no IDE integration
-- no Nicole semantic changes
-
-Phase 6E recommended tests:
-
-- diagnostic without trace renders exactly as before
-- diagnostic with trace renders trace section
-- RuntimeError rendering includes trace through diagnostic
-- deterministic trace ordering
-- frame without span renders without placeholder
-- frame with span renders inline location
-- trace=None renders nothing extra
-- empty trace renders nothing extra
-- renderer does not mutate RuntimeDiagnostic
-- renderer does not mutate RuntimeStackTrace
-- renderer remains ANSI-free
-- renderer does not expose opaque payload internals
+- no semantic runtime changes
 
 Phase 6 subphases:
 
@@ -1013,8 +1007,11 @@ Scope:
 - no IDE integration
 - no semantic changes
 
+Completion note:
+- trace rendering now integrated into runtime diagnostics renderer
+
 6F:
-final audit, tests, cleanup, closure
+final audit, cleanup, closure
 
 ## Phase 1A detailed sequence
 
@@ -1516,3 +1513,4 @@ Before Phase 8:
 | 2026-05-25 | `c0b94e6fbe41316b4e5968ce52e6bae03c8c0bda` | Phase 6B implemented and committed: RuntimeFrameKind added with WORD/QUOTATION/HOST; RuntimeFrame added as immutable metadata-only structure; RuntimeStackTrace added as immutable container with append/extend returning new instances | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 224 passed; `./.venv/bin/python -m pytest -q`: 848 passed | Commit `feat: add runtime stack trace foundation`; no diagnostics trace attachment; no RuntimeError trace attachment; no renderer changes; no locals snapshots; no frame history; runtime behavior preserved; Phase 6C frame lifecycle attachment is next |
 | 2026-05-25 | `700654d9e99225cff9337b16bb2f08a797a0447a` | Phase 6C implemented and committed: RuntimeStackTrace threaded internally through runtime execution lifecycle; frame creation attached at frozen points with duplicate quotation frame removed from `_execute_call(...)` and kept in `_invoke_runtime_quote_value(...)` | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 226 passed; `./.venv/bin/python -m pytest -q`: 850 passed | Commit `feat: attach runtime frame lifecycle`; WORD frames created in `_invoke_word(...)`; HOST frames created in `_execute_host_call(...)`; QUOTATION frames created only in `_invoke_runtime_quote_value(...)`; traces remain internal and are not attached to RuntimeDiagnostic or RuntimeError; no renderer changes; no locals snapshots; no frame history; self-tail-call compactness preserved; runtime behavior preserved; Phase 6D RuntimeDiagnostic and RuntimeError trace attachment is next |
 | 2026-05-25 | `72b63fb01d70d4ee8e12db19b0ab752c7f7fcd86` | Phase 6D implemented and committed: RuntimeDiagnostic and RuntimeError now carry structured RuntimeStackTrace attachment without changing legacy RuntimeError string behavior | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 240 passed; `./.venv/bin/python -m pytest -q`: 864 passed | Commit `feat: attach traces to runtime diagnostics`; RuntimeDiagnostic carries optional RuntimeStackTrace metadata; `runtime_diagnostic(...)` accepts optional trace data; RuntimeError preserves diagnostic trace through diagnostics tuple; renderer does not render traces; traces remain structured-only metadata; trace is attached only where natural runtime trace context exists; no fake traces for stack pop/peek, host binding constructor validation, or missing export API errors; checker/runtime separation preserved after test rewrite; defensive runtime guards remain, but statically invalid Nicole programs are not tested via checker bypass in Phase 6D tests; Phase 6E runtime trace rendering integration is next |
+| 2026-05-25 | `59166a394f9615a13dd2e0ddb7877ee2b3573708` | Phase 6E implemented and committed: runtime diagnostic renderer now renders RuntimeStackTrace when present using frozen deterministic trace formatting while preserving legacy RuntimeError compatibility and no-trace rendering behavior | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 248 passed; `./.venv/bin/python -m pytest -q`: 872 passed | Commit `feat: render runtime stack traces`; trace rendering integrated; no ANSI; no locals snapshots; no frame history; no semantic changes; renderer remains presentation-only; Phase 6F final audit and closeout is next |
