@@ -320,7 +320,7 @@ Possible phase states:
 | 4. Multi-file compiler | completed | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4 completed: source-aware lexing, explicit file compile, recursive input normalization, and merged multi-file AST analysis are implemented | `13 passed`; `30 passed`; `821 passed` | Phase 4A and Phase 4E freezes integrated; Phase 5 runtime diagnostics is next |
 | 5. Runtime diagnostics | completed | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5 completed: runtime diagnostics architecture freeze, RuntimeDiagnostic foundation, raise-site conversion, context enrichment, and pure runtime diagnostic rendering are implemented | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; Phase 6A stack trace architecture audit is next |
 | 6. Nicole stack trace | completed | `59166a394f9615a13dd2e0ddb7877ee2b3573708`; cleanup `2ebf6485e77cd84491dd526038fec1380505bede` | Phase 6 completed: runtime stack trace system is implemented and cleanup closeout is complete | `248 passed`; `872 passed` | Runtime stack trace system completed; immutable RuntimeStackTrace lifecycle implemented; RuntimeDiagnostic / RuntimeError trace attachment implemented; deterministic trace rendering implemented; RuntimeError.__str__ compatibility preserved; checker/runtime separation clarified and cleanup completed; renderer remains presentation-only; no semantic runtime changes introduced |
-| 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
+| 7. Interpreter API | in_progress | - | Phase 7 architecture freeze completed: minimal Interpreter API approved; implementation pending | - | Preserve `run_export(...)` compatibility and compiler/runtime separation |
 | 8. User class API | pending | - | Add ergonomic app-level wrapper usage patterns | - | Thin convenience layer |
 | 9. Optional host method binding | deferred | - | Optional decorator/introspection binding model | - | Deferred by decision |
 
@@ -971,13 +971,136 @@ Residual accepted debt:
 - runtime still contains defensive runtime validation overlap with checker
 - remaining overlap is intentional defensive runtime policy, not primary semantic enforcement
 
+## Decision freeze before Phase 7
+
+Phase 7 title:
+
+- Interpreter API
+
+Audit result:
+
+- INTERPRETER_API_READY_FOR_FREEZE
+
+Primary goal:
+
+- introduce explicit runtime/interpreter API
+- preserve compiler/runtime separation
+- preserve runtime semantics
+- preserve compatibility
+
+Frozen constructor:
+
+- `NicoleInterpreter(checked: CheckedProgram, runtime_bindings: RuntimeHostBindings)`
+
+Frozen execution entrypoint:
+
+- `run_export(export_name: str, *args: object) -> object`
+
+Compatibility rule:
+
+- existing `run_export(...)` remains public
+- existing `run_export(...)` becomes a thin facade over `NicoleInterpreter`
+
+Ownership rules:
+
+NicoleInterpreter owns only:
+- CheckedProgram reference
+- RuntimeHostBindings reference
+
+Runtime-local only:
+- RuntimeStack
+- locals env
+- RuntimeFrame
+- RuntimeStackTrace
+- RuntimeDiagnostic lifecycle
+- execution-local state
+
+CheckedProgram remains:
+- passive compiled artifact only
+
+Freeze decisions:
+
+- no `CheckedProgram.create_interpreter(...)`
+- no debugger API
+- no stepping API
+- no breakpoint API
+- no renderer API
+- no snapshot API
+- no profiling API
+- no logging API
+- no reflection/inspection API
+- no persistent VM/session semantics
+- no coroutine/task semantics
+- no runtime semantic redesign
+
+Compiler/runtime separation:
+
+Compiler owns:
+- source loading
+- parsing
+- checking
+- multi-file compilation
+- compile-time diagnostics
+
+Interpreter owns:
+- execution entrypoint only
+
+Runtime internals own:
+- execution lifecycle
+- stack
+- trace lifecycle
+- diagnostics
+- host invocation
+- tail-call behavior
+
+Compatibility freeze:
+
+- `analyze_program(...)` remains unchanged
+- `NicoleCompiler` remains unchanged
+- RuntimeError behavior remains unchanged
+- Runtime stack trace behavior remains unchanged
+
+Future extension boundary:
+
+Future debugger/IDE/profiling systems must attach later as separate subsystems and must not be folded into NicoleInterpreter.
+
+## Phase 7 non-goals
+
+- no debugger subsystem
+- no IDE subsystem
+- no stepping
+- no breakpoints
+- no persistent runtime sessions
+- no VM redesign
+- no scheduler/task system
+- no async redesign
+- no runtime semantic changes
+- no compiler redesign
+
 ## Next patch
 
-Phase 7
+Phase 7A
 
 Name:
 
-Interpreter API
+NicoleInterpreter minimal implementation
+
+Scope:
+- add NicoleInterpreter
+- add minimal constructor
+- add minimal run_export method
+- preserve existing run_export compatibility facade
+- preserve runtime semantics
+- preserve compiler/runtime separation
+
+Non-goals:
+- no debugger
+- no stepping
+- no breakpoint support
+- no renderer integration
+- no profiler
+- no reflection APIs
+- no persistent runtime state
 
 Phase 6 subphases:
 
