@@ -319,7 +319,7 @@ Possible phase states:
 | 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
 | 4. Multi-file compiler | completed | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4 completed: source-aware lexing, explicit file compile, recursive input normalization, and merged multi-file AST analysis are implemented | `13 passed`; `30 passed`; `821 passed` | Phase 4A and Phase 4E freezes integrated; Phase 5 runtime diagnostics is next |
 | 5. Runtime diagnostics | completed | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5 completed: runtime diagnostics architecture freeze, RuntimeDiagnostic foundation, raise-site conversion, context enrichment, and pure runtime diagnostic rendering are implemented | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; Phase 6A stack trace architecture audit is next |
-| 6. Nicole stack trace | in_progress | - | Phase 6A completed: stack trace architecture audit completed and required architecture freezes recorded before implementation work | `218 passed`; `842 passed` | Decision `PASS_PHASE_READY_TO_CLOSE`; Phase 6B RuntimeFrame and RuntimeStackTrace foundation implementation is next |
+| 6. Nicole stack trace | in_progress | `c0b94e6fbe41316b4e5968ce52e6bae03c8c0bda` | Phase 6A completed and Phase 6B foundation implemented: RuntimeFrameKind, RuntimeFrame and RuntimeStackTrace were added as immutable runtime metadata foundations | `224 passed`; `848 passed` | Runtime behavior preserved; no diagnostics trace attachment; no RuntimeError trace attachment; no renderer changes; no locals snapshots; no frame history; Phase 6C frame lifecycle attachment is next |
 | 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
 | 8. User class API | pending | - | Add ergonomic app-level wrapper usage patterns | - | Thin convenience layer |
 | 9. Optional host method binding | deferred | - | Optional decorator/introspection binding model | - | Deferred by decision |
@@ -866,31 +866,19 @@ Residual risks:
 
 ## Next patch
 
-Phase 6B
+Phase 6C
 
 Name:
 
-RuntimeFrame and RuntimeStackTrace foundation implementation
+frame lifecycle attachment
 
 Scope:
-- implement RuntimeFrame data structure
-- implement RuntimeStackTrace container
-- implement frame storage model
-- implement frame creation helpers
-- preserve existing runtime behavior
-- preserve self-tail-call behavior
-- preserve RuntimeStack responsibility separation
-- preserve RuntimeDiagnostic separation
-
-Non-goals:
-- no renderer work
-- no ANSI formatting
-- no locals snapshots
-- no frame history
-- no IDE integration
-- no host frame redesign
-- no quotation policy redesign
-- no Nicole semantic changes
+- attach frames at frozen creation points
+- preserve self-tail-call compactness
+- preserve RuntimeStack separation
+- do not add rendering
+- do not add locals snapshots
+- do not change Nicole semantics
 
 Phase 6 subphases:
 
@@ -1422,3 +1410,4 @@ Before Phase 8:
 | 2026-05-24 | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5E implementation accepted | `218 passed`; `842 passed` | Commit `feat: render runtime diagnostics` |
 | 2026-05-24 | - | Phase 5 closed after complete audit | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; no required fixes before closure |
 | 2026-05-24 | - | Phase 6A stack trace architecture audit completed and architecture freezes recorded before implementation | `218 passed`; `842 passed` | Tracking-only closeout with decision `PASS_PHASE_READY_TO_CLOSE`; Phase 6B RuntimeFrame and RuntimeStackTrace foundation implementation is next |
+| 2026-05-25 | `c0b94e6fbe41316b4e5968ce52e6bae03c8c0bda` | Phase 6B implemented and committed: RuntimeFrameKind added with WORD/QUOTATION/HOST; RuntimeFrame added as immutable metadata-only structure; RuntimeStackTrace added as immutable container with append/extend returning new instances | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 224 passed; `./.venv/bin/python -m pytest -q`: 848 passed | Commit `feat: add runtime stack trace foundation`; no diagnostics trace attachment; no RuntimeError trace attachment; no renderer changes; no locals snapshots; no frame history; runtime behavior preserved; Phase 6C frame lifecycle attachment is next |
