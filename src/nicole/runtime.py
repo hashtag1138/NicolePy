@@ -332,6 +332,21 @@ def run_export(
     runtime_bindings: RuntimeHostBindings,
     *args: object,
 ) -> object:
+    from .interpreter import NicoleInterpreter
+
+    interpreter = NicoleInterpreter(
+        checked=checked,
+        runtime_bindings=runtime_bindings,
+    )
+    return interpreter.run_export(export_name, *args)
+
+
+def _run_export_checked(
+    checked: CheckedProgram,
+    export_name: str,
+    runtime_bindings: RuntimeHostBindings,
+    args: tuple[object, ...],
+) -> object:
     export_word = checked.export_contract.words.get(export_name)
     if export_word is None:
         message = f"missing export: {export_name}"

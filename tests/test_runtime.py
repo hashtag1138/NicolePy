@@ -13,6 +13,7 @@ from nicole.parser import Parser
 from nicole.pipeline import analyze_program
 from nicole.resolver import ResolutionError
 from nicole.ast_nodes import TypeNode
+from nicole.interpreter import NicoleInterpreter
 import nicole.runtime as runtime_module
 from nicole.runtime import (
     Err,
@@ -58,6 +59,98 @@ def test_runtime_error_string_compatibility_is_preserved() -> None:
 
     assert str(error) == "x"
     assert error.message == "x"
+
+
+def test_nicole_interpreter_basic_execution() -> None:
+    checked = analyze_program(
+        """module @app
+  : add { a:Int b:Int -- result:Int }
+    a b +
+  ;
+  export : add
+end-module
+"""
+    )
+    interpreter = NicoleInterpreter(
+        checked=checked,
+        runtime_bindings=RuntimeHostBindings({}),
+    )
+
+    assert interpreter.run_export("@app.add", 2, 3) == 5
+
+
+def test_nicole_interpreter_preserves_run_export_behavior() -> None:
+    checked = analyze_program(
+        """module @app
+  : add { a:Int b:Int -- result:Int }
+    a b +
+  ;
+  export : add
+end-module
+"""
+    )
+    interpreter = NicoleInterpreter(
+        checked=checked,
+        runtime_bindings=RuntimeHostBindings({}),
+    )
+
+    expected = run_export(checked, "@app.add", RuntimeHostBindings({}), 4, 6)
+    assert interpreter.run_export("@app.add", 4, 6) == expected
+
+
+def test_run_export_wrapper_remains_compatible_with_interpreter_api() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { -- n:Int }
+    7
+  ;
+  export : run
+end-module
+"""
+    )
+
+    assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 7
+
+
+def test_nicole_interpreter_does_not_expose_runtime_internals() -> None:
+    checked = analyze_program(
+        """module @app
+  : run { -- n:Int }
+    1
+  ;
+  export : run
+end-module
+"""
+    )
+    interpreter = NicoleInterpreter(
+        checked=checked,
+        runtime_bindings=RuntimeHostBindings({}),
+    )
+
+    assert hasattr(interpreter, "checked")
+    assert hasattr(interpreter, "runtime_bindings")
+    assert not hasattr(interpreter, "stack")
+    assert not hasattr(interpreter, "trace")
+    assert not hasattr(interpreter, "frames")
+
+
+def test_nicole_interpreter_does_not_persist_runtime_state_between_calls() -> None:
+    checked = analyze_program(
+        """module @app
+  : id { n:Int -- out:Int }
+    n
+  ;
+  export : id
+end-module
+"""
+    )
+    interpreter = NicoleInterpreter(
+        checked=checked,
+        runtime_bindings=RuntimeHostBindings({}),
+    )
+
+    assert interpreter.run_export("@app.id", 3) == 3
+    assert interpreter.run_export("@app.id", 9) == 9
 
 
 def test_runtime_frame_creation_with_optional_span() -> None:

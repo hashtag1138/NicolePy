@@ -1,20 +1,22 @@
-"""
-Placeholder module.
-
-Nicole v0.14 uses direct AST execution through `nicole.runtime`.
-This module is reserved for future work and is not part of the active execution pipeline.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .ir import Block
+from .pipeline import CheckedProgram
+from .runtime import RuntimeHostBindings, _run_export_checked
+
+__all__ = ["NicoleInterpreter"]
 
 
-@dataclass(slots=True)
-class Interpreter:
-    """Reserved placeholder interpreter for inactive IR scaffolding."""
+@dataclass(frozen=True, slots=True)
+class NicoleInterpreter:
+    checked: CheckedProgram
+    runtime_bindings: RuntimeHostBindings
 
-    def execute(self, block: Block) -> object:
-        raise NotImplementedError("Interpreter is not implemented yet.")
+    def run_export(self, export_name: str, *args: object) -> object:
+        return _run_export_checked(
+            self.checked,
+            export_name,
+            self.runtime_bindings,
+            args,
+        )
