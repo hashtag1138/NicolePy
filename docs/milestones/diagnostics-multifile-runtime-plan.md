@@ -319,7 +319,7 @@ Possible phase states:
 | 3. Structured compilation diagnostics | completed | `5c58008acebf324d35793a239e24bf748e462c1d` | Phase 3 completed: structured compilation diagnostics, ABI diagnostics, renderer, and cleanup finalized | 802 passed | Phase 3 completed; Phase 4 multi-file compiler pending |
 | 4. Multi-file compiler | completed | `bb695b07afaf879b5ad9ec2dfb88988745a5102f` | Phase 4 completed: source-aware lexing, explicit file compile, recursive input normalization, and merged multi-file AST analysis are implemented | `13 passed`; `30 passed`; `821 passed` | Phase 4A and Phase 4E freezes integrated; Phase 5 runtime diagnostics is next |
 | 5. Runtime diagnostics | completed | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5 completed: runtime diagnostics architecture freeze, RuntimeDiagnostic foundation, raise-site conversion, context enrichment, and pure runtime diagnostic rendering are implemented | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; Phase 6A stack trace architecture audit is next |
-| 6. Nicole stack trace | in_progress | - | Phase 6A completed: stack trace architecture audit completed and required architecture freezes recorded before implementation work | `218 passed`; `842 passed` | Decision `PASS_PHASE_READY_TO_CLOSE`; Phase 6B RuntimeFrame and RuntimeStackTrace design freeze is next |
+| 6. Nicole stack trace | in_progress | - | Phase 6A completed: stack trace architecture audit completed and required architecture freezes recorded before implementation work | `218 passed`; `842 passed` | Decision `PASS_PHASE_READY_TO_CLOSE`; Phase 6B RuntimeFrame and RuntimeStackTrace foundation implementation is next |
 | 7. Interpreter API | pending | - | Add explicit `NicoleInterpreter` API on `CheckedProgram` | - | Keep `run_export(...)` compatibility |
 | 8. User class API | pending | - | Add ergonomic app-level wrapper usage patterns | - | Thin convenience layer |
 | 9. Optional host method binding | deferred | - | Optional decorator/introspection binding model | - | Deferred by decision |
@@ -870,24 +870,60 @@ Phase 6B
 
 Name:
 
-RuntimeFrame and RuntimeStackTrace design freeze
+RuntimeFrame and RuntimeStackTrace foundation implementation
 
 Scope:
-- define RuntimeFrame structure
-- define RuntimeStackTrace structure
-- define frame lifecycle
-- define frame ownership rules
-- define host frame policy
-- define quotation frame policy
-- define tail-call representation
-- define renderer integration boundaries
+- implement RuntimeFrame data structure
+- implement RuntimeStackTrace container
+- implement frame storage model
+- implement frame creation helpers
+- preserve existing runtime behavior
+- preserve self-tail-call behavior
+- preserve RuntimeStack responsibility separation
+- preserve RuntimeDiagnostic separation
 
 Non-goals:
-- no implementation
 - no renderer work
 - no ANSI formatting
 - no locals snapshots
+- no frame history
 - no IDE integration
+- no host frame redesign
+- no quotation policy redesign
+- no Nicole semantic changes
+
+Phase 6 subphases:
+
+6A:
+stack trace architecture audit + freeze
+
+6B:
+RuntimeFrame and RuntimeStackTrace foundation implementation
+
+6C:
+frame lifecycle attachment
+
+Scope:
+- attach frames at frozen creation points
+- preserve tail-call optimization behavior
+
+6D:
+RuntimeDiagnostic and RuntimeError trace attachment
+
+Scope:
+- attach RuntimeStackTrace to runtime diagnostics
+- preserve existing RuntimeError compatibility
+
+6E:
+runtime trace rendering integration
+
+Scope:
+- rendering only
+- no semantic changes
+- no ANSI
+
+6F:
+final audit, tests, cleanup, closure
 
 ## Phase 1A detailed sequence
 
@@ -1385,4 +1421,4 @@ Before Phase 8:
 | 2026-05-24 | `db43fa1f23433b839b620e538212ecd0af1745c7` | Phase 5D implementation accepted and tracked | `209 passed`; `833 passed` | Commit `feat: enrich runtime diagnostic context`; post-audit result accepted; residual coverage gap remains non-blocking |
 | 2026-05-24 | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5E implementation accepted | `218 passed`; `842 passed` | Commit `feat: render runtime diagnostics` |
 | 2026-05-24 | - | Phase 5 closed after complete audit | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; no required fixes before closure |
-| 2026-05-24 | - | Phase 6A stack trace architecture audit completed and architecture freezes recorded before implementation | `218 passed`; `842 passed` | Tracking-only closeout with decision `PASS_PHASE_READY_TO_CLOSE`; Phase 6B design freeze is next |
+| 2026-05-24 | - | Phase 6A stack trace architecture audit completed and architecture freezes recorded before implementation | `218 passed`; `842 passed` | Tracking-only closeout with decision `PASS_PHASE_READY_TO_CLOSE`; Phase 6B RuntimeFrame and RuntimeStackTrace foundation implementation is next |
