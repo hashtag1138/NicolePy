@@ -50,9 +50,13 @@ module @app
   ;
 
   dirty : run { -- }
+    "Quel est votre prénom ? " host.out.text
     host.console.read
+    "Quelle est votre année de naissance ? " host.out.text
     host.console.read host.parse.int
+    "Quel est votre mois de naissance ? " host.out.text
     host.console.read host.parse.int
+    "Quel est votre jour de naissance ? " host.out.text
     host.console.read host.parse.int
     host.now.year
     host.now.month

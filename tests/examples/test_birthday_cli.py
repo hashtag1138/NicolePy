@@ -46,7 +46,15 @@ def _birthday_host_contract():
     )
 
 
-def _run_birthday_cli(*, inputs: list[str], today: tuple[int, int, int]) -> tuple[str, dict[str, int]]:
+PROMPTS = [
+    "Quel est votre prénom ? ",
+    "Quelle est votre année de naissance ? ",
+    "Quel est votre mois de naissance ? ",
+    "Quel est votre jour de naissance ? ",
+]
+
+
+def _run_birthday_cli(*, inputs: list[str], today: tuple[int, int, int]) -> tuple[str, dict[str, int], list[str]]:
     queue = list(inputs)
     output_segments: list[str] = []
     call_counts = {
@@ -118,24 +126,37 @@ def _run_birthday_cli(*, inputs: list[str], today: tuple[int, int, int]) -> tupl
     assert call_counts["out_text"] > 0
     assert call_counts["out_int"] > 0
 
-    return "".join(output_segments), call_counts
+    return "".join(output_segments), call_counts, output_segments
 
 
 def test_birthday_cli_birthday_today() -> None:
-    rendered, call_counts = _run_birthday_cli(
-        inputs=["Alice", "1990", "5", "20"],
-        today=(2026, 5, 20),
+    rendered, call_counts, segments = _run_birthday_cli(
+        inputs=["Alice", "1990", "5", "25"],
+        today=(2026, 5, 25),
     )
 
-    assert rendered == "Joyeux 36e anniversaire Alice !"
+    assert segments[:4] == PROMPTS
+    assert rendered == "".join(PROMPTS) + "Joyeux 36e anniversaire Alice !"
     assert call_counts["out_int"] == 1
 
 
-def test_birthday_cli_not_today_next_year_message() -> None:
-    rendered, call_counts = _run_birthday_cli(
-        inputs=["Alice", "1990", "5", "20"],
-        today=(2026, 5, 19),
+def test_birthday_cli_not_yet_reached_this_year() -> None:
+    rendered, call_counts, segments = _run_birthday_cli(
+        inputs=["Alice", "1990", "5", "25"],
+        today=(2026, 5, 24),
     )
 
-    assert rendered == "Bonjour Alice, l'année prochaine vous aurez 36 ans."
+    assert segments[:4] == PROMPTS
+    assert rendered == "".join(PROMPTS) + "Bonjour Alice, l'année prochaine vous aurez 36 ans."
+    assert call_counts["out_int"] == 1
+
+
+def test_birthday_cli_already_passed_this_year() -> None:
+    rendered, call_counts, segments = _run_birthday_cli(
+        inputs=["Alice", "1990", "5", "20"],
+        today=(2026, 5, 21),
+    )
+
+    assert segments[:4] == PROMPTS
+    assert rendered == "".join(PROMPTS) + "Bonjour Alice, l'année prochaine vous aurez 37 ans."
     assert call_counts["out_int"] == 1
