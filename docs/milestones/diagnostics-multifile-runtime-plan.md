@@ -321,7 +321,7 @@ Possible phase states:
 | 5. Runtime diagnostics | completed | `7b4a14f2e60e7d3386403ef77d29d22a49b5a33c` | Phase 5 completed: runtime diagnostics architecture freeze, RuntimeDiagnostic foundation, raise-site conversion, context enrichment, and pure runtime diagnostic rendering are implemented | `218 passed`; `842 passed` | Global closeout result `PASS_PHASE5_READY_TO_CLOSE`; Phase 6A stack trace architecture audit is next |
 | 6. Nicole stack trace | completed | `59166a394f9615a13dd2e0ddb7877ee2b3573708`; cleanup `2ebf6485e77cd84491dd526038fec1380505bede` | Phase 6 completed: runtime stack trace system is implemented and cleanup closeout is complete | `248 passed`; `872 passed` | Runtime stack trace system completed; immutable RuntimeStackTrace lifecycle implemented; RuntimeDiagnostic / RuntimeError trace attachment implemented; deterministic trace rendering implemented; RuntimeError.__str__ compatibility preserved; checker/runtime separation clarified and cleanup completed; renderer remains presentation-only; no semantic runtime changes introduced |
 | 7. Interpreter API | completed | `6cf78848f7cdac9d24487783093366a0df4978d1` | Phase 7A implemented: `NicoleInterpreter` introduced, `run_export(...)` compatibility preserved, interpreter remains minimal, and `CheckedProgram` remains passive | PASS_READY_FOR_TRACKING | No runtime redesign introduced; no VM/session semantics introduced; package-root export decision deferred to Phase 8 |
-| 8. User class API | pending | - | Add ergonomic app-level wrapper usage patterns | - | Thin convenience layer |
+| 8. User class API | in_progress | - | Phase 8 architecture freeze completed: thin `NicoleApplication` facade approved; implementation pending | - | `NicoleCompiler -> CheckedProgram -> NicoleInterpreter -> NicoleApplication`; orchestration only; no host ABI inference; no debugger/session/VM/profiler/renderer behavior |
 | 9. Optional host method binding | deferred | - | Optional decorator/introspection binding model | - | Deferred by decision |
 
 ## Audit findings summary
@@ -1616,7 +1616,28 @@ Before Phase 7:
 
 Before Phase 8:
 
-- freeze whether the user class API is documentation-only, a thin helper, or a public library API
+- Phase 8 name: User class API / `NicoleApplication` facade
+- objective: thin ergonomic facade for experimentation
+- layering: `NicoleCompiler -> CheckedProgram -> NicoleInterpreter -> NicoleApplication`
+- `NicoleApplication` is orchestration only
+- constructor stores configuration only
+- constructor does not compile or run
+- `compile() -> CheckedProgram` compiles paths and stores `CheckedProgram`
+- `run(export_name, *args) -> object` lazily compiles if needed
+- `run()` creates a fresh `NicoleInterpreter` per call
+- `host_bindings` may be `None`, `Mapping[str, Callable[..., object]]`, or `RuntimeHostBindings`
+- if `host_bindings` is `None`, use `RuntimeHostBindings({})`
+- if `host_bindings` is already `RuntimeHostBindings`, reuse it
+- if `host_bindings` is a mapping, wrap it in `RuntimeHostBindings(host_bindings)`
+- no host ABI inference
+- no automatic `HostContract` generation from Python callables
+- no signature reflection
+- no debugger/session/VM/profiler/renderer behavior
+- no implicit default entrypoint
+- `@app.main` is passed through as a normal export name
+- errors propagate unchanged
+- no fake spans/traces/frames
+- package-root export decision is allowed only for `NicoleApplication` if needed
 - defer `host_object` unless explicitly approved after compiler/interpreter APIs are stable
 
 ## Change log
@@ -1660,3 +1681,4 @@ Before Phase 8:
 | 2026-05-25 | `59166a394f9615a13dd2e0ddb7877ee2b3573708` | Phase 6E implemented and committed: runtime diagnostic renderer now renders RuntimeStackTrace when present using frozen deterministic trace formatting while preserving legacy RuntimeError compatibility and no-trace rendering behavior | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 248 passed; `./.venv/bin/python -m pytest -q`: 872 passed | Commit `feat: render runtime stack traces`; trace rendering integrated; no ANSI; no locals snapshots; no frame history; no semantic changes; renderer remains presentation-only; Phase 6F final audit and closeout is next |
 | 2026-05-25 | `2ebf6485e77cd84491dd526038fec1380505bede` | Phase 6F cleanup completed: runtime trace tests aligned with checker/runtime boundary policy by removing checker-bypass execution of statically invalid Nicole programs through run_export(...) | `./.venv/bin/python -m pytest tests/test_runtime.py -q`: 248 passed; `./.venv/bin/python -m pytest -q`: 872 passed | Commit `test: align runtime trace tests with checker boundaries`; helper-level runtime defensive tests preserved; runtime-boundary tests preserved; host-boundary tests preserved; Phase 6 officially ready to close |
 | 2026-05-25 | `6cf78848f7cdac9d24487783093366a0df4978d1` | Phase 7A audit acceptance recorded: `NicoleInterpreter` introduced, `run_export(...)` compatibility preserved, interpreter remains minimal, `CheckedProgram` remains passive, and no runtime redesign or VM/session semantics were introduced | `PASS_READY_FOR_TRACKING` | Tracking-only acceptance for implementation commit `6cf78848f7cdac9d24487783093366a0df4978d1`; package-root export decision deferred to Phase 8 |
+| 2026-05-25 | - | Phase 8 architecture freeze recorded: thin `NicoleApplication` facade approved as orchestration-only convenience over `NicoleCompiler`, `CheckedProgram`, and `NicoleInterpreter` with lazy compile-on-run behavior and unchanged error propagation | - | Tracking-only freeze; no host ABI inference; no signature reflection; no debugger/session/VM/profiler/renderer behavior; package-root export allowed only for `NicoleApplication` if needed; Phase 8A implementation is next |
