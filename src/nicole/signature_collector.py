@@ -21,6 +21,7 @@ from .symbols import (
     SourceHostCapabilitySymbol,
     SourceHostContract,
     SourceHostOpaqueTypeSymbol,
+    SymbolCategory,
     SymbolError,
     SymbolTable,
     WordSymbol,
@@ -49,6 +50,7 @@ def collect_semantic_model(program: ProgramNode) -> CollectedSemanticModel:
             _collect_host_module(declaration, source_host_contract)
             continue
         _collect_module(declaration, table)
+    _categorize_imports(table, source_host_contract)
     return CollectedSemanticModel(symbols=table, source_host_contract=source_host_contract)
 
 
@@ -174,6 +176,47 @@ def _collect_import(declaration: ImportDeclaration, table: SymbolTable, *, owner
             group_parent_target=target,
             group_member=member,
         )
+
+
+def _categorize_imports(table: SymbolTable, source_host_contract: SourceHostContract) -> None:
+    if not table.imports:
+        return
+
+    categorized_imports = []
+    categorized_aliases = {}
+
+    for metadata in table.imports:
+        category = _category_from_source_host_contract(metadata.target, source_host_contract)
+        categorized_metadata = replace(metadata, category=category)
+        categorized_imports.append(categorized_metadata)
+        if categorized_metadata.alias is not None:
+            categorized_aliases[(categorized_metadata.owner_module, categorized_metadata.alias)] = categorized_metadata
+
+    table.imports = categorized_imports
+    table.aliases = categorized_aliases
+
+
+def _category_from_source_host_contract(
+    import_target: str,
+    source_host_contract: SourceHostContract,
+) -> SymbolCategory | None:
+    canonical_host_name = _canonical_host_name_from_import_target(import_target)
+    if canonical_host_name is None:
+        return None
+    if canonical_host_name in source_host_contract.capabilities:
+        return SymbolCategory.HOST_CAPABILITY
+    if canonical_host_name in source_host_contract.opaque_types:
+        return SymbolCategory.HOST_OPAQUE_TYPE
+    return None
+
+
+def _canonical_host_name_from_import_target(import_target: str) -> str | None:
+    if not import_target.startswith("host."):
+        return None
+    suffix = import_target.removeprefix("host.")
+    if suffix == "":
+        return None
+    return f"@host.{suffix}"
 
 
 def _collect_word(word: WordDefNode, table: SymbolTable, *, module: str | None, owner: str | None) -> None:

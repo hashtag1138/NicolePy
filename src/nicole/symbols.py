@@ -56,6 +56,7 @@ class ImportMetadata:
     target: str
     alias: str | None
     span: SourceSpan
+    category: SymbolCategory | None = None
     is_grouped_expansion: bool = False
     group_parent_target: str | None = None
     group_member: str | None = None

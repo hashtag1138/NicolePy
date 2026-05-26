@@ -293,6 +293,91 @@ def test_grouped_import_alias_can_repeat_in_different_modules() -> None:
     assert ("other", "ops.add") in table.aliases
 
 
+def test_import_simple_host_capability_is_categorized() -> None:
+    table = collect_signatures(
+        parse_source(
+            "module @host\n"
+            "  require console.log { msg:String -- } dirty\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @host.console.log as log\n"
+            "end-module\n"
+        )
+    )
+    assert table.aliases[("app", "log")].category is SymbolCategory.HOST_CAPABILITY
+
+
+def test_import_simple_host_opaque_is_categorized() -> None:
+    table = collect_signatures(
+        parse_source(
+            "module @host\n"
+            "  opaque io.FileHandle\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @host.io.FileHandle as FileHandle\n"
+            "end-module\n"
+        )
+    )
+    assert table.aliases[("app", "FileHandle")].category is SymbolCategory.HOST_OPAQUE_TYPE
+
+
+def test_grouped_host_import_members_are_categorized() -> None:
+    table = collect_signatures(
+        parse_source(
+            "module @host\n"
+            "  require io.open-file { path:String -- handle:@host.io.FileHandle } dirty\n"
+            "  opaque io.FileHandle\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @host.io.{ open-file FileHandle } as io\n"
+            "end-module\n"
+        )
+    )
+    assert table.aliases[("app", "io.open-file")].category is SymbolCategory.HOST_CAPABILITY
+    assert table.aliases[("app", "io.FileHandle")].category is SymbolCategory.HOST_OPAQUE_TYPE
+
+
+def test_grouped_host_import_as_star_members_are_categorized() -> None:
+    table = collect_signatures(
+        parse_source(
+            "module @host\n"
+            "  require console.log { msg:String -- } dirty\n"
+            "  require console.read-line { -- line:String } dirty\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @host.console.{ log read-line } as *\n"
+            "end-module\n"
+        )
+    )
+    assert table.aliases[("app", "log")].category is SymbolCategory.HOST_CAPABILITY
+    assert table.aliases[("app", "read-line")].category is SymbolCategory.HOST_CAPABILITY
+
+
+def test_import_user_symbol_category_remains_none() -> None:
+    table = collect_signatures(
+        parse_source(
+            "module @app\n"
+            "  import @math.add as add\n"
+            "end-module\n"
+        )
+    )
+    assert table.aliases[("app", "add")].category is None
+
+
+def test_import_host_category_is_order_independent_of_host_fragment_position() -> None:
+    table = collect_signatures(
+        parse_source(
+            "module @app\n"
+            "  import @host.console.log as log\n"
+            "end-module\n"
+            "module @host\n"
+            "  require console.log { msg:String -- } dirty\n"
+            "end-module\n"
+        )
+    )
+    assert table.aliases[("app", "log")].category is SymbolCategory.HOST_CAPABILITY
+
+
 @pytest.mark.parametrize("reserved_root", ["list", "map", "result"])
 def test_reserved_root_module_name_is_rejected(reserved_root: str) -> None:
     program = parse_source(
