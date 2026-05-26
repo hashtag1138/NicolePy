@@ -13,6 +13,39 @@ from nicole.source import MEMORY_SOURCE_PATH, SYNTHETIC_SOURCE_PATH
 from nicole.signature_collector import collect_signatures
 from nicole.standard_symbols import with_standard_symbols
 
+
+def _rewrite_direct_host_calls_to_import_aliases(source: str, host_words: list[HostWord]) -> str:
+    unique_host_names = []
+    seen = set()
+    for host_word in host_words:
+        if host_word.name in seen:
+            continue
+        seen.add(host_word.name)
+        unique_host_names.append(host_word.name)
+
+    rewritten = source
+    used_aliases: list[tuple[str, str]] = []
+    for host_name in unique_host_names:
+        if not host_name.startswith("host."):
+            continue
+        host_suffix = host_name[len("host.") :]
+        alias_name = f"h.{host_suffix}"
+        if host_name in rewritten:
+            rewritten = rewritten.replace(host_name, alias_name)
+            used_aliases.append((host_name, alias_name))
+
+    if not used_aliases:
+        return rewritten
+
+    import_lines = [f"  import @{host_name} as {alias_name}\n" for host_name, alias_name in used_aliases]
+    output: list[str] = []
+    for line in rewritten.splitlines(keepends=True):
+        output.append(line)
+        if line.startswith("module @") and line.strip() != "module @host":
+            output.extend(import_lines)
+    return "".join(output)
+
+
 def _parse_source(source: str):
     return Parser(lex(source)).parse()
 
@@ -43,6 +76,7 @@ def _opaque_types(type_names):
 
 
 def check_source_with_host_contract(source: str, host_words, *, opaque_type_names=()):
+    source = _rewrite_direct_host_calls_to_import_aliases(source, host_words)
     program = _parse_source(source)
     symbols = collect_signatures(program)
     symbols = with_standard_symbols(symbols)
@@ -64,6 +98,7 @@ def check_source_without_builtins(source: str):
     return check_program(resolved, symbols)
 
 def check_source_with_host_contract_without_builtins(source: str, host_words, *, opaque_type_names=()):
+    source = _rewrite_direct_host_calls_to_import_aliases(source, host_words)
     program = _parse_source(source)
     symbols = collect_signatures(program)
     contract = host_contract_from_words(
@@ -946,9 +981,11 @@ def test_checker_does_not_mark_self_call_inside_case_guard_as_tail() -> None:
 def test_checker_effect_analysis_distinguishes_same_name_words_across_modules() -> None:
     host_signature = signature_from_source('module @app\n  : hostsig { msg:String -- } ;\nend-module\n')
     source = 'module @a\n  : run { -- n:Int }\n    1\n  ;\nend-module\nmodule @b\n  dirty : run { msg:String -- }\n    msg host.log\n  ;\nend-module'
+    host_words = [HostWord(name='host.log', signature=host_signature, effect=HostEffect.DIRTY)]
+    source = _rewrite_direct_host_calls_to_import_aliases(source, host_words)
     program = _parse_source(source)
     symbols = collect_signatures(program)
-    contract = host_contract_from_words([HostWord(name='host.log', signature=host_signature, effect=HostEffect.DIRTY)])
+    contract = host_contract_from_words(host_words)
     resolved = resolve(program, symbols, host_contract=contract)
     analysis = Checker(symbols)._analyze_effects(resolved)
     assert len(set(analysis.word_order)) == 2
@@ -1156,6 +1193,7 @@ def test_checker_case_pattern_mismatch_exposes_structured_diagnostic() -> None:
 
 def test_checker_case_guard_dirty_call_exposes_structured_diagnostic() -> None:
     host_signature = signature_from_source('module @app\n  : hostsig { msg:String -- } ;\nend-module\n')
+    host_words = [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)]
     source = (
         "module @app\n"
         "  dirty : use-guard { r:Result<Int,MapError> -- n:Int }\n"
@@ -1169,12 +1207,13 @@ def test_checker_case_guard_dirty_call_exposes_structured_diagnostic() -> None:
     with pytest.raises(CheckerError) as exc_info:
         check_source_with_host_contract(
             source,
-            [HostWord(name="host.log", signature=host_signature, effect=HostEffect.DIRTY)],
+            host_words,
         )
     error = exc_info.value
-    program = _parse_source(source)
+    rewritten = _rewrite_direct_host_calls_to_import_aliases(source, host_words)
+    program = _parse_source(rewritten)
     word = get_module_word(program, module_name="app", word_name="use-guard")
-    host_call = _find_identifier(word.body, "host.log")
+    host_call = _find_identifier(word.body, "h.log")
     diagnostic_span = error.diagnostic.span
     assert diagnostic_span is not None
     assert error.diagnostic.phase is DiagnosticPhase.CHECKER

@@ -402,14 +402,15 @@ def test_host_resolution_remains_stable() -> None:
     )
     program = resolve_source_with_host_contract(
         "module @app\n"
-        "  : log { msg:String -- }\n"
-        "    msg host.log\n"
+        "  import @host.log as log\n"
+        "  : run { msg:String -- }\n"
+        "    msg log\n"
         "  ;\n"
         "end-module\n",
         [HostWord(name="host.log", signature=signature, effect=HostEffect.PURE)],
     )
 
-    host_ref = get_module_word(program, module_name="app", word_name="log").body.items[1]
+    host_ref = get_module_word(program, module_name="app", word_name="run").body.items[1]
     assert isinstance(host_ref, IdentifierNode)
     assert host_ref.resolution.owner_scope == "host"
     assert host_ref.resolution.qualified_name == "host.log"
@@ -427,8 +428,9 @@ def test_required_host_resolution_remains_stable() -> None:
     )
     program = resolve_source_with_host_contract(
         "module @app\n"
-        "  : log { msg:String -- }\n"
-        "    msg host.log\n"
+        "  import @host.log as log\n"
+        "  : run { msg:String -- }\n"
+        "    msg log\n"
         "  ;\n"
         "end-module\n",
         [
@@ -441,7 +443,7 @@ def test_required_host_resolution_remains_stable() -> None:
         ],
     )
 
-    host_ref = get_module_word(program, module_name="app", word_name="log").body.items[1]
+    host_ref = get_module_word(program, module_name="app", word_name="run").body.items[1]
     assert isinstance(host_ref, IdentifierNode)
     assert host_ref.resolution.owner_scope == "host"
     assert host_ref.resolution.qualified_name == "host.log"
@@ -578,7 +580,7 @@ def test_resolver_unresolved_name_exposes_structured_diagnostic() -> None:
     assert error.column == error.diagnostic.span.column
 
 
-def test_resolver_host_contract_required_exposes_structured_diagnostic() -> None:
+def test_resolver_direct_host_access_is_forbidden_with_structured_diagnostic() -> None:
     with pytest.raises(ResolutionError) as exc_info:
         resolve_source(
             "module @app\n"
@@ -590,8 +592,9 @@ def test_resolver_host_contract_required_exposes_structured_diagnostic() -> None
 
     error = exc_info.value
     assert error.diagnostic.phase is DiagnosticPhase.RESOLVER
-    assert error.diagnostic.code == "RESOLVER_HOST_CONTRACT_REQUIRED"
-    assert error.message == "host contract required for host.* reference"
+    assert error.diagnostic.code == "RESOLVER_DIRECT_HOST_ACCESS_FORBIDDEN"
+    assert error.message == "direct host access is forbidden; import from @host instead"
+    assert error.diagnostic.suggestion == "import this symbol from @host inside the current module"
 
 
 def test_resolver_unknown_host_word_exposes_structured_diagnostic() -> None:
@@ -606,8 +609,9 @@ def test_resolver_unknown_host_word_exposes_structured_diagnostic() -> None:
     with pytest.raises(ResolutionError) as exc_info:
         resolve_source_with_host_contract(
             "module @app\n"
+            "  import @host.log as log\n"
             "  : run { msg:String -- }\n"
-            "    msg host.log\n"
+            "    msg log\n"
             "  ;\n"
             "end-module\n",
             [HostWord(name="host.print", signature=hostsig, effect=HostEffect.PURE)],
@@ -631,8 +635,9 @@ def test_resolver_optional_host_word_direct_call_exposes_structured_diagnostic()
     with pytest.raises(ResolutionError) as exc_info:
         resolve_source_with_host_contract(
             "module @app\n"
+            "  import @host.log as log\n"
             "  : run { msg:String -- }\n"
-            "    msg host.log\n"
+            "    msg log\n"
             "  ;\n"
             "end-module\n",
             [
@@ -649,3 +654,43 @@ def test_resolver_optional_host_word_direct_call_exposes_structured_diagnostic()
     assert error.diagnostic.phase is DiagnosticPhase.RESOLVER
     assert error.diagnostic.code == "RESOLVER_OPTIONAL_HOST_WORD_DIRECT_CALL"
     assert error.message == "optional host word cannot be called directly in v1"
+
+
+def test_rejects_host_opaque_alias_used_as_expression() -> None:
+    with pytest.raises(ResolutionError) as exc_info:
+        resolve_source(
+            "module @host\n"
+            "  opaque io.FileHandle\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @host.io.FileHandle as FileHandle\n"
+            "  : run { -- }\n"
+            "    FileHandle\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.RESOLVER
+    assert error.diagnostic.code == "RESOLVER_HOST_OPAQUE_TYPE_VALUE_USE"
+    assert error.message == "host opaque type cannot be used as an expression"
+
+
+def test_rejects_grouped_host_opaque_alias_used_as_expression() -> None:
+    with pytest.raises(ResolutionError) as exc_info:
+        resolve_source(
+            "module @host\n"
+            "  opaque io.FileHandle\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @host.io.{ FileHandle } as io\n"
+            "  : run { -- }\n"
+            "    io.FileHandle\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+    error = exc_info.value
+    assert error.diagnostic.phase is DiagnosticPhase.RESOLVER
+    assert error.diagnostic.code == "RESOLVER_HOST_OPAQUE_TYPE_VALUE_USE"
+    assert error.message == "host opaque type cannot be used as an expression"

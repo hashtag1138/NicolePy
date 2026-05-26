@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .ast_nodes import (
     BlockNode,
     CaseBranchNode,
@@ -18,7 +20,7 @@ from .ast_nodes import (
 )
 from .errors import DiagnosticError, DiagnosticPhase
 from .host_abi import BindingAvailability, HostContract
-from .symbols import SymbolSource, SymbolTable, WordSymbol
+from .symbols import ImportMetadata, SymbolCategory, SymbolSource, SymbolTable, WordSymbol
 
 __all__ = ["ResolutionError", "Resolver", "resolve"]
 
@@ -259,7 +261,14 @@ class Resolver:
             return
 
         if node.name.startswith("host."):
-            self._annotate_host(node)
+            self._raise_error(
+                "direct host access is forbidden; import from @host instead",
+                node.span.line,
+                node.span.column,
+                code="RESOLVER_DIRECT_HOST_ACCESS_FORBIDDEN",
+                span=node.span,
+                suggestion="import this symbol from @host inside the current module",
+            )
             return
 
         symbol = self._lookup_symbol(
@@ -276,6 +285,15 @@ class Resolver:
             return
 
         host_alias_reference = self._resolve_host_alias_reference(node.name, current_module=current_module)
+        if host_alias_reference == "opaque-type":
+            self._raise_error(
+                "host opaque type cannot be used as an expression",
+                node.span.line,
+                node.span.column,
+                code="RESOLVER_HOST_OPAQUE_TYPE_VALUE_USE",
+                span=node.span,
+            )
+            return
         if host_alias_reference is not None:
             self._annotate_host_reference(node, host_alias_reference)
             return
@@ -409,16 +427,40 @@ class Resolver:
             signature_reference=None,
         )
 
-    def _annotate_host(self, node: IdentifierNode) -> None:
-        self._annotate_host_reference(node, node.name)
-
     def _resolve_host_alias_reference(self, name: str, *, current_module: str) -> str | None:
-        alias, separator, suffix = name.partition(".")
-        alias_suffix = suffix if separator else None
-        referenced = self._symbols.resolve_alias_reference(current_module, alias, alias_suffix)
-        if referenced is None or not referenced.startswith("host."):
+        metadata = self._resolve_alias_metadata(name, current_module=current_module)
+        if metadata is None:
             return None
-        return referenced
+        if metadata.category is SymbolCategory.HOST_OPAQUE_TYPE:
+            return "opaque-type"
+        if metadata.category is SymbolCategory.HOST_CAPABILITY:
+            return metadata.target
+        if metadata.target.startswith("host."):
+            return metadata.target
+        return None
+
+    def _resolve_alias_metadata(self, name: str, *, current_module: str) -> ImportMetadata | None:
+        alias, separator, suffix = name.partition(".")
+        if separator:
+            exact_alias_metadata = self._symbols.alias_metadata(current_module, f"{alias}.{suffix}")
+            if exact_alias_metadata is not None:
+                return exact_alias_metadata
+
+        alias_metadata = self._symbols.alias_metadata(current_module, alias)
+        if alias_metadata is None:
+            return None
+
+        is_module_target = alias_metadata.target in self._symbols.modules
+        if not is_module_target:
+            return alias_metadata if not separator else None
+        if not separator:
+            return None
+
+        return replace(
+            alias_metadata,
+            target=f"{alias_metadata.target}.{suffix}",
+            category=None,
+        )
 
     def _annotate_host_reference(self, node: IdentifierNode, host_reference: str) -> None:
         if self._host_contract is None:
@@ -446,6 +488,7 @@ class Resolver:
                 code="RESOLVER_OPTIONAL_HOST_WORD_DIRECT_CALL",
                 span=node.span,
             )
+        node.name = host_reference
         node.resolution = ResolutionInfo(
             resolved_symbol=host_word,
             owner_scope="host",

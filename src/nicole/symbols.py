@@ -187,6 +187,9 @@ class SymbolTable:
             return None
         return metadata.target
 
+    def alias_metadata(self, owner_module: str, alias: str) -> ImportMetadata | None:
+        return self.aliases.get((owner_module, alias))
+
     def resolve_alias_reference(self, owner_module: str, alias: str, suffix: str | None) -> str | None:
         if suffix is not None:
             exact_target = self.alias_target(owner_module, f"{alias}.{suffix}")

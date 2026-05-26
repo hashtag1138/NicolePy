@@ -212,8 +212,9 @@ def test_pipeline_accepts_host_calls_with_imports() -> None:
         "end-module\n"
         "module @app\n"
         "  import @util\n"
+        "  import @host.log as log\n"
         "  : send { msg:String -- }\n"
-        "    msg @util.normalize host.log\n"
+        "    msg @util.normalize log\n"
         "  ;\n"
         "end-module\n",
         host_contract=host_contract,
@@ -244,8 +245,9 @@ def test_pipeline_accepts_host_contract_with_declared_opaque_types_in_phase1() -
     )
     result = analyze_program(
         "module @app\n"
+        "  import @host.log as log\n"
         "  : run { msg:String -- }\n"
-        "    msg host.log\n"
+        "    msg log\n"
         "  ;\n"
         "end-module\n",
         host_contract=host_contract,
@@ -273,8 +275,9 @@ def test_pipeline_builds_legacy_capability_bridge_from_source_host_contract() ->
         "  require console.log { msg:String -- } dirty\n"
         "end-module\n"
         "module @app\n"
+        "  import @host.console.log as console.log\n"
         "  dirty : run { msg:String -- }\n"
-        "    msg host.console.log\n"
+        "    msg console.log\n"
         "  ;\n"
         "end-module\n"
     )
@@ -409,8 +412,9 @@ def test_pipeline_rejects_pure_cross_module_call_to_dirty_same_name_word() -> No
     with pytest.raises(CheckerError, match=r"inferred dirty.*missing dirty annotation"):
         analyze_program(
             "module @b\n"
+            "  import @host.log as log\n"
             "  dirty : run { msg:String -- }\n"
-            "    msg host.log\n"
+            "    msg log\n"
             "  ;\n"
             "end-module\n"
             "module @a\n"
@@ -600,8 +604,9 @@ def test_pipeline_public_path_accepts_declared_opaque_value_through_host_word_an
     )
     checked = analyze_program(
         "module @app\n"
+        "  import @host.open as open\n"
         "  : run { -- out:host.io.FileHandle }\n"
-        "    host.open\n"
+        "    open\n"
         "  ;\n"
         "  export : run\n"
         "end-module\n",
@@ -630,8 +635,9 @@ def test_pipeline_public_path_propagates_declared_opaque_result_container() -> N
     )
     checked = analyze_program(
         "module @app\n"
+        "  import @host.open-result as open-result\n"
         "  : run { -- out:Result<host.io.FileHandle,String> }\n"
-        "    host.open-result\n"
+        "    open-result\n"
         "  ;\n"
         "  export : run\n"
         "end-module\n",
@@ -663,8 +669,9 @@ def test_pipeline_public_path_rejects_wrong_opaque_type_name_at_runtime() -> Non
     )
     checked = analyze_program(
         "module @app\n"
+        "  import @host.open as open\n"
         "  : run { -- out:host.io.FileHandle }\n"
-        "    host.open\n"
+        "    open\n"
         "  ;\n"
         "  export : run\n"
         "end-module\n",
@@ -693,8 +700,9 @@ def test_pipeline_public_path_rejects_raw_python_object_for_opaque_output() -> N
     )
     checked = analyze_program(
         "module @app\n"
+        "  import @host.open as open\n"
         "  : run { -- out:host.io.FileHandle }\n"
-        "    host.open\n"
+        "    open\n"
         "  ;\n"
         "  export : run\n"
         "end-module\n",

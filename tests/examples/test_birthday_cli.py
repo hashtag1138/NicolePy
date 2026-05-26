@@ -1,5 +1,7 @@
 from pathlib import Path
 import sys
+import re
+from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
@@ -15,6 +17,32 @@ EXAMPLE_PATH = Path(__file__).resolve().parents[2] / "examples" / "birthday_cli"
 
 def _signature_from_source(source: str):
     return Parser(lex(source)).parse().words[0].signature
+
+
+def _rewrite_direct_host_calls_to_import_aliases(source: str, host_word_names: list[str]) -> str:
+    rewritten = source
+    used_aliases: list[tuple[str, str]] = []
+    for host_name in sorted(host_word_names, key=len, reverse=True):
+        if not host_name.startswith("host."):
+            continue
+        host_suffix = host_name[len("host.") :]
+        alias_name = f"h.{host_suffix}"
+        pattern = re.compile(rf"(?<![A-Za-z0-9_@.-]){re.escape(host_name)}(?![A-Za-z0-9_.-])")
+        rewritten, count = pattern.subn(alias_name, rewritten)
+        if count > 0:
+            used_aliases.append((host_name, alias_name))
+
+    if not used_aliases:
+        return rewritten
+
+    import_lines = [f"  import @{host_name} as {alias_name}\n" for host_name, alias_name in used_aliases]
+    output: list[str] = []
+    for line in rewritten.splitlines(keepends=True):
+        output.append(line)
+        stripped = line.strip()
+        if stripped.startswith("module @") and stripped != "module @host":
+            output.extend(import_lines)
+    return "".join(output)
 
 
 def _birthday_host_contract():
@@ -98,23 +126,32 @@ def _run_birthday_cli(*, inputs: list[str], today: tuple[int, int, int]) -> tupl
         call_counts["out_int"] += 1
         output_segments.append(str(value))
 
-    app = NicoleApplication(
-        EXAMPLE_PATH,
-        host_contract=_birthday_host_contract(),
-        host_bindings=RuntimeHostBindings(
-            {
-                "host.console.read": read_next,
-                "host.parse.int": parse_int,
-                "host.now.year": now_year,
-                "host.now.month": now_month,
-                "host.now.day": now_day,
-                "host.out.text": out_text,
-                "host.out.int": out_int,
-            }
-        ),
+    host_contract = _birthday_host_contract()
+    source_text = EXAMPLE_PATH.read_text(encoding="utf-8")
+    rewritten_source = _rewrite_direct_host_calls_to_import_aliases(
+        source_text,
+        list(host_contract.words),
     )
+    with TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir) / "birthday_cli_imported.nic"
+        tmp_path.write_text(rewritten_source, encoding="utf-8")
+        app = NicoleApplication(
+            tmp_path,
+            host_contract=host_contract,
+            host_bindings=RuntimeHostBindings(
+                {
+                    "host.console.read": read_next,
+                    "host.parse.int": parse_int,
+                    "host.now.year": now_year,
+                    "host.now.month": now_month,
+                    "host.now.day": now_day,
+                    "host.out.text": out_text,
+                    "host.out.int": out_int,
+                }
+            ),
+        )
 
-    result = app.run("@app.run")
+        result = app.run("@app.run")
 
     assert result is None
     assert queue == []

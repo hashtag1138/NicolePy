@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 from dataclasses import FrozenInstanceError
+import re
 
 import pytest
 
@@ -10,7 +11,7 @@ from nicole.checker import CheckerError
 from nicole.host_abi import HostABIError, HostEffect, HostOpaqueType, HostWord, host_contract_from_words
 from nicole.lexer import lex
 from nicole.parser import Parser
-from nicole.pipeline import analyze_program
+from nicole.pipeline import analyze_program as _analyze_program
 from nicole.resolver import ResolutionError
 from nicole.ast_nodes import TypeNode
 from nicole.interpreter import NicoleInterpreter
@@ -45,6 +46,49 @@ from nicole.source import SourceFile, SourceLocation, SourceSpan
 
 def signature_from_source(source: str):
     return Parser(lex(source)).parse().words[0].signature
+
+
+def _rewrite_direct_host_calls_to_import_aliases(source: str, host_words: list[HostWord]) -> str:
+    unique_host_names: list[str] = []
+    seen = set()
+    for host_word in host_words:
+        host_name = host_word.name
+        if not host_name.startswith("host.") or host_name in seen:
+            continue
+        seen.add(host_name)
+        unique_host_names.append(host_name)
+
+    rewritten = source
+    used_aliases: list[tuple[str, str]] = []
+    for host_name in sorted(unique_host_names, key=len, reverse=True):
+        host_suffix = host_name[len("host.") :]
+        alias_name = f"h.{host_suffix}"
+        pattern = re.compile(rf"(?<![A-Za-z0-9_@.-]){re.escape(host_name)}(?![A-Za-z0-9_.-])")
+        rewritten, count = pattern.subn(alias_name, rewritten)
+        if count > 0:
+            used_aliases.append((host_name, alias_name))
+
+    if not used_aliases:
+        return rewritten
+
+    import_lines = [f"  import @{host_name} as {alias_name}\n" for host_name, alias_name in used_aliases]
+    output: list[str] = []
+    for line in rewritten.splitlines(keepends=True):
+        output.append(line)
+        stripped = line.strip()
+        if stripped.startswith("module @") and stripped != "module @host":
+            output.extend(import_lines)
+    return "".join(output)
+
+
+def analyze_program(source: str, *, host_contract=None):
+    if host_contract is None:
+        return _analyze_program(source)
+    rewritten_source = _rewrite_direct_host_calls_to_import_aliases(
+        source,
+        list(host_contract.words.values()),
+    )
+    return _analyze_program(rewritten_source, host_contract=host_contract)
 
 
 def host_contract_with_opaque(*type_names: str, words: list[HostWord] | None = None):
