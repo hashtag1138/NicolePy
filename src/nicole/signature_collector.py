@@ -6,6 +6,7 @@ from .ast_nodes import (
     ExportDeclaration,
     HostOpaqueDeclaration,
     HostRequireDeclaration,
+    ImportAliasKind,
     ImportDeclaration,
     ModuleDeclaration,
     ParameterNode,
@@ -137,7 +138,42 @@ def _collect_host_opaque(
 
 def _collect_import(declaration: ImportDeclaration, table: SymbolTable, *, owner_module: str) -> None:
     target = _module_key(declaration.target.parts)
-    table.add_import(owner_module=owner_module, target=target, alias=declaration.alias, span=declaration.span)
+    if not declaration.is_grouped:
+        table.add_import(owner_module=owner_module, target=target, alias=declaration.alias, span=declaration.span)
+        return
+
+    for member in declaration.grouped_members:
+        member_target = f"{target}.{member}"
+        if declaration.alias_kind is ImportAliasKind.STAR:
+            member_alias = member
+        elif declaration.alias_kind is ImportAliasKind.PREFIX:
+            if declaration.alias is None:
+                raise SymbolError(
+                    message="grouped import requires an alias",
+                    line=declaration.span.line,
+                    column=declaration.span.column,
+                    span=declaration.span,
+                    code="SYMBOLS_GROUPED_IMPORT_ALIAS_REQUIRED",
+                )
+            member_alias = f"{declaration.alias}.{member}"
+        else:
+            raise SymbolError(
+                message="unsupported grouped import alias kind",
+                line=declaration.span.line,
+                column=declaration.span.column,
+                span=declaration.span,
+                code="SYMBOLS_GROUPED_IMPORT_ALIAS_KIND_UNSUPPORTED",
+            )
+
+        table.add_import(
+            owner_module=owner_module,
+            target=member_target,
+            alias=member_alias,
+            span=declaration.span,
+            is_grouped_expansion=True,
+            group_parent_target=target,
+            group_member=member,
+        )
 
 
 def _collect_word(word: WordDefNode, table: SymbolTable, *, module: str | None, owner: str | None) -> None:

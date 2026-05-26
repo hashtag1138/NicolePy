@@ -216,6 +216,83 @@ def test_imports_are_recorded_per_owner_module() -> None:
     }
 
 
+def test_grouped_import_with_prefix_alias_is_desugared_into_explicit_imports() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  import @host.io.{ open-file close-file FileHandle } as io\n"
+        "end-module\n"
+    )
+    table = collect_signatures(program)
+
+    assert len(table.imports) == 3
+    assert {(metadata.target, metadata.alias) for metadata in table.imports} == {
+        ("host.io.open-file", "io.open-file"),
+        ("host.io.close-file", "io.close-file"),
+        ("host.io.FileHandle", "io.FileHandle"),
+    }
+    assert all(metadata.owner_module == "app" for metadata in table.imports)
+    assert all(metadata.is_grouped_expansion for metadata in table.imports)
+    assert all(metadata.group_parent_target == "host.io" for metadata in table.imports)
+    assert {metadata.group_member for metadata in table.imports} == {"open-file", "close-file", "FileHandle"}
+
+
+def test_grouped_import_with_as_star_desugars_to_short_aliases_only() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  import @host.console.{ log read-line } as *\n"
+        "end-module\n"
+    )
+    table = collect_signatures(program)
+
+    assert len(table.imports) == 2
+    assert {(metadata.target, metadata.alias) for metadata in table.imports} == {
+        ("host.console.log", "log"),
+        ("host.console.read-line", "read-line"),
+    }
+    assert all(metadata.is_grouped_expansion for metadata in table.imports)
+    assert all(metadata.group_parent_target == "host.console" for metadata in table.imports)
+    assert {metadata.group_member for metadata in table.imports} == {"log", "read-line"}
+
+
+def test_grouped_import_desugaring_applies_to_user_modules_too() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  import @math.ops.{ add sub } as ops\n"
+        "end-module\n"
+    )
+    table = collect_signatures(program)
+
+    assert {(metadata.target, metadata.alias) for metadata in table.imports} == {
+        ("math.ops.add", "ops.add"),
+        ("math.ops.sub", "ops.sub"),
+    }
+
+
+def test_grouped_import_alias_collision_in_same_module_is_rejected() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  import @math.ops.{ add } as ops\n"
+        "  import @tools.ops.{ add } as ops\n"
+        "end-module\n"
+    )
+    with pytest.raises(SymbolError, match="duplicate import alias: ops.add"):
+        collect_signatures(program)
+
+
+def test_grouped_import_alias_can_repeat_in_different_modules() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  import @math.ops.{ add } as ops\n"
+        "end-module\n"
+        "module @other\n"
+        "  import @tools.ops.{ add } as ops\n"
+        "end-module\n"
+    )
+    table = collect_signatures(program)
+    assert ("app", "ops.add") in table.aliases
+    assert ("other", "ops.add") in table.aliases
+
+
 @pytest.mark.parametrize("reserved_root", ["list", "map", "result"])
 def test_reserved_root_module_name_is_rejected(reserved_root: str) -> None:
     program = parse_source(

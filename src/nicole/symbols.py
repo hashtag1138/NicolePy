@@ -56,6 +56,9 @@ class ImportMetadata:
     target: str
     alias: str | None
     span: SourceSpan
+    is_grouped_expansion: bool = False
+    group_parent_target: str | None = None
+    group_member: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,8 +125,26 @@ class SymbolTable:
             )
         self.modules[module_name] = span
 
-    def add_import(self, owner_module: str, target: str, alias: str | None, span: SourceSpan) -> None:
-        metadata = ImportMetadata(owner_module=owner_module, target=target, alias=alias, span=span)
+    def add_import(
+        self,
+        owner_module: str,
+        target: str,
+        alias: str | None,
+        span: SourceSpan,
+        *,
+        is_grouped_expansion: bool = False,
+        group_parent_target: str | None = None,
+        group_member: str | None = None,
+    ) -> None:
+        metadata = ImportMetadata(
+            owner_module=owner_module,
+            target=target,
+            alias=alias,
+            span=span,
+            is_grouped_expansion=is_grouped_expansion,
+            group_parent_target=group_parent_target,
+            group_member=group_member,
+        )
         self.imports.append(metadata)
 
         if alias is None:
@@ -166,6 +187,11 @@ class SymbolTable:
         return metadata.target
 
     def resolve_alias_reference(self, owner_module: str, alias: str, suffix: str | None) -> str | None:
+        if suffix is not None:
+            exact_target = self.alias_target(owner_module, f"{alias}.{suffix}")
+            if exact_target is not None:
+                return exact_target
+
         target = self.alias_target(owner_module, alias)
         if target is None:
             return None

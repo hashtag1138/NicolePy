@@ -281,16 +281,61 @@ def test_pipeline_builds_legacy_capability_bridge_from_source_host_contract() ->
     assert "host.console.log" in result.host_contract.words
 
 
-def test_pipeline_grouped_imports_remain_parser_only_semantics() -> None:
+def test_pipeline_accepts_grouped_import_with_prefix_alias() -> None:
+    result = analyze_program(
+        "module @math.ops\n"
+        "  : add { n:Int -- out:Int }\n"
+        "    n\n"
+        "  ;\n"
+        "end-module\n"
+        "module @app\n"
+        "  import @math.ops.{ add } as ops\n"
+        "  : run { n:Int -- out:Int }\n"
+        "    n ops.add\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    call = _get_module_word(result.program, module_name="app", word_name="run").body.items[1]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "math.ops"
+
+
+def test_pipeline_accepts_grouped_import_with_as_star() -> None:
+    result = analyze_program(
+        "module @math.ops\n"
+        "  : add { n:Int -- out:Int }\n"
+        "    n\n"
+        "  ;\n"
+        "end-module\n"
+        "module @app\n"
+        "  import @math.ops.{ add } as *\n"
+        "  : run { n:Int -- out:Int }\n"
+        "    n add\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    call = _get_module_word(result.program, module_name="app", word_name="run").body.items[1]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "math.ops"
+
+
+def test_pipeline_grouped_import_rejects_member_not_listed() -> None:
     with pytest.raises(ResolutionError, match="unresolved name"):
         analyze_program(
-            "module @host\n"
-            "  require io.open-file { -- out:Int } pure\n"
+            "module @math.ops\n"
+            "  : add { n:Int -- out:Int }\n"
+            "    n\n"
+            "  ;\n"
+            "  : sub { n:Int -- out:Int }\n"
+            "    n\n"
+            "  ;\n"
             "end-module\n"
             "module @app\n"
-            "  import @host.io.{ open-file } as io\n"
-            "  : run { -- out:Int }\n"
-            "    io.open-file\n"
+            "  import @math.ops.{ add } as ops\n"
+            "  : run { n:Int -- out:Int }\n"
+            "    n ops.sub\n"
             "  ;\n"
             "end-module\n"
         )

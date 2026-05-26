@@ -267,19 +267,25 @@ class Resolver:
             current_scope=current_scope,
             current_module=current_module,
         )
-        if symbol is None:
-            self._raise_error(
-                "unresolved name",
-                node.span.line,
-                node.span.column,
-                code="RESOLVER_UNRESOLVED_NAME",
-                span=node.span,
+        if symbol is not None:
+            self._annotate_symbol_node(
+                node,
+                symbol,
+                owner_scope=symbol.owner or "module",
             )
+            return
 
-        self._annotate_symbol_node(
-            node,
-            symbol,
-            owner_scope=symbol.owner or "module",
+        host_alias_reference = self._resolve_host_alias_reference(node.name, current_module=current_module)
+        if host_alias_reference is not None:
+            self._annotate_host_reference(node, host_alias_reference)
+            return
+
+        self._raise_error(
+            "unresolved name",
+            node.span.line,
+            node.span.column,
+            code="RESOLVER_UNRESOLVED_NAME",
+            span=node.span,
         )
 
     def _lookup_symbol(
@@ -404,6 +410,17 @@ class Resolver:
         )
 
     def _annotate_host(self, node: IdentifierNode) -> None:
+        self._annotate_host_reference(node, node.name)
+
+    def _resolve_host_alias_reference(self, name: str, *, current_module: str) -> str | None:
+        alias, separator, suffix = name.partition(".")
+        alias_suffix = suffix if separator else None
+        referenced = self._symbols.resolve_alias_reference(current_module, alias, alias_suffix)
+        if referenced is None or not referenced.startswith("host."):
+            return None
+        return referenced
+
+    def _annotate_host_reference(self, node: IdentifierNode, host_reference: str) -> None:
         if self._host_contract is None:
             self._raise_error(
                 "host contract required for host.* reference",
@@ -412,7 +429,7 @@ class Resolver:
                 code="RESOLVER_HOST_CONTRACT_REQUIRED",
                 span=node.span,
             )
-        host_word = self._host_contract.words.get(node.name)
+        host_word = self._host_contract.words.get(host_reference)
         if host_word is None:
             self._raise_error(
                 "unknown host word",
@@ -432,7 +449,7 @@ class Resolver:
         node.resolution = ResolutionInfo(
             resolved_symbol=host_word,
             owner_scope="host",
-            qualified_name=node.name,
+            qualified_name=host_reference,
             visibility=None,
             signature_reference=host_word.signature,
             host_effect=host_word.effect,

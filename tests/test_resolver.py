@@ -162,6 +162,167 @@ def test_resolves_direct_imported_word_alias() -> None:
     assert call.resolution.resolved_symbol.name == "add"
 
 
+def test_resolves_grouped_prefix_alias_member_for_user_module() -> None:
+    program = resolve_source(
+        "module @math.ops\n"
+        "  : add { -- }\n"
+        "  ;\n"
+        "end-module\n"
+        "module @app\n"
+        "  import @math.ops.{ add } as ops\n"
+        "  : run { -- }\n"
+        "    ops.add\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    call = get_module_word(program, module_name="app", word_name="run").body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "math.ops"
+    assert call.resolution.resolved_symbol.name == "add"
+
+
+def test_resolves_grouped_as_star_member_for_host_contract() -> None:
+    signature = signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    program = resolve_source_with_host_contract(
+        "module @app\n"
+        "  import @host.console.{ log } as *\n"
+        "  : run { msg:String -- }\n"
+        "    msg log\n"
+        "  ;\n"
+        "end-module\n",
+        [HostWord(name="host.console.log", signature=signature, effect=HostEffect.PURE)],
+    )
+
+    call = get_module_word(program, module_name="app", word_name="run").body.items[1]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.owner_scope == "host"
+    assert call.resolution.qualified_name == "host.console.log"
+
+
+def test_resolves_grouped_prefix_alias_member_for_host_contract() -> None:
+    signature = signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- out:Int }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    program = resolve_source_with_host_contract(
+        "module @app\n"
+        "  import @host.io.{ open-file } as io\n"
+        "  : run { -- out:Int }\n"
+        "    io.open-file\n"
+        "  ;\n"
+        "end-module\n",
+        [HostWord(name="host.io.open-file", signature=signature, effect=HostEffect.PURE)],
+    )
+
+    call = get_module_word(program, module_name="app", word_name="run").body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.owner_scope == "host"
+    assert call.resolution.qualified_name == "host.io.open-file"
+
+
+def test_grouped_host_alias_does_not_override_same_module_word() -> None:
+    signature = signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    program = resolve_source_with_host_contract(
+        "module @app\n"
+        "  import @host.console.{ log } as *\n"
+        "  : log { -- }\n"
+        "  ;\n"
+        "  : run { -- }\n"
+        "    log\n"
+        "  ;\n"
+        "end-module\n",
+        [HostWord(name="host.console.log", signature=signature, effect=HostEffect.PURE)],
+    )
+
+    call = get_module_word(program, module_name="app", word_name="run").body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.owner_scope == "module"
+    assert call.resolution.resolved_symbol.module == "app"
+    assert call.resolution.resolved_symbol.name == "log"
+
+
+def test_grouped_host_alias_resolves_when_not_shadowed() -> None:
+    signature = signature_from_source(
+        "module @sig\n"
+        "  : hostsig { -- }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    program = resolve_source_with_host_contract(
+        "module @app\n"
+        "  import @host.console.{ log } as *\n"
+        "  : run { -- }\n"
+        "    log\n"
+        "  ;\n"
+        "end-module\n",
+        [HostWord(name="host.console.log", signature=signature, effect=HostEffect.PURE)],
+    )
+
+    call = get_module_word(program, module_name="app", word_name="run").body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.owner_scope == "host"
+    assert call.resolution.qualified_name == "host.console.log"
+
+
+def test_grouped_import_does_not_resolve_unlisted_member() -> None:
+    with pytest.raises(ResolutionError, match="unresolved name"):
+        resolve_source(
+            "module @math.ops\n"
+            "  : add { -- }\n"
+            "  ;\n"
+            "  : sub { -- }\n"
+            "  ;\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @math.ops.{ add } as ops\n"
+            "  : run { -- }\n"
+            "    ops.sub\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+
+def test_grouped_alias_is_not_visible_outside_importer_module() -> None:
+    with pytest.raises(ResolutionError, match="unresolved name"):
+        resolve_source(
+            "module @math.ops\n"
+            "  : add { -- }\n"
+            "  ;\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @math.ops.{ add } as ops\n"
+            "end-module\n"
+            "module @other\n"
+            "  : run { -- }\n"
+            "    ops.add\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+
 def test_rejects_missing_alias_usage() -> None:
     with pytest.raises(ResolutionError, match="unresolved name"):
         resolve_source(
