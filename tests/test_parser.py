@@ -9,7 +9,11 @@ from nicole.ast_nodes import (
     BlockNode,
     CaseNode,
     ExportDeclaration,
+    HostAbiEffect,
+    HostOpaqueDeclaration,
+    HostRequireDeclaration,
     IdentifierNode,
+    ImportAliasKind,
     ImportDeclaration,
     IncludeDeclaration,
     IfNode,
@@ -29,7 +33,7 @@ from nicole.ast_nodes import (
     Visibility,
 )
 from nicole.errors import DiagnosticPhase, DiagnosticSeverity
-from nicole.lexer import lex
+from nicole.lexer import LexError, lex
 from nicole.parser import ParseError, Parser
 from nicole.tokens import TokenKind
 
@@ -86,25 +90,181 @@ def test_parser_parses_module_declaration_with_export_declaration():
 
 def test_parser_parses_import_declaration_forms():
     program = parse_source_raw(
-        "import @math\n"
-        "import @math as m\n"
-        "import @math.utils\n"
-        "import @math.utils as u\n"
+        "module @app\n"
+        "  import @math\n"
+        "  import @math as m\n"
+        "  import @math.utils\n"
+        "  import @math.utils as u\n"
+        "  : run { -- }\n"
+        "  ;\n"
+        "end-module\n"
     )
 
-    assert len(program.declarations) == 4
-    assert isinstance(program.declarations[0], ImportDeclaration)
-    assert program.declarations[0].target.parts == ("math",)
-    assert program.declarations[0].alias is None
-    assert isinstance(program.declarations[1], ImportDeclaration)
-    assert program.declarations[1].target.parts == ("math",)
-    assert program.declarations[1].alias == "m"
-    assert isinstance(program.declarations[2], ImportDeclaration)
-    assert program.declarations[2].target.parts == ("math", "utils")
-    assert program.declarations[2].alias is None
-    assert isinstance(program.declarations[3], ImportDeclaration)
-    assert program.declarations[3].target.parts == ("math", "utils")
-    assert program.declarations[3].alias == "u"
+    assert len(program.declarations) == 1
+    module_decl = program.declarations[0]
+    assert isinstance(module_decl, ModuleDeclaration)
+    assert isinstance(module_decl.items[0], ImportDeclaration)
+    assert module_decl.items[0].target.parts == ("math",)
+    assert module_decl.items[0].alias is None
+    assert isinstance(module_decl.items[1], ImportDeclaration)
+    assert module_decl.items[1].target.parts == ("math",)
+    assert module_decl.items[1].alias == "m"
+    assert isinstance(module_decl.items[2], ImportDeclaration)
+    assert module_decl.items[2].target.parts == ("math", "utils")
+    assert module_decl.items[2].alias is None
+    assert isinstance(module_decl.items[3], ImportDeclaration)
+    assert module_decl.items[3].target.parts == ("math", "utils")
+    assert module_decl.items[3].alias == "u"
+
+
+def test_parser_parses_grouped_import_with_prefix_alias():
+    program = parse_source_raw(
+        "module @app\n"
+        "  import @host.io.{ open-file close-file FileHandle } as io\n"
+        "end-module\n"
+    )
+
+    module_decl = program.declarations[0]
+    assert isinstance(module_decl, ModuleDeclaration)
+    grouped_import = module_decl.items[0]
+    assert isinstance(grouped_import, ImportDeclaration)
+    assert grouped_import.target.parts == ("host", "io")
+    assert grouped_import.is_grouped is True
+    assert grouped_import.grouped_members == ("open-file", "close-file", "FileHandle")
+    assert grouped_import.alias == "io"
+    assert grouped_import.alias_kind is ImportAliasKind.PREFIX
+
+
+def test_parser_parses_grouped_import_with_as_star():
+    program = parse_source_raw(
+        "module @app\n"
+        "  import @host.console.{ log read-line } as *\n"
+        "end-module\n"
+    )
+
+    module_decl = program.declarations[0]
+    assert isinstance(module_decl, ModuleDeclaration)
+    grouped_import = module_decl.items[0]
+    assert isinstance(grouped_import, ImportDeclaration)
+    assert grouped_import.target.parts == ("host", "console")
+    assert grouped_import.is_grouped is True
+    assert grouped_import.grouped_members == ("log", "read-line")
+    assert grouped_import.alias is None
+    assert grouped_import.alias_kind is ImportAliasKind.STAR
+
+
+def test_parser_parses_grouped_import_outside_host_namespace():
+    program = parse_source_raw(
+        "module @app\n"
+        "  import @math.ops.{ add sub } as ops\n"
+        "end-module\n"
+    )
+
+    module_decl = program.declarations[0]
+    assert isinstance(module_decl, ModuleDeclaration)
+    grouped_import = module_decl.items[0]
+    assert isinstance(grouped_import, ImportDeclaration)
+    assert grouped_import.target.parts == ("math", "ops")
+    assert grouped_import.is_grouped is True
+    assert grouped_import.grouped_members == ("add", "sub")
+    assert grouped_import.alias == "ops"
+    assert grouped_import.alias_kind is ImportAliasKind.PREFIX
+
+
+def test_parser_rejects_grouped_import_with_empty_members():
+    with pytest.raises(ParseError, match="grouped import must list at least one member"):
+        parse_source_raw(
+            "module @app\n"
+            "  import @host.io.{ } as io\n"
+            "end-module\n"
+        )
+
+
+def test_parser_rejects_grouped_import_without_alias():
+    with pytest.raises(ParseError, match="grouped import requires an alias"):
+        parse_source_raw(
+            "module @app\n"
+            "  import @host.io.{ open-file }\n"
+            "end-module\n"
+        )
+
+
+def test_parser_grouped_import_without_alias_points_span_to_closing_brace():
+    source = (
+        "module @app\n"
+        "  import @host.io.{ open-file }\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    closing_brace = _token_by_kind(tokens, TokenKind.RBRACE, index=0)
+
+    with pytest.raises(ParseError, match="grouped import requires an alias") as exc_info:
+        parse_source_raw(source)
+
+    diagnostic = exc_info.value.diagnostic
+    assert diagnostic.code == "PARSER_GROUPED_IMPORT_ALIAS_REQUIRED"
+    assert diagnostic.span == closing_brace.span
+    assert diagnostic.span.line == 2
+    assert diagnostic.span.column == 31
+
+
+def test_parser_rejects_grouped_import_with_invalid_alias():
+    with pytest.raises(ParseError, match="expected grouped import alias"):
+        parse_source_raw(
+            "module @app\n"
+            "  import @host.io.{ open-file } as {\n"
+            "end-module\n"
+        )
+
+
+def test_parser_grouped_import_with_as_without_alias_points_span_to_as():
+    source = (
+        "module @app\n"
+        "  import @host.io.{ open-file } as\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    as_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="as", index=0)
+
+    with pytest.raises(ParseError, match="expected grouped import alias") as exc_info:
+        parse_source_raw(source)
+
+    diagnostic = exc_info.value.diagnostic
+    assert diagnostic.code == "PARSER_GROUPED_IMPORT_ALIAS_INVALID"
+    assert diagnostic.span == as_token.span
+    assert diagnostic.span.line == 2
+    assert diagnostic.span.column == 33
+
+
+def test_parser_grouped_import_with_as_lbrace_points_span_to_lbrace():
+    source = (
+        "module @app\n"
+        "  import @host.io.{ open-file } as {\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    bad_token = _token_by_kind(tokens, TokenKind.LBRACE, index=1)
+
+    with pytest.raises(ParseError, match="expected grouped import alias") as exc_info:
+        parse_source_raw(source)
+
+    diagnostic = exc_info.value.diagnostic
+    assert diagnostic.code == "PARSER_GROUPED_IMPORT_ALIAS_INVALID"
+    assert diagnostic.span == bad_token.span
+    assert diagnostic.span.line == 2
+    assert diagnostic.span.column == 36
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "module @app\n  import @host.io.*\nend-module\n",
+        "module @app\n  import @host.io.* as *\nend-module\n",
+    ],
+)
+def test_parser_rejects_wildcard_like_import_forms(source):
+    with pytest.raises(LexError, match="invalid module reference"):
+        parse_source_raw(source)
 
 
 def test_parser_parses_include_declaration():
@@ -118,6 +278,22 @@ def test_parser_parses_include_declaration():
 def test_parser_rejects_top_level_word_definition():
     with pytest.raises(ParseError, match="top-level word definition is not allowed"):
         parse_source_raw(": run { -- n:Int } 0 ;")
+
+
+def test_parser_rejects_top_level_import():
+    with pytest.raises(ParseError, match="imports are only allowed inside modules"):
+        parse_source_raw("import @math\n")
+
+
+def test_parser_rejects_import_after_module_definition():
+    with pytest.raises(ParseError, match="imports must appear before module definitions"):
+        parse_source_raw(
+            "module @app\n"
+            "  : run { -- }\n"
+            "  ;\n"
+            "  import @math\n"
+            "end-module\n"
+        )
 
 
 def test_parser_rejects_export_outside_module():
@@ -152,6 +328,245 @@ def test_parser_rejects_nested_module():
         )
 
 
+def test_parser_rejects_import_inside_word_body():
+    with pytest.raises(ParseError, match="unexpected token"):
+        parse_source_raw(
+            "module @app\n"
+            "  : run { -- }\n"
+            "    import @math\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+
+def test_parser_accepts_empty_host_module():
+    program = parse_source_raw(
+        "module @host\n"
+        "end-module\n"
+    )
+
+    module_decl = program.declarations[0]
+    assert isinstance(module_decl, ModuleDeclaration)
+    assert module_decl.name.parts == ("host",)
+    assert module_decl.is_host_module is True
+    assert module_decl.items == ()
+
+
+def test_parser_parses_host_require_with_dirty_effect():
+    program = parse_source_raw(
+        "module @host\n"
+        "  require console.log { msg:String -- } dirty\n"
+        "end-module\n"
+    )
+
+    module_decl = program.declarations[0]
+    require_decl = module_decl.items[0]
+    assert isinstance(require_decl, HostRequireDeclaration)
+    assert require_decl.path.parts == ("console", "log")
+    assert require_decl.signature.inputs[0].name == "msg"
+    assert require_decl.signature.inputs[0].type_node.name == "String"
+    assert require_decl.effect is HostAbiEffect.DIRTY
+
+
+def test_parser_parses_host_require_with_pure_effect():
+    program = parse_source_raw(
+        "module @host\n"
+        "  require clock.now-ms { -- n:Int } pure\n"
+        "end-module\n"
+    )
+
+    module_decl = program.declarations[0]
+    require_decl = module_decl.items[0]
+    assert isinstance(require_decl, HostRequireDeclaration)
+    assert require_decl.path.parts == ("clock", "now-ms")
+    assert require_decl.signature.outputs[0].name == "n"
+    assert require_decl.effect is HostAbiEffect.PURE
+
+
+def test_parser_parses_host_require_with_canonical_host_output_type():
+    program = parse_source_raw(
+        "module @host\n"
+        "  require file.open { path:String -- handle:@host.io.FileHandle } dirty\n"
+        "end-module\n"
+    )
+
+    module_decl = program.declarations[0]
+    require_decl = module_decl.items[0]
+    assert isinstance(require_decl, HostRequireDeclaration)
+    output = require_decl.signature.outputs[0]
+    assert output.name == "handle"
+    # Transitional parser compatibility: canonical @host.* type is normalized to host.*.
+    assert output.type_node.name == "host.io.FileHandle"
+
+
+def test_parser_rejects_host_require_with_anonymous_output_signature():
+    with pytest.raises(ParseError, match="expected ':' in parameter"):
+        parse_source_raw(
+            "module @host\n"
+            "  require clock.now-ms { -- Int } pure\n"
+            "end-module\n"
+        )
+
+
+def test_parser_rejects_host_require_with_anonymous_input_signature():
+    with pytest.raises(ParseError, match="expected ':' in parameter"):
+        parse_source_raw(
+            "module @host\n"
+            "  require clock.accept { Int -- } dirty\n"
+            "end-module\n"
+        )
+
+
+def test_parser_host_require_missing_effect_points_span_to_signature_end():
+    source = (
+        "module @host\n"
+        "  require console.log { msg:String -- }\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    signature_end = _token_by_kind(tokens, TokenKind.RBRACE, index=0)
+
+    with pytest.raises(ParseError, match="host requirement must declare an effect") as exc_info:
+        parse_source_raw(source)
+
+    diagnostic = exc_info.value.diagnostic
+    assert diagnostic.code == "PARSER_HOST_REQUIRE_MISSING_EFFECT"
+    assert diagnostic.span == signature_end.span
+    assert diagnostic.span.line == 2
+    assert diagnostic.span.column == 39
+
+
+def test_parser_parses_host_opaque_declaration():
+    program = parse_source_raw(
+        "module @host\n"
+        "  opaque io.FileHandle\n"
+        "end-module\n"
+    )
+
+    module_decl = program.declarations[0]
+    opaque_decl = module_decl.items[0]
+    assert isinstance(opaque_decl, HostOpaqueDeclaration)
+    assert opaque_decl.path.parts == ("io", "FileHandle")
+
+
+def test_parser_parses_multiple_host_module_fragments():
+    program = parse_source_raw(
+        "module @host\n"
+        "  require console.log { msg:String -- } dirty\n"
+        "end-module\n"
+        "module @host\n"
+        "  opaque io.FileHandle\n"
+        "end-module\n"
+    )
+
+    assert len(program.declarations) == 2
+    first = program.declarations[0]
+    second = program.declarations[1]
+    assert isinstance(first, ModuleDeclaration)
+    assert isinstance(second, ModuleDeclaration)
+    assert first.is_host_module is True
+    assert second.is_host_module is True
+    assert isinstance(first.items[0], HostRequireDeclaration)
+    assert isinstance(second.items[0], HostOpaqueDeclaration)
+
+
+def test_parser_rejects_require_outside_host_module():
+    with pytest.raises(ParseError, match="host ABI declarations are only allowed inside module @host"):
+        parse_source_raw(
+            "module @app\n"
+            "  require console.log { msg:String -- } dirty\n"
+            "end-module\n"
+        )
+
+
+def test_parser_rejects_opaque_outside_host_module():
+    with pytest.raises(ParseError, match="host ABI declarations are only allowed inside module @host"):
+        parse_source_raw(
+            "module @app\n"
+            "  opaque io.FileHandle\n"
+            "end-module\n"
+        )
+
+
+def test_parser_rejects_top_level_require():
+    with pytest.raises(ParseError, match="host ABI declarations are only allowed inside module @host"):
+        parse_source_raw("require console.log { msg:String -- } dirty\n")
+
+
+def test_parser_rejects_top_level_opaque():
+    with pytest.raises(ParseError, match="host ABI declarations are only allowed inside module @host"):
+        parse_source_raw("opaque io.FileHandle\n")
+
+
+def test_parser_rejects_host_require_with_absolute_host_path():
+    with pytest.raises(ParseError, match="host ABI paths are relative to @host"):
+        parse_source_raw(
+            "module @host\n"
+            "  require @host.console.log { msg:String -- } dirty\n"
+            "end-module\n"
+        )
+
+
+def test_parser_rejects_host_opaque_with_absolute_host_path():
+    with pytest.raises(ParseError, match="host ABI paths are relative to @host"):
+        parse_source_raw(
+            "module @host\n"
+            "  opaque @host.io.FileHandle\n"
+            "end-module\n"
+        )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "module @host\n  import @math\nend-module\n",
+        "module @host\n  include \"x.nic\"\nend-module\n",
+        "module @host\n  export : run\nend-module\n",
+        "module @host\n  : run { -- }\n  ;\nend-module\n",
+        "module @host\n  console.log\nend-module\n",
+    ],
+)
+def test_parser_rejects_non_host_abi_content_in_host_module(source):
+    with pytest.raises(ParseError, match="module @host only allows require and opaque declarations"):
+        parse_source_raw(source)
+
+
+def test_parser_host_require_span_includes_effect_token():
+    source = (
+        "module @host\n"
+        "  require console.log { msg:String -- } dirty\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    module_decl = program.declarations[0]
+    require_decl = module_decl.items[0]
+    require_token = _token_by_kind(tokens, TokenKind.REQUIRE)
+    dirty_token = _token_by_kind(tokens, TokenKind.DIRTY)
+
+    assert isinstance(require_decl, HostRequireDeclaration)
+    assert require_decl.span.start == require_token.span.start
+    assert require_decl.span.end == dirty_token.span.end
+
+
+def test_parser_host_opaque_span_includes_path_token():
+    source = (
+        "module @host\n"
+        "  opaque io.FileHandle\n"
+        "end-module\n"
+    )
+    tokens = lex(source)
+    program = parse_source_raw(source)
+    module_decl = program.declarations[0]
+    opaque_decl = module_decl.items[0]
+    opaque_token = _token_by_kind(tokens, TokenKind.OPAQUE)
+    path_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="io.FileHandle")
+
+    assert isinstance(opaque_decl, HostOpaqueDeclaration)
+    assert opaque_decl.span.start == opaque_token.span.start
+    assert opaque_decl.span.end == path_token.span.end
+
+
 def test_parser_rejects_legacy_export_definition_form():
     with pytest.raises(ParseError):
         parse_source_raw(
@@ -184,6 +599,57 @@ def test_parser_rejects_dotted_user_word_definition():
             "module @app\n"
             "  : app.run { -- n:Int }\n"
             "    0\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+
+def test_parser_parses_word_signature_with_canonical_host_type():
+    program = parse_source_raw(
+        "module @app\n"
+        "  : consume { handle:@host.io.FileHandle -- }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    word = program.words[0]
+    assert word.signature.inputs[0].name == "handle"
+    assert word.signature.inputs[0].type_node.name == "host.io.FileHandle"
+
+
+def test_parser_parses_generic_types_with_canonical_host_type_arguments():
+    program = parse_source_raw(
+        "module @app\n"
+        "  : consume-list { xs:List<@host.io.FileHandle> -- }\n"
+        "  ;\n"
+        "  : consume-result { x:Result<@host.io.FileHandle,String> -- }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    consume_list = program.words[0]
+    consume_result = program.words[1]
+    list_arg = consume_list.signature.inputs[0].type_node.args[0]
+    result_first_arg = consume_result.signature.inputs[0].type_node.args[0]
+
+    assert list_arg.name == "host.io.FileHandle"
+    assert result_first_arg.name == "host.io.FileHandle"
+
+
+def test_parser_keeps_legacy_host_dotted_type_name():
+    program = parse_source_raw(
+        "module @app\n"
+        "  : consume { handle:host.io.FileHandle -- }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    word = program.words[0]
+    assert word.signature.inputs[0].type_node.name == "host.io.FileHandle"
+
+
+def test_parser_rejects_non_host_qualified_module_type():
+    with pytest.raises(ParseError, match="malformed type"):
+        parse_source_raw(
+            "module @app\n"
+            "  : consume { value:@app.Type -- }\n"
             "  ;\n"
             "end-module\n"
         )
@@ -1263,7 +1729,7 @@ def test_parser_rejects_nested_word_defs_inside_control_flow(source):
 
 
 def test_parser_program_span_non_empty_ends_at_eof():
-    source = "import @math\n"
+    source = 'include "path.nic"\n'
     tokens = lex(source)
     program = parse_source_raw(source)
     eof = _token_by_kind(tokens, TokenKind.EOF)
@@ -1300,12 +1766,17 @@ def test_parser_module_declaration_span_includes_end_module():
 
 
 def test_parser_import_declaration_span_includes_target_without_alias():
-    source = "import @math.utils\n"
+    source = (
+        "module @app\n"
+        "  import @math.utils\n"
+        "end-module\n"
+    )
     tokens = lex(source)
     program = parse_source_raw(source)
-    import_decl = program.declarations[0]
+    module_decl = program.declarations[0]
+    import_decl = module_decl.items[0]
     import_token = _token_by_kind(tokens, TokenKind.IMPORT)
-    target_token = _token_by_kind(tokens, TokenKind.QUALIFIED_MODULE_NAME)
+    target_token = _token_by_kind(tokens, TokenKind.QUALIFIED_MODULE_NAME, index=1)
 
     assert isinstance(import_decl, ImportDeclaration)
     assert import_decl.span.start == import_token.span.start
@@ -1313,10 +1784,15 @@ def test_parser_import_declaration_span_includes_target_without_alias():
 
 
 def test_parser_import_declaration_span_includes_alias_with_alias():
-    source = "import @math as m\n"
+    source = (
+        "module @app\n"
+        "  import @math as m\n"
+        "end-module\n"
+    )
     tokens = lex(source)
     program = parse_source_raw(source)
-    import_decl = program.declarations[0]
+    module_decl = program.declarations[0]
+    import_decl = module_decl.items[0]
     import_token = _token_by_kind(tokens, TokenKind.IMPORT)
     alias_token = _token_by_kind(tokens, TokenKind.IDENTIFIER, lexeme="m")
 

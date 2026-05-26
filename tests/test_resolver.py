@@ -90,8 +90,8 @@ def test_resolves_external_qualified_reference_with_matching_import() -> None:
         "  : add { -- }\n"
         "  ;\n"
         "end-module\n"
-        "import @math\n"
         "module @app\n"
+        "  import @math\n"
         "  : run { -- }\n"
         "    @math.add\n"
         "  ;\n"
@@ -126,8 +126,8 @@ def test_resolves_module_import_alias_qualified_reference() -> None:
         "  : add { -- }\n"
         "  ;\n"
         "end-module\n"
-        "import @math as m\n"
         "module @app\n"
+        "  import @math as m\n"
         "  : run { -- }\n"
         "    m.add\n"
         "  ;\n"
@@ -147,8 +147,8 @@ def test_resolves_direct_imported_word_alias() -> None:
         "  : add { -- }\n"
         "  ;\n"
         "end-module\n"
-        "import @math.add as add\n"
         "module @app\n"
+        "  import @math.add as add\n"
         "  : run { -- }\n"
         "    add\n"
         "  ;\n"
@@ -169,8 +169,8 @@ def test_rejects_missing_alias_usage() -> None:
             "  : add { -- }\n"
             "  ;\n"
             "end-module\n"
-            "import @math\n"
             "module @app\n"
+            "  import @math\n"
             "  : run { -- }\n"
             "    m.add\n"
             "  ;\n"
@@ -199,8 +199,8 @@ def test_local_lexical_names_resolve_before_imported_aliases() -> None:
         "  : x { -- }\n"
         "  ;\n"
         "end-module\n"
-        "import @math.x as x\n"
         "module @app\n"
+        "  import @math.x as x\n"
         "  : run { x:Int -- }\n"
         "    x\n"
         "  ;\n"
@@ -289,8 +289,8 @@ def test_required_host_resolution_remains_stable() -> None:
 def test_rejects_reserved_root_import_alias() -> None:
     with pytest.raises(SymbolError, match="cannot use reserved root as import alias: list"):
         resolve_source(
-            "import @math as list\n"
             "module @app\n"
+            "  import @math as list\n"
             "end-module\n"
         )
 
@@ -298,9 +298,9 @@ def test_rejects_reserved_root_import_alias() -> None:
 def test_rejects_duplicate_import_alias() -> None:
     with pytest.raises(SymbolError, match="duplicate import alias: m"):
         resolve_source(
-            "import @math as m\n"
-            "import @tools as m\n"
             "module @app\n"
+            "  import @math as m\n"
+            "  import @tools as m\n"
             "end-module\n"
         )
 
@@ -308,8 +308,8 @@ def test_rejects_duplicate_import_alias() -> None:
 def test_symbol_error_exposes_structured_diagnostic() -> None:
     with pytest.raises(SymbolError) as exc_info:
         resolve_source(
-            "import @math as list\n"
             "module @app\n"
+            "  import @math as list\n"
             "end-module\n"
         )
 
@@ -319,6 +319,42 @@ def test_symbol_error_exposes_structured_diagnostic() -> None:
     assert error.message == "cannot use reserved root as import alias: list"
     assert error.line == error.diagnostic.span.line
     assert error.column == error.diagnostic.span.column
+
+
+def test_alias_is_not_visible_outside_importer_module() -> None:
+    with pytest.raises(ResolutionError, match="unresolved name"):
+        resolve_source(
+            "module @math\n"
+            "  : add { -- }\n"
+            "  ;\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @math as m\n"
+            "end-module\n"
+            "module @other\n"
+            "  : run { -- }\n"
+            "    m.add\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+
+def test_qualified_import_is_not_visible_outside_importer_module() -> None:
+    with pytest.raises(ResolutionError, match="unresolved name"):
+        resolve_source(
+            "module @math\n"
+            "  : add { -- }\n"
+            "  ;\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @math\n"
+            "end-module\n"
+            "module @other\n"
+            "  : run { -- }\n"
+            "    @math.add\n"
+            "  ;\n"
+            "end-module\n"
+        )
 
 
 def test_export_missing_target_exposes_structured_diagnostic() -> None:

@@ -300,7 +300,7 @@ class Resolver:
         if same_module_symbol is not None:
             return same_module_symbol
 
-        alias_symbol = self._lookup_alias_reference(name)
+        alias_symbol = self._lookup_alias_reference(name, current_module=current_module)
         if alias_symbol is not None:
             return alias_symbol
 
@@ -328,10 +328,10 @@ class Resolver:
 
         return None
 
-    def _lookup_alias_reference(self, name: str) -> WordSymbol | None:
+    def _lookup_alias_reference(self, name: str, *, current_module: str) -> WordSymbol | None:
         alias, separator, suffix = name.partition(".")
         alias_suffix = suffix if separator else None
-        referenced = self._symbols.resolve_alias_reference(alias, alias_suffix)
+        referenced = self._symbols.resolve_alias_reference(current_module, alias, alias_suffix)
         if referenced is None:
             return None
         return self._lookup_user_symbol_by_reference(referenced)
@@ -345,7 +345,7 @@ class Resolver:
         if symbol.module == current_module:
             return symbol
 
-        if self._symbols.allows_qualified_reference(normalized):
+        if self._symbols.allows_qualified_reference(current_module, normalized):
             return symbol
 
         return None

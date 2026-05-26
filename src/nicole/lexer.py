@@ -247,6 +247,17 @@ class Lexer:
         self._lex_module_name_segment()
 
         while not self._at_end() and self._peek() == ".":
+            if self._peek_next() == "{":
+                self._advance()
+                lexeme = self.source[start.index : self._index]
+                self._tokens.append(
+                    Token(
+                        kind=TokenKind.QUALIFIED_MODULE_PREFIX,
+                        lexeme=lexeme,
+                        span=self._span_from_mark(start),
+                    )
+                )
+                return
             if self._peek_next() is None or not _is_identifier_start(self._peek_next()):
                 self._raise_error("invalid module reference")
             self._advance()
@@ -431,6 +442,9 @@ def _keyword_kind(lexeme: str) -> TokenKind | None:
         "end-module": TokenKind.END_MODULE,
         "import": TokenKind.IMPORT,
         "include": TokenKind.INCLUDE,
+        "require": TokenKind.REQUIRE,
+        "opaque": TokenKind.OPAQUE,
+        "pure": TokenKind.PURE,
         "dirty": TokenKind.DIRTY,
         "if": TokenKind.IF,
         "else": TokenKind.ELSE,

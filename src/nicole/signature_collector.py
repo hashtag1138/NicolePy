@@ -13,10 +13,6 @@ def collect_signatures(program: ProgramNode) -> SymbolTable:
     for declaration in program.declarations:
         if isinstance(declaration, ModuleDeclaration):
             _collect_module(declaration, table)
-            continue
-        if isinstance(declaration, ImportDeclaration):
-            _collect_import(declaration, table)
-            continue
     return table
 
 
@@ -26,6 +22,9 @@ def _collect_module(declaration: ModuleDeclaration, table: SymbolTable) -> None:
 
     export_declarations: list[ExportDeclaration] = []
     for item in declaration.items:
+        if isinstance(item, ImportDeclaration):
+            _collect_import(item, table, owner_module=module_name)
+            continue
         if isinstance(item, WordDefNode):
             _collect_word(item, table, module=module_name, owner=None)
             continue
@@ -35,9 +34,9 @@ def _collect_module(declaration: ModuleDeclaration, table: SymbolTable) -> None:
     _apply_module_exports(export_declarations, table, module_name=module_name)
 
 
-def _collect_import(declaration: ImportDeclaration, table: SymbolTable) -> None:
+def _collect_import(declaration: ImportDeclaration, table: SymbolTable, *, owner_module: str) -> None:
     target = _module_key(declaration.target.parts)
-    table.add_import(target=target, alias=declaration.alias, span=declaration.span)
+    table.add_import(owner_module=owner_module, target=target, alias=declaration.alias, span=declaration.span)
 
 
 def _collect_word(word: WordDefNode, table: SymbolTable, *, module: str | None, owner: str | None) -> None:

@@ -40,6 +40,7 @@ class WordSymbol:
 
 @dataclass(frozen=True, slots=True)
 class ImportMetadata:
+    owner_module: str
     target: str
     alias: str | None
     span: SourceSpan
@@ -50,7 +51,7 @@ class SymbolTable:
     words: dict[str, list[WordSymbol]] = field(default_factory=dict)
     modules: dict[str, SourceSpan] = field(default_factory=dict)
     imports: list[ImportMetadata] = field(default_factory=list)
-    aliases: dict[str, ImportMetadata] = field(default_factory=dict)
+    aliases: dict[tuple[str, str], ImportMetadata] = field(default_factory=dict)
 
     def add(self, symbol: WordSymbol) -> None:
         for existing in self.words.get(symbol.name, []):
@@ -84,8 +85,8 @@ class SymbolTable:
             )
         self.modules[module_name] = span
 
-    def add_import(self, target: str, alias: str | None, span: SourceSpan) -> None:
-        metadata = ImportMetadata(target=target, alias=alias, span=span)
+    def add_import(self, owner_module: str, target: str, alias: str | None, span: SourceSpan) -> None:
+        metadata = ImportMetadata(owner_module=owner_module, target=target, alias=alias, span=span)
         self.imports.append(metadata)
 
         if alias is None:
@@ -98,7 +99,8 @@ class SymbolTable:
                 span=span,
                 code="SYMBOLS_RESERVED_IMPORT_ALIAS",
             )
-        if alias in self.aliases:
+        alias_key = (owner_module, alias)
+        if alias_key in self.aliases:
             raise SymbolError(
                 message=f"duplicate import alias: {alias}",
                 line=span.line,
@@ -106,9 +108,9 @@ class SymbolTable:
                 span=span,
                 code="SYMBOLS_DUPLICATE_IMPORT_ALIAS",
             )
-        self.aliases[alias] = metadata
+        self.aliases[alias_key] = metadata
 
-    def allows_qualified_reference(self, qualified_reference: str) -> bool:
+    def allows_qualified_reference(self, owner_module: str, qualified_reference: str) -> bool:
         normalized = qualified_reference[1:] if qualified_reference.startswith("@") else qualified_reference
         return any(
             _import_target_matches_reference(
@@ -117,16 +119,17 @@ class SymbolTable:
                 known_modules=self.modules,
             )
             for metadata in self.imports
+            if metadata.owner_module == owner_module
         )
 
-    def alias_target(self, alias: str) -> str | None:
-        metadata = self.aliases.get(alias)
+    def alias_target(self, owner_module: str, alias: str) -> str | None:
+        metadata = self.aliases.get((owner_module, alias))
         if metadata is None:
             return None
         return metadata.target
 
-    def resolve_alias_reference(self, alias: str, suffix: str | None) -> str | None:
-        target = self.alias_target(alias)
+    def resolve_alias_reference(self, owner_module: str, alias: str, suffix: str | None) -> str | None:
+        target = self.alias_target(owner_module, alias)
         if target is None:
             return None
 

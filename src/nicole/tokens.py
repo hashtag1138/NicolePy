@@ -33,6 +33,9 @@ class TokenKind(Enum):
     END_MODULE = auto()
     IMPORT = auto()
     INCLUDE = auto()
+    REQUIRE = auto()
+    OPAQUE = auto()
+    PURE = auto()
     DIRTY = auto()
     IF = auto()
     ELSE = auto()
@@ -49,6 +52,7 @@ class TokenKind(Enum):
     STRING_LITERAL = auto()
     BOOL_LITERAL = auto()
 
+    QUALIFIED_MODULE_PREFIX = auto()
     QUALIFIED_MODULE_NAME = auto()
     IDENTIFIER = auto()
     OPERATOR = auto()

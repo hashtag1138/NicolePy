@@ -9,7 +9,12 @@ from .ast_nodes import (
     CaseBranchNode,
     CaseNode,
     ExportDeclaration,
+    HostAbiEffect,
+    HostOpaqueDeclaration,
+    HostPathNode,
+    HostRequireDeclaration,
     IdentifierNode,
+    ImportAliasKind,
     ImportDeclaration,
     IncludeDeclaration,
     IfNode,
@@ -70,6 +75,46 @@ _RESERVED_WORD_PREFIXES = (
 )
 
 _PARSER_ERROR_DETAILS: dict[str, tuple[str, str | None]] = {
+    "imports are only allowed inside modules": (
+        "PARSER_TOP_LEVEL_IMPORT_FORBIDDEN",
+        "move this import to the beginning of a module",
+    ),
+    "imports must appear before module definitions": (
+        "PARSER_IMPORT_ORDER",
+        "move this import before the first module definition",
+    ),
+    "host ABI declarations are only allowed inside module @host": (
+        "PARSER_HOST_DECLARATION_OUTSIDE_HOST_MODULE",
+        "move this declaration into module @host",
+    ),
+    "module @host only allows require and opaque declarations": (
+        "PARSER_HOST_MODULE_INVALID_CONTENT",
+        "remove this declaration or move it to a normal module",
+    ),
+    "host ABI paths are relative to @host": (
+        "PARSER_HOST_PATH_MUST_BE_RELATIVE",
+        "remove the @host. prefix",
+    ),
+    "expected host ABI path": (
+        "PARSER_EXPECTED_HOST_PATH",
+        "use a relative host path such as console.log or io.FileHandle",
+    ),
+    "host requirement must declare an effect": (
+        "PARSER_HOST_REQUIRE_MISSING_EFFECT",
+        "add pure or dirty after the signature",
+    ),
+    "grouped import must list at least one member": (
+        "PARSER_GROUPED_IMPORT_EMPTY",
+        "add imported member names inside the braces",
+    ),
+    "grouped import requires an alias": (
+        "PARSER_GROUPED_IMPORT_ALIAS_REQUIRED",
+        "add as <alias> or as * after the grouped import",
+    ),
+    "expected grouped import alias": (
+        "PARSER_GROUPED_IMPORT_ALIAS_INVALID",
+        "use as <alias> or as *",
+    ),
     "export declaration is only allowed inside module": (
         "PARSER_EXPORT_OUTSIDE_MODULE",
         "move this export declaration inside a module block",
@@ -213,7 +258,9 @@ class Parser:
         if self._check(TokenKind.MODULE):
             return self._parse_module_declaration()
         if self._check(TokenKind.IMPORT):
-            return self._parse_import_declaration()
+            self._raise_error("imports are only allowed inside modules")
+        if self._check(TokenKind.REQUIRE) or self._check(TokenKind.OPAQUE):
+            self._raise_error("host ABI declarations are only allowed inside module @host")
         if self._check(TokenKind.INCLUDE):
             return self._parse_include_declaration()
         if self._check(TokenKind.EXPORT):
@@ -225,15 +272,37 @@ class Parser:
     def _parse_module_declaration(self) -> ModuleDeclaration:
         start = self._expect(TokenKind.MODULE, "expected 'module'")
         module_name = self._parse_qualified_module_name("expected module name")
+        is_host_module = module_name.parts == ("host",)
         items: list[ASTNode] = []
+
+        if is_host_module:
+            while not self._check(TokenKind.END_MODULE):
+                if self._check(TokenKind.EOF):
+                    self._raise_error("missing 'end-module'")
+                if self._check(TokenKind.MODULE):
+                    self._raise_error("nested module declaration is not allowed")
+                if self._check(TokenKind.REQUIRE):
+                    items.append(self._parse_host_require_declaration())
+                    continue
+                if self._check(TokenKind.OPAQUE):
+                    items.append(self._parse_host_opaque_declaration())
+                    continue
+                self._raise_error("module @host only allows require and opaque declarations")
+        else:
+            while self._check(TokenKind.IMPORT):
+                items.append(self._parse_import_declaration())
 
         while not self._check(TokenKind.END_MODULE):
             if self._check(TokenKind.EOF):
                 self._raise_error("missing 'end-module'")
             if self._check(TokenKind.MODULE):
                 self._raise_error("nested module declaration is not allowed")
-            if self._check(TokenKind.IMPORT) or self._check(TokenKind.INCLUDE):
+            if self._check(TokenKind.IMPORT):
+                self._raise_error("imports must appear before module definitions")
+            if self._check(TokenKind.INCLUDE):
                 self._raise_error("unexpected token")
+            if self._check(TokenKind.REQUIRE) or self._check(TokenKind.OPAQUE):
+                self._raise_error("host ABI declarations are only allowed inside module @host")
             if self._check(TokenKind.EXPORT):
                 items.append(self._parse_export_declaration())
                 continue
@@ -247,10 +316,14 @@ class Parser:
             span=self._span_from(start, end),
             name=module_name,
             items=tuple(items),
+            is_host_module=is_host_module,
         )
 
     def _parse_import_declaration(self) -> ImportDeclaration:
         start = self._expect(TokenKind.IMPORT, "expected 'import'")
+        if self._check(TokenKind.QUALIFIED_MODULE_PREFIX):
+            return self._parse_grouped_import_declaration(start)
+
         target = self._parse_qualified_module_name("expected import target")
         alias: str | None = None
         end: Token | QualifiedModuleName = target
@@ -260,6 +333,57 @@ class Parser:
             alias = alias_token.lexeme
             end = alias_token
         return ImportDeclaration(span=self._span_from(start, end), target=target, alias=alias)
+
+    def _parse_grouped_import_declaration(self, start: Token) -> ImportDeclaration:
+        prefix_token = self._expect(TokenKind.QUALIFIED_MODULE_PREFIX, "expected import target")
+        prefix_parts = tuple(prefix_token.lexeme[1:-1].split("."))
+        target = QualifiedModuleName(span=prefix_token.span, parts=prefix_parts)
+
+        self._expect(TokenKind.LBRACE, "unexpected token")
+        if self._check(TokenKind.RBRACE):
+            self._raise_error("grouped import must list at least one member")
+
+        members: list[str] = []
+        closing_brace_token: Token | None = None
+        while True:
+            member_token = self._expect(TokenKind.IDENTIFIER, "unexpected token")
+            members.append(member_token.lexeme)
+            if self._check(TokenKind.RBRACE):
+                closing_brace_token = self._advance()
+                break
+
+        if not (self._check(TokenKind.IDENTIFIER) and self._current().lexeme == "as"):
+            self._raise_error(
+                "grouped import requires an alias",
+                span=closing_brace_token.span if closing_brace_token is not None else None,
+            )
+        as_token = self._advance()
+
+        if self._check(TokenKind.OPERATOR) and self._current().lexeme == "*":
+            star_token = self._advance()
+            return ImportDeclaration(
+                span=self._span_from(start, star_token),
+                target=target,
+                alias=None,
+                is_grouped=True,
+                grouped_members=tuple(members),
+                alias_kind=ImportAliasKind.STAR,
+            )
+
+        if self._check(TokenKind.IDENTIFIER):
+            alias_token = self._advance()
+            return ImportDeclaration(
+                span=self._span_from(start, alias_token),
+                target=target,
+                alias=alias_token.lexeme,
+                is_grouped=True,
+                grouped_members=tuple(members),
+                alias_kind=ImportAliasKind.PREFIX,
+            )
+
+        if self._check(TokenKind.END_MODULE) or self._check(TokenKind.EOF):
+            self._raise_error("expected grouped import alias", span=as_token.span)
+        self._raise_error("expected grouped import alias", span=self._current().span)
 
     def _parse_include_declaration(self) -> IncludeDeclaration:
         start = self._expect(TokenKind.INCLUDE, "expected 'include'")
@@ -285,6 +409,52 @@ class Parser:
         )
         parts = tuple(token.lexeme[1:].split("."))
         return QualifiedModuleName(span=token.span, parts=parts)
+
+    def _parse_host_path(self) -> HostPathNode:
+        token = self._current()
+        if token.kind is TokenKind.QUALIFIED_MODULE_NAME:
+            self._raise_error("host ABI paths are relative to @host", span=token.span)
+        if token.kind is not TokenKind.IDENTIFIER:
+            self._raise_error("expected host ABI path")
+
+        self._advance()
+        parts = tuple(token.lexeme.split("."))
+        if not parts or any(part == "" for part in parts):
+            self._raise_error("expected host ABI path", span=token.span)
+        return HostPathNode(span=token.span, parts=parts)
+
+    def _parse_host_require_declaration(self) -> HostRequireDeclaration:
+        start = self._expect(TokenKind.REQUIRE, "unexpected token")
+        path = self._parse_host_path()
+        signature = self._parse_signature()
+        signature_end_span = signature.span
+        if self._index > 0:
+            signature_end_token = self._tokens[self._index - 1]
+            if signature_end_token.kind is TokenKind.RBRACE:
+                signature_end_span = signature_end_token.span
+
+        effect_token: Token
+        effect: HostAbiEffect
+        if self._check(TokenKind.PURE):
+            effect_token = self._advance()
+            effect = HostAbiEffect.PURE
+        elif self._check(TokenKind.DIRTY):
+            effect_token = self._advance()
+            effect = HostAbiEffect.DIRTY
+        else:
+            self._raise_error("host requirement must declare an effect", span=signature_end_span)
+
+        return HostRequireDeclaration(
+            span=self._span_from(start, effect_token),
+            path=path,
+            signature=signature,
+            effect=effect,
+        )
+
+    def _parse_host_opaque_declaration(self) -> HostOpaqueDeclaration:
+        start = self._expect(TokenKind.OPAQUE, "unexpected token")
+        path = self._parse_host_path()
+        return HostOpaqueDeclaration(span=self._span_from(start, path), path=path)
 
     def _parse_word_def(self, *, is_top_level: bool) -> WordDefNode:
         start = self._current()
@@ -387,15 +557,25 @@ class Parser:
         )
 
     def _parse_type(self) -> TypeNode | QuoteTypeNode:
-        name_token = self._expect(TokenKind.IDENTIFIER, "malformed type")
+        token = self._current()
+        normalized_name: str
+        if token.kind is TokenKind.IDENTIFIER:
+            name_token = self._advance()
+            normalized_name = name_token.lexeme
+        elif token.kind is TokenKind.QUALIFIED_MODULE_NAME and token.lexeme.startswith("@host."):
+            name_token = self._advance()
+            # Transitional compatibility: keep downstream host opaque handling on host.* names.
+            normalized_name = token.lexeme[1:]
+        else:
+            self._raise_error("malformed type")
 
-        if name_token.lexeme in {"Quote", "DirtyQuote"} and self._match(TokenKind.LT):
+        if normalized_name in {"Quote", "DirtyQuote"} and self._match(TokenKind.LT):
             if self._check(TokenKind.LBRACE):
                 quote_type = self._parse_quote_type()
                 end = self._expect(TokenKind.GT, "malformed type")
                 quote_type.effect_kind = (
                     QuoteEffect.DIRTY
-                    if name_token.lexeme == "DirtyQuote"
+                    if normalized_name == "DirtyQuote"
                     else QuoteEffect.PURE
                 )
                 return TypeNode(
@@ -408,11 +588,11 @@ class Parser:
             args, end = self._parse_type_arguments()
             return TypeNode(
                 span=self._span_from(name_token, end),
-                name=name_token.lexeme,
+                name=normalized_name,
                 args=tuple(args),
             )
 
-        return TypeNode(span=name_token.span, name=name_token.lexeme)
+        return TypeNode(span=name_token.span, name=normalized_name)
 
     def _parse_type_arguments(self) -> tuple[list[TypeNode | QuoteTypeNode], Token]:
         args: list[TypeNode | QuoteTypeNode] = []

@@ -80,6 +80,18 @@ def test_module_keywords_recognized():
     ]
 
 
+def test_host_abi_keywords_recognized():
+    tokens = lex("require opaque pure dirty")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.REQUIRE,
+        TokenKind.OPAQUE,
+        TokenKind.PURE,
+        TokenKind.DIRTY,
+        TokenKind.EOF,
+    ]
+
+
 def test_qualified_module_name_tokenized():
     tokens = lex("@app @app.run @app-")
 
@@ -94,6 +106,38 @@ def test_qualified_module_name_tokenized():
         "@app.run",
         "@app-",
     ]
+
+
+def test_host_qualified_module_name_tokenized():
+    tokens = lex("@host.io.FileHandle")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.QUALIFIED_MODULE_NAME,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["@host.io.FileHandle"]
+
+
+def test_grouped_import_prefix_tokenized():
+    tokens = lex("@host.io.{")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.QUALIFIED_MODULE_PREFIX,
+        TokenKind.LBRACE,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["@host.io.", "{"]
+
+
+def test_grouped_import_prefix_tokenized_for_console():
+    tokens = lex("@host.console.{")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.QUALIFIED_MODULE_PREFIX,
+        TokenKind.LBRACE,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["@host.console.", "{"]
 
 
 @pytest.mark.parametrize("source", ["@", "@app.", "@app..run"])
@@ -159,6 +203,20 @@ def test_composite_identifiers():
     ]
 
 
+def test_host_dot_words_remain_identifiers():
+    tokens = lex("host.log host.io.FileHandle")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.IDENTIFIER,
+        TokenKind.IDENTIFIER,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == [
+        "host.log",
+        "host.io.FileHandle",
+    ]
+
+
 def test_hyphenated_identifier_is_single_identifier():
     tokens = lex("a-b")
 
@@ -212,6 +270,17 @@ def test_float_operators_are_tokenized_as_distinct_operators():
         TokenKind.EOF,
     ]
     assert [token.lexeme for token in tokens[:-1]] == ["+.", "-.", "*.", "/."]
+
+
+def test_as_star_keeps_identifier_and_operator_tokens():
+    tokens = lex("as *")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.IDENTIFIER,
+        TokenKind.OPERATOR,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["as", "*"]
 
 
 def test_bare_slash_is_not_a_v1_operator():

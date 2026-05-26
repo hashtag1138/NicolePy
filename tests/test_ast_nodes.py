@@ -12,8 +12,13 @@ from nicole.ast_nodes import (
     CaseBranchNode,
     CaseNode,
     ExportDeclaration,
+    HostAbiEffect,
+    HostOpaqueDeclaration,
+    HostPathNode,
+    HostRequireDeclaration,
     IdentifierNode,
     ImportDeclaration,
+    ImportAliasKind,
     IncludeDeclaration,
     IfNode,
     LiteralKind,
@@ -111,10 +116,106 @@ def test_module_import_include_export_nodes_creation():
     export_node = ExportDeclaration(word_name="run", span=make_span())
 
     assert module_node.name.parts == ("app",)
+    assert module_node.is_host_module is False
     assert import_node.target.parts == ("app",)
     assert import_node.alias == "a"
+    assert import_node.is_grouped is False
+    assert import_node.grouped_members == ()
+    assert import_node.alias_kind is ImportAliasKind.NONE
     assert include_node.path == "feature.nic"
     assert export_node.word_name == "run"
+
+
+def test_host_abi_effect_enum_values():
+    assert HostAbiEffect.PURE.value == "pure"
+    assert HostAbiEffect.DIRTY.value == "dirty"
+
+
+def test_import_alias_kind_enum_values():
+    assert ImportAliasKind.NONE.value == "none"
+    assert ImportAliasKind.SIMPLE.value == "simple"
+    assert ImportAliasKind.PREFIX.value == "prefix"
+    assert ImportAliasKind.STAR.value == "star"
+
+
+def test_module_declaration_host_flag_is_additive_and_compatible():
+    qualified = QualifiedModuleName(parts=("app",), span=make_span())
+
+    module_default = ModuleDeclaration(name=qualified, span=make_span())
+    assert module_default.is_host_module is False
+
+    module_host = ModuleDeclaration(name=qualified, span=make_span(), is_host_module=True)
+    assert module_host.is_host_module is True
+
+
+def test_host_path_node_stores_parts_and_span():
+    span = make_span(2, 3, 8)
+    path = HostPathNode(parts=("console", "log"), span=span)
+
+    assert path.parts == ("console", "log")
+    assert path.span == span
+
+
+def test_host_require_declaration_stores_path_signature_effect_and_span():
+    span = make_span(4, 1, 12)
+    path = HostPathNode(parts=("console", "log"), span=span)
+    signature = SignatureNode(span=make_span(), inputs=(), outputs=())
+    require_node = HostRequireDeclaration(
+        path=path,
+        signature=signature,
+        effect=HostAbiEffect.DIRTY,
+        span=span,
+    )
+
+    assert require_node.path is path
+    assert require_node.signature is signature
+    assert require_node.effect is HostAbiEffect.DIRTY
+    assert require_node.span == span
+
+
+def test_host_opaque_declaration_stores_path_and_span():
+    span = make_span(5, 1, 20)
+    path = HostPathNode(parts=("io", "FileHandle"), span=span)
+    opaque_node = HostOpaqueDeclaration(path=path, span=span)
+
+    assert opaque_node.path is path
+    assert opaque_node.span == span
+
+
+def test_import_declaration_grouped_prefix_shape():
+    target = QualifiedModuleName(parts=("host", "io"), span=make_span())
+    node = ImportDeclaration(
+        target=target,
+        alias="io",
+        is_grouped=True,
+        grouped_members=("open-file", "close-file", "FileHandle"),
+        alias_kind=ImportAliasKind.PREFIX,
+        span=make_span(),
+    )
+
+    assert node.target is target
+    assert node.alias == "io"
+    assert node.is_grouped is True
+    assert node.grouped_members == ("open-file", "close-file", "FileHandle")
+    assert node.alias_kind is ImportAliasKind.PREFIX
+
+
+def test_import_declaration_grouped_as_star_shape():
+    target = QualifiedModuleName(parts=("host", "console"), span=make_span())
+    node = ImportDeclaration(
+        target=target,
+        alias=None,
+        is_grouped=True,
+        grouped_members=("log", "read-line"),
+        alias_kind=ImportAliasKind.STAR,
+        span=make_span(),
+    )
+
+    assert node.target is target
+    assert node.alias is None
+    assert node.is_grouped is True
+    assert node.grouped_members == ("log", "read-line")
+    assert node.alias_kind is ImportAliasKind.STAR
 
 
 def test_if_node_has_no_condition_field():

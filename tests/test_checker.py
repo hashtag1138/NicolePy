@@ -960,10 +960,10 @@ def test_checker_effect_analysis_distinguishes_same_name_words_across_modules() 
 def test_checker_rejects_pure_cross_module_call_to_dirty_same_name_word() -> None:
     host_signature = signature_from_source('module @app\n  : hostsig { msg:String -- } ;\nend-module\n')
     with pytest.raises(CheckerError, match='inferred dirty.*missing dirty annotation'):
-        check_source_with_host_contract_without_builtins('module @b\n  dirty : run { msg:String -- }\n    msg host.log\n  ;\nend-module\nimport @b\nmodule @a\n  : run { msg:String -- }\n    msg @b.run\n  ;\nend-module', [HostWord(name='host.log', signature=host_signature, effect=HostEffect.DIRTY)])
+        check_source_with_host_contract_without_builtins('module @b\n  dirty : run { msg:String -- }\n    msg host.log\n  ;\nend-module\nmodule @a\n  import @b\n  : run { msg:String -- }\n    msg @b.run\n  ;\nend-module', [HostWord(name='host.log', signature=host_signature, effect=HostEffect.DIRTY)])
 
 def test_checker_does_not_mark_cross_module_same_name_tail_call_as_self() -> None:
-    program = check_source_without_builtins('module @b\n  : loop { n:Int -- n2:Int }\n    n\n  ;\nend-module\nimport @b\nmodule @a\n  : loop { n:Int -- n2:Int }\n    n @b.loop\n  ;\nend-module')
+    program = check_source_without_builtins('module @b\n  : loop { n:Int -- n2:Int }\n    n\n  ;\nend-module\nmodule @a\n  import @b\n  : loop { n:Int -- n2:Int }\n    n @b.loop\n  ;\nend-module')
     a_loop = get_module_word(program, module_name='a', word_name='loop')
     call = a_loop.body.items[1]
     assert isinstance(call, IdentifierNode)

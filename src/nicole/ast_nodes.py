@@ -24,12 +24,17 @@ __all__ = [
     "QualifiedModuleName",
     "ProgramNode",
     "QuoteEffect",
+    "HostAbiEffect",
+    "ImportAliasKind",
     "QuoteNode",
     "QuoteTypeNode",
     "ResolutionInfo",
     "SignatureNode",
     "ModuleDeclaration",
     "ImportDeclaration",
+    "HostPathNode",
+    "HostRequireDeclaration",
+    "HostOpaqueDeclaration",
     "IncludeDeclaration",
     "ExportDeclaration",
     "TypedEmptyListNode",
@@ -66,6 +71,18 @@ class PatternKind(Enum):
 class QuoteEffect(Enum):
     PURE = auto()
     DIRTY = auto()
+
+
+class HostAbiEffect(Enum):
+    PURE = "pure"
+    DIRTY = "dirty"
+
+
+class ImportAliasKind(Enum):
+    NONE = "none"
+    SIMPLE = "simple"
+    PREFIX = "prefix"
+    STAR = "star"
 
 
 @dataclass(slots=True)
@@ -112,12 +129,33 @@ class QualifiedModuleName(ASTNode):
 class ModuleDeclaration(ASTNode):
     name: QualifiedModuleName
     items: tuple[ASTNode, ...] = field(default_factory=tuple)
+    is_host_module: bool = False
 
 
 @dataclass(slots=True)
 class ImportDeclaration(ASTNode):
     target: QualifiedModuleName
     alias: str | None = None
+    is_grouped: bool = False
+    grouped_members: tuple[str, ...] = ()
+    alias_kind: ImportAliasKind = ImportAliasKind.NONE
+
+
+@dataclass(slots=True)
+class HostPathNode(ASTNode):
+    parts: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class HostRequireDeclaration(ASTNode):
+    path: HostPathNode
+    signature: SignatureNode
+    effect: HostAbiEffect
+
+
+@dataclass(slots=True)
+class HostOpaqueDeclaration(ASTNode):
+    path: HostPathNode
 
 
 @dataclass(slots=True)

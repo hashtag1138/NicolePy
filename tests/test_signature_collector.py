@@ -151,8 +151,8 @@ def test_duplicate_module_declaration_is_rejected() -> None:
 
 def test_import_declaration_metadata_is_recorded() -> None:
     program = parse_source(
-        "import @math\n"
         "module @app\n"
+        "  import @math\n"
         "end-module\n"
     )
     table = collect_signatures(program)
@@ -160,23 +160,60 @@ def test_import_declaration_metadata_is_recorded() -> None:
     assert len(table.imports) == 1
     metadata = table.imports[0]
     assert isinstance(metadata, ImportMetadata)
+    assert metadata.owner_module == "app"
     assert metadata.target == "math"
     assert metadata.alias is None
 
 
 def test_import_alias_metadata_is_recorded() -> None:
     program = parse_source(
-        "import @math.utils as u\n"
         "module @app\n"
+        "  import @math.utils as u\n"
         "end-module\n"
     )
     table = collect_signatures(program)
 
     assert len(table.imports) == 1
     metadata = table.imports[0]
+    assert metadata.owner_module == "app"
     assert metadata.target == "math.utils"
     assert metadata.alias == "u"
-    assert table.aliases["u"] is metadata
+    assert table.aliases[("app", "u")] is metadata
+
+
+def test_same_alias_is_allowed_in_different_modules() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  import @math as m\n"
+        "end-module\n"
+        "module @tools\n"
+        "  import @utils as m\n"
+        "end-module\n"
+    )
+    table = collect_signatures(program)
+
+    assert len(table.imports) == 2
+    assert ("app", "m") in table.aliases
+    assert ("tools", "m") in table.aliases
+    assert table.aliases[("app", "m")].target == "math"
+    assert table.aliases[("tools", "m")].target == "utils"
+
+
+def test_imports_are_recorded_per_owner_module() -> None:
+    program = parse_source(
+        "module @app\n"
+        "  import @math\n"
+        "end-module\n"
+        "module @tools\n"
+        "  import @util\n"
+        "end-module\n"
+    )
+    table = collect_signatures(program)
+
+    assert {(metadata.owner_module, metadata.target) for metadata in table.imports} == {
+        ("app", "math"),
+        ("tools", "util"),
+    }
 
 
 @pytest.mark.parametrize("reserved_root", ["host", "list", "map", "result"])
@@ -195,8 +232,8 @@ def test_reserved_root_module_name_is_rejected(reserved_root: str) -> None:
 @pytest.mark.parametrize("reserved_root", ["host", "list", "map", "result"])
 def test_reserved_root_alias_is_rejected(reserved_root: str) -> None:
     program = parse_source(
-        f"import @math as {reserved_root}\n"
         "module @app\n"
+        f"  import @math as {reserved_root}\n"
         "end-module\n"
     )
     with pytest.raises(

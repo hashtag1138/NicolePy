@@ -9,8 +9,8 @@ from nicole.checker import CheckerError
 from nicole.diagnostic_renderer import render_diagnostic, render_diagnostic_error
 from nicole.errors import Diagnostic, DiagnosticError, DiagnosticPhase, DiagnosticSeverity
 from nicole.host_abi import HostABIError
-from nicole.lexer import LexError
-from nicole.parser import ParseError
+from nicole.lexer import LexError, lex
+from nicole.parser import ParseError, Parser
 from nicole.resolver import ResolutionError
 from nicole.source import SourceFile, SourceLocation
 from nicole.standard_symbols import StandardSymbolError
@@ -146,6 +146,42 @@ def test_parse_error_legacy_message_line_column_and_str_are_compatible() -> None
     assert error.line == 7
     assert error.column == 2
     assert str(error) == "unexpected token at 7:2"
+
+
+def test_renderer_renders_top_level_import_parser_diagnostic() -> None:
+    source = "import @math\n"
+
+    with pytest.raises(ParseError, match="imports are only allowed inside modules") as exc_info:
+        Parser(lex(source)).parse()
+
+    rendered = render_diagnostic_error(exc_info.value)
+
+    assert "ERROR [PARSER/PARSER_TOP_LEVEL_IMPORT_FORBIDDEN] imports are only allowed inside modules" in rendered
+    assert "--> <memory>:1:1" in rendered
+
+
+def test_renderer_renders_grouped_import_alias_required_diagnostic() -> None:
+    source = "module @app\n  import @host.io.{ open-file }\nend-module\n"
+
+    with pytest.raises(ParseError, match="grouped import requires an alias") as exc_info:
+        Parser(lex(source)).parse()
+
+    rendered = render_diagnostic_error(exc_info.value)
+
+    assert "ERROR [PARSER/PARSER_GROUPED_IMPORT_ALIAS_REQUIRED] grouped import requires an alias" in rendered
+    assert "--> <memory>:2:31" in rendered
+
+
+def test_renderer_renders_host_require_missing_effect_diagnostic() -> None:
+    source = "module @host\n  require console.log { msg:String -- }\nend-module\n"
+
+    with pytest.raises(ParseError, match="host requirement must declare an effect") as exc_info:
+        Parser(lex(source)).parse()
+
+    rendered = render_diagnostic_error(exc_info.value)
+
+    assert "ERROR [PARSER/PARSER_HOST_REQUIRE_MISSING_EFFECT] host requirement must declare an effect" in rendered
+    assert "--> <memory>:2:39" in rendered
 
 
 def test_checker_error_legacy_message_line_column_and_str_are_compatible() -> None:
