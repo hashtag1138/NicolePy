@@ -8,8 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from nicole.ast_nodes import BlockNode, ProgramNode, SignatureNode, WordDefNode
 from nicole.lexer import lex
 from nicole.parser import Parser
-from nicole.signature_collector import collect_signatures
-from nicole.symbols import ImportMetadata, SymbolError, WordSymbol
+from nicole.signature_collector import collect_semantic_model, collect_signatures
+from nicole.symbols import ImportMetadata, SymbolCategory, SymbolError, WordSymbol
 from nicole.tokens import SourceSpan
 
 
@@ -216,7 +216,7 @@ def test_imports_are_recorded_per_owner_module() -> None:
     }
 
 
-@pytest.mark.parametrize("reserved_root", ["host", "list", "map", "result"])
+@pytest.mark.parametrize("reserved_root", ["list", "map", "result"])
 def test_reserved_root_module_name_is_rejected(reserved_root: str) -> None:
     program = parse_source(
         f"module @{reserved_root}\n"
@@ -241,3 +241,109 @@ def test_reserved_root_alias_is_rejected(reserved_root: str) -> None:
         match=rf"cannot use reserved root as import alias: {reserved_root}",
     ):
         collect_signatures(program)
+
+
+def test_collect_semantic_model_preserves_word_category_defaults() -> None:
+    model = collect_semantic_model(
+        parse_source(
+            "module @app\n"
+            "  : run { -- }\n"
+            "  ;\n"
+            "end-module\n"
+        )
+    )
+    symbol = model.symbols.words["run"][0]
+    assert symbol.category is SymbolCategory.USER_WORD
+
+
+def test_collect_semantic_model_collects_host_capability_canonical_name() -> None:
+    model = collect_semantic_model(
+        parse_source(
+            "module @host\n"
+            "  require console.log { msg:String -- } dirty\n"
+            "end-module\n"
+        )
+    )
+    assert "@host.console.log" in model.source_host_contract.capabilities
+
+
+def test_collect_semantic_model_collects_host_opaque_canonical_name() -> None:
+    model = collect_semantic_model(
+        parse_source(
+            "module @host\n"
+            "  opaque io.FileHandle\n"
+            "end-module\n"
+        )
+    )
+    assert "@host.io.FileHandle" in model.source_host_contract.opaque_types
+
+
+def test_collect_semantic_model_consolidates_multiple_host_fragments() -> None:
+    model = collect_semantic_model(
+        parse_source(
+            "module @host\n"
+            "  require console.log { msg:String -- } dirty\n"
+            "end-module\n"
+            "module @host\n"
+            "  opaque io.FileHandle\n"
+            "end-module\n"
+        )
+    )
+    assert "@host.console.log" in model.source_host_contract.capabilities
+    assert "@host.io.FileHandle" in model.source_host_contract.opaque_types
+
+
+def test_collect_semantic_model_accepts_identical_host_require_duplicate() -> None:
+    model = collect_semantic_model(
+        parse_source(
+            "module @host\n"
+            "  require console.log { msg:String -- } dirty\n"
+            "end-module\n"
+            "module @host\n"
+            "  require console.log { msg:String -- } dirty\n"
+            "end-module\n"
+        )
+    )
+    assert len(model.source_host_contract.capabilities) == 1
+
+
+def test_collect_semantic_model_rejects_divergent_host_require_duplicate() -> None:
+    with pytest.raises(SymbolError, match="conflicting host capability declaration: @host.console.log"):
+        collect_semantic_model(
+            parse_source(
+                "module @host\n"
+                "  require console.log { msg:String -- } dirty\n"
+                "end-module\n"
+                "module @host\n"
+                "  require console.log { msg:String -- } pure\n"
+                "end-module\n"
+            )
+        )
+
+
+def test_collect_semantic_model_accepts_identical_host_opaque_duplicate() -> None:
+    model = collect_semantic_model(
+        parse_source(
+            "module @host\n"
+            "  opaque io.FileHandle\n"
+            "end-module\n"
+            "module @host\n"
+            "  opaque io.FileHandle\n"
+            "end-module\n"
+        )
+    )
+    assert len(model.source_host_contract.opaque_types) == 1
+
+
+def test_collect_semantic_model_rejects_host_category_collision() -> None:
+    with pytest.raises(SymbolError, match="host symbol category conflict: @host.io.FileHandle"):
+        collect_semantic_model(
+            parse_source(
+                "module @host\n"
+                "  require io.FileHandle { -- } pure\n"
+                "end-module\n"
+                "module @host\n"
+                "  opaque io.FileHandle\n"
+                "end-module\n"
+            )
+        )

@@ -1,19 +1,54 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
-from .ast_nodes import ExportDeclaration, ImportDeclaration, ModuleDeclaration, ProgramNode, Visibility, WordDefNode
-from .symbols import SymbolError, SymbolTable, WordSymbol
+from .ast_nodes import (
+    ExportDeclaration,
+    HostOpaqueDeclaration,
+    HostRequireDeclaration,
+    ImportDeclaration,
+    ModuleDeclaration,
+    ParameterNode,
+    ProgramNode,
+    QuoteTypeNode,
+    SignatureNode,
+    TypeNode,
+    Visibility,
+    WordDefNode,
+)
+from .symbols import (
+    SourceHostCapabilitySymbol,
+    SourceHostContract,
+    SourceHostOpaqueTypeSymbol,
+    SymbolError,
+    SymbolTable,
+    WordSymbol,
+)
 
-__all__ = ["collect_signatures"]
+__all__ = ["CollectedSemanticModel", "collect_semantic_model", "collect_signatures"]
+
+
+@dataclass(frozen=True, slots=True)
+class CollectedSemanticModel:
+    symbols: SymbolTable
+    source_host_contract: SourceHostContract
 
 
 def collect_signatures(program: ProgramNode) -> SymbolTable:
+    return collect_semantic_model(program).symbols
+
+
+def collect_semantic_model(program: ProgramNode) -> CollectedSemanticModel:
     table = SymbolTable()
+    source_host_contract = SourceHostContract()
     for declaration in program.declarations:
-        if isinstance(declaration, ModuleDeclaration):
-            _collect_module(declaration, table)
-    return table
+        if not isinstance(declaration, ModuleDeclaration):
+            continue
+        if declaration.is_host_module:
+            _collect_host_module(declaration, source_host_contract)
+            continue
+        _collect_module(declaration, table)
+    return CollectedSemanticModel(symbols=table, source_host_contract=source_host_contract)
 
 
 def _collect_module(declaration: ModuleDeclaration, table: SymbolTable) -> None:
@@ -32,6 +67,72 @@ def _collect_module(declaration: ModuleDeclaration, table: SymbolTable) -> None:
             export_declarations.append(item)
 
     _apply_module_exports(export_declarations, table, module_name=module_name)
+
+
+def _collect_host_module(declaration: ModuleDeclaration, source_host_contract: SourceHostContract) -> None:
+    for item in declaration.items:
+        if isinstance(item, HostRequireDeclaration):
+            _collect_host_capability(item, source_host_contract)
+        elif isinstance(item, HostOpaqueDeclaration):
+            _collect_host_opaque(item, source_host_contract)
+
+
+def _collect_host_capability(
+    declaration: HostRequireDeclaration,
+    source_host_contract: SourceHostContract,
+) -> None:
+    canonical_name = _canonical_host_name(declaration.path.parts)
+    existing = source_host_contract.capabilities.get(canonical_name)
+    if existing is not None:
+        if _same_signature(existing.signature, declaration.signature) and existing.effect == declaration.effect:
+            return
+        raise SymbolError(
+            message=f"conflicting host capability declaration: {canonical_name}",
+            line=declaration.span.line,
+            column=declaration.span.column,
+            span=declaration.span,
+            code="SYMBOLS_HOST_CAPABILITY_CONFLICT",
+        )
+
+    if canonical_name in source_host_contract.opaque_types:
+        raise SymbolError(
+            message=f"host symbol category conflict: {canonical_name}",
+            line=declaration.span.line,
+            column=declaration.span.column,
+            span=declaration.span,
+            code="SYMBOLS_HOST_CATEGORY_CONFLICT",
+        )
+
+    source_host_contract.capabilities[canonical_name] = SourceHostCapabilitySymbol(
+        canonical_name=canonical_name,
+        path=declaration.path.parts,
+        signature=declaration.signature,
+        effect=declaration.effect,
+        span=declaration.span,
+    )
+
+
+def _collect_host_opaque(
+    declaration: HostOpaqueDeclaration,
+    source_host_contract: SourceHostContract,
+) -> None:
+    canonical_name = _canonical_host_name(declaration.path.parts)
+    if canonical_name in source_host_contract.capabilities:
+        raise SymbolError(
+            message=f"host symbol category conflict: {canonical_name}",
+            line=declaration.span.line,
+            column=declaration.span.column,
+            span=declaration.span,
+            code="SYMBOLS_HOST_CATEGORY_CONFLICT",
+        )
+    if canonical_name in source_host_contract.opaque_types:
+        return
+
+    source_host_contract.opaque_types[canonical_name] = SourceHostOpaqueTypeSymbol(
+        canonical_name=canonical_name,
+        path=declaration.path.parts,
+        span=declaration.span,
+    )
 
 
 def _collect_import(declaration: ImportDeclaration, table: SymbolTable, *, owner_module: str) -> None:
@@ -114,3 +215,45 @@ def _apply_module_exports(
 
 def _module_key(parts: tuple[str, ...]) -> str:
     return ".".join(parts)
+
+
+def _canonical_host_name(parts: tuple[str, ...]) -> str:
+    return f"@host.{'.'.join(parts)}"
+
+
+def _same_signature(left: SignatureNode, right: SignatureNode) -> bool:
+    return (
+        _same_parameters(left.inputs, right.inputs)
+        and _same_parameters(left.outputs, right.outputs)
+    )
+
+
+def _same_parameters(left: tuple[ParameterNode, ...], right: tuple[ParameterNode, ...]) -> bool:
+    if len(left) != len(right):
+        return False
+    return all(
+        _same_parameter(left_parameter, right_parameter)
+        for left_parameter, right_parameter in zip(left, right, strict=True)
+    )
+
+
+def _same_parameter(left: ParameterNode, right: ParameterNode) -> bool:
+    return left.name == right.name and _same_type_node(left.type_node, right.type_node)
+
+
+def _same_type_node(left: TypeNode | QuoteTypeNode, right: TypeNode | QuoteTypeNode) -> bool:
+    if isinstance(left, TypeNode) and isinstance(right, TypeNode):
+        if left.name != right.name or len(left.args) != len(right.args):
+            return False
+        return all(
+            _same_type_node(left_argument, right_argument)
+            for left_argument, right_argument in zip(left.args, right.args, strict=True)
+        )
+    if isinstance(left, QuoteTypeNode) and isinstance(right, QuoteTypeNode):
+        return (
+            left.effect_kind == right.effect_kind
+            and _same_parameters(left.captures, right.captures)
+            and _same_parameters(left.inputs, right.inputs)
+            and _same_parameters(left.outputs, right.outputs)
+        )
+    return False

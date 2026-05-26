@@ -171,10 +171,21 @@ def test_host_contract_accepts_declared_host_net_tcp_socket() -> None:
     assert "host.net.TcpSocket" in contract.opaque_types
 
 
-@pytest.mark.parametrize("name", ["FileHandle", "opaque.FileHandle", "extern.FileHandle", "foo.bar"])
+@pytest.mark.parametrize("name", ["FileHandle", "opaque.FileHandle", "extern.FileHandle", "foo.bar", "@host.io.FileHandle"])
 def test_host_contract_rejects_non_canonical_opaque_type_name(name: str) -> None:
     with pytest.raises(HostABIError, match="host opaque type name must be canonical host\\.\\*"):
         host_contract_from_words([], opaque_types=[HostOpaqueType(name=name)])
+
+
+def test_host_contract_still_rejects_source_canonical_host_word_name() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(HostABIError, match="host word name must start with 'host.'"):
+        host_contract_from_words([HostWord(name="@host.console.log", signature=signature, effect=HostEffect.PURE)])
 
 
 def test_host_contract_rejects_duplicate_opaque_type_declarations() -> None:

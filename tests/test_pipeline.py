@@ -253,6 +253,49 @@ def test_pipeline_accepts_host_contract_with_declared_opaque_types_in_phase1() -
     assert "host.io.FileHandle" in result.host_contract.opaque_types
 
 
+def test_pipeline_builds_legacy_opaque_bridge_from_source_host_contract() -> None:
+    result = analyze_program(
+        "module @host\n"
+        "  opaque io.FileHandle\n"
+        "end-module\n"
+        "module @app\n"
+        "  : run { fh:host.io.FileHandle -- out:host.io.FileHandle }\n"
+        "    fh\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    assert "host.io.FileHandle" in result.host_contract.opaque_types
+
+
+def test_pipeline_builds_legacy_capability_bridge_from_source_host_contract() -> None:
+    result = analyze_program(
+        "module @host\n"
+        "  require console.log { msg:String -- } dirty\n"
+        "end-module\n"
+        "module @app\n"
+        "  dirty : run { msg:String -- }\n"
+        "    msg host.console.log\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    assert "host.console.log" in result.host_contract.words
+
+
+def test_pipeline_grouped_imports_remain_parser_only_semantics() -> None:
+    with pytest.raises(ResolutionError, match="unresolved name"):
+        analyze_program(
+            "module @host\n"
+            "  require io.open-file { -- out:Int } pure\n"
+            "end-module\n"
+            "module @app\n"
+            "  import @host.io.{ open-file } as io\n"
+            "  : run { -- out:Int }\n"
+            "    io.open-file\n"
+            "  ;\n"
+            "end-module\n"
+        )
+
+
 def test_pipeline_checker_accepts_declared_opaque_types_from_host_contract() -> None:
     host_contract = host_contract_from_words(
         [],

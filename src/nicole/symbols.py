@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
-from .ast_nodes import SignatureNode, Visibility
+from .ast_nodes import HostAbiEffect, SignatureNode, Visibility
 from .errors import DiagnosticError, DiagnosticPhase
 from .tokens import SourceSpan
 
@@ -11,6 +11,13 @@ from .tokens import SourceSpan
 class SymbolSource(Enum):
     USER = auto()
     BUILTIN = auto()
+
+
+class SymbolCategory(Enum):
+    USER_WORD = auto()
+    BUILTIN_WORD = auto()
+    HOST_CAPABILITY = auto()
+    HOST_OPAQUE_TYPE = auto()
 
 
 _RESERVED_ROOTS = {"host", "list", "map", "result"}
@@ -31,7 +38,12 @@ class WordSymbol:
     module: str | None = None
     owner: str | None = None
     source: SymbolSource = SymbolSource.USER
+    category: SymbolCategory = SymbolCategory.USER_WORD
     quote_callable_only: bool = False
+
+    def __post_init__(self) -> None:
+        if self.source is SymbolSource.BUILTIN and self.category is SymbolCategory.USER_WORD:
+            object.__setattr__(self, "category", SymbolCategory.BUILTIN_WORD)
 
     @property
     def qualified_name(self) -> str:
@@ -44,6 +56,31 @@ class ImportMetadata:
     target: str
     alias: str | None
     span: SourceSpan
+
+
+@dataclass(frozen=True, slots=True)
+class SourceHostCapabilitySymbol:
+    canonical_name: str
+    path: tuple[str, ...]
+    signature: SignatureNode
+    effect: HostAbiEffect
+    span: SourceSpan
+
+
+@dataclass(frozen=True, slots=True)
+class SourceHostOpaqueTypeSymbol:
+    canonical_name: str
+    path: tuple[str, ...]
+    span: SourceSpan
+
+
+@dataclass(frozen=True, slots=True)
+class SourceHostContract:
+    capabilities: dict[str, SourceHostCapabilitySymbol] = field(default_factory=dict)
+    opaque_types: dict[str, SourceHostOpaqueTypeSymbol] = field(default_factory=dict)
+
+    def has_entries(self) -> bool:
+        return bool(self.capabilities or self.opaque_types)
 
 
 @dataclass
