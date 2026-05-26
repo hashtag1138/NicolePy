@@ -189,6 +189,66 @@ def test_checker_rejects_nested_unknown_nominal_type() -> None:
     with pytest.raises(CheckerError, match='type is not supported in v1: CustomError'):
         check_source('module @app\n  : bad { x:Result<Int,CustomError> -- }\n    x drop\n  ;\nend-module\n')
 
+
+def test_checker_rejects_imported_host_capability_as_type() -> None:
+    with pytest.raises(CheckerError, match='host capability cannot be used as a type') as exc_info:
+        check_source(
+            'module @host\n'
+            '  require console.log { msg:String -- } dirty\n'
+            'end-module\n'
+            'module @app\n'
+            '  import @host.console.log as Log\n'
+            '  : f { x:Log -- }\n'
+            '    x drop\n'
+            '  ;\n'
+            'end-module\n'
+        )
+
+    assert exc_info.value.diagnostic.code == "CHECKER_HOST_CAPABILITY_TYPE_USE"
+
+
+def test_checker_accepts_imported_host_opaque_alias_as_type() -> None:
+    check_source(
+        'module @host\n'
+        '  opaque io.FileHandle\n'
+        'end-module\n'
+        'module @app\n'
+        '  import @host.io.FileHandle as FileHandle\n'
+        '  : f { h:FileHandle -- out:FileHandle }\n'
+        '    h\n'
+        '  ;\n'
+        'end-module\n'
+    )
+
+
+def test_checker_accepts_grouped_prefixed_host_opaque_alias_as_type() -> None:
+    check_source(
+        'module @host\n'
+        '  opaque io.FileHandle\n'
+        'end-module\n'
+        'module @app\n'
+        '  import @host.io.{ FileHandle } as io\n'
+        '  : f { h:io.FileHandle -- out:io.FileHandle }\n'
+        '    h\n'
+        '  ;\n'
+        'end-module\n'
+    )
+
+
+def test_checker_accepts_grouped_star_host_opaque_alias_as_type() -> None:
+    check_source(
+        'module @host\n'
+        '  opaque io.FileHandle\n'
+        'end-module\n'
+        'module @app\n'
+        '  import @host.io.{ FileHandle } as *\n'
+        '  : f { h:FileHandle -- out:FileHandle }\n'
+        '    h\n'
+        '  ;\n'
+        'end-module\n'
+    )
+
+
 def test_checker_accepts_declared_opaque_type_in_word_signature() -> None:
     check_source_with_host_contract(
         'module @app\n  : id { fh:host.io.FileHandle -- out:host.io.FileHandle }\n    fh\n  ;\nend-module\n',

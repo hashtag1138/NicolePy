@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections import deque
+from typing import Callable
 
 from .ast_nodes import (
     BlockNode,
@@ -28,7 +29,7 @@ from .ast_nodes import (
 )
 from .errors import DiagnosticError, DiagnosticPhase
 from .host_abi import HostABIError, HostEffect, validate_type_v1
-from .symbols import SymbolSource, SymbolTable, WordSymbol
+from .symbols import SymbolCategory, SymbolSource, SymbolTable, WordSymbol
 from .tokens import SourceSpan
 
 __all__ = ["Checker", "CheckerError", "check", "check_program"]
@@ -102,72 +103,84 @@ class Checker:
         return program
 
     def _validate_program_types(self, program: ProgramNode) -> None:
-        for word in self._iter_top_level_words(program):
-            self._validate_word_types(word)
+        for declaration in program.declarations:
+            if not isinstance(declaration, ModuleDeclaration):
+                continue
+            module_name = ".".join(declaration.name.parts)
+            for item in declaration.items:
+                if isinstance(item, WordDefNode):
+                    self._validate_word_types(item, module_name=module_name)
 
-    def _validate_word_types(self, word: WordDefNode) -> None:
-        self._validate_signature_types(word.signature)
-        self._validate_block_types(word.body)
+    def _validate_word_types(self, word: WordDefNode, *, module_name: str) -> None:
+        self._validate_signature_types(word.signature, module_name=module_name)
+        self._validate_block_types(word.body, module_name=module_name)
         for nested_word in word.nested_words:
-            self._validate_word_types(nested_word)
+            self._validate_word_types(nested_word, module_name=module_name)
 
-    def _validate_signature_types(self, signature) -> None:
+    def _validate_signature_types(self, signature, *, module_name: str) -> None:
         for parameter in signature.inputs:
-            self._validate_type_node(parameter.type_node)
+            self._validate_type_node(parameter.type_node, module_name=module_name)
         for parameter in signature.outputs:
-            self._validate_type_node(parameter.type_node)
+            self._validate_type_node(parameter.type_node, module_name=module_name)
 
-    def _validate_block_types(self, block: BlockNode) -> None:
+    def _validate_block_types(self, block: BlockNode, *, module_name: str) -> None:
         for item in block.items:
             if isinstance(item, TypedEmptyListNode):
-                self._validate_type_node(item.type_node)
+                self._validate_type_node(item.type_node, module_name=module_name)
                 continue
             if isinstance(item, TypedEmptyMapNode):
-                self._validate_type_node(item.type_node)
+                self._validate_type_node(item.type_node, module_name=module_name)
                 continue
             if isinstance(item, QuoteNode):
                 for parameter in item.captures:
-                    self._validate_type_node(parameter.type_node)
+                    self._validate_type_node(parameter.type_node, module_name=module_name)
                 for parameter in item.inputs:
-                    self._validate_type_node(parameter.type_node)
+                    self._validate_type_node(parameter.type_node, module_name=module_name)
                 for parameter in item.outputs:
-                    self._validate_type_node(parameter.type_node)
-                self._validate_block_types(item.body)
+                    self._validate_type_node(parameter.type_node, module_name=module_name)
+                self._validate_block_types(item.body, module_name=module_name)
                 continue
             if isinstance(item, ListLiteralNode):
                 for element in item.elements:
                     if isinstance(element, QuoteNode):
                         for parameter in element.captures:
-                            self._validate_type_node(parameter.type_node)
+                            self._validate_type_node(parameter.type_node, module_name=module_name)
                         for parameter in element.inputs:
-                            self._validate_type_node(parameter.type_node)
+                            self._validate_type_node(parameter.type_node, module_name=module_name)
                         for parameter in element.outputs:
-                            self._validate_type_node(parameter.type_node)
-                        self._validate_block_types(element.body)
+                            self._validate_type_node(parameter.type_node, module_name=module_name)
+                        self._validate_block_types(element.body, module_name=module_name)
                     elif isinstance(element, TypedEmptyListNode):
-                        self._validate_type_node(element.type_node)
+                        self._validate_type_node(element.type_node, module_name=module_name)
                     elif isinstance(element, TypedEmptyMapNode):
-                        self._validate_type_node(element.type_node)
+                        self._validate_type_node(element.type_node, module_name=module_name)
                 continue
             if isinstance(item, IfNode):
-                self._validate_block_types(item.then_block)
-                self._validate_block_types(item.else_block)
+                self._validate_block_types(item.then_block, module_name=module_name)
+                self._validate_block_types(item.else_block, module_name=module_name)
                 continue
             if isinstance(item, CaseNode):
                 for branch in item.branches:
                     if branch.guard is not None:
-                        self._validate_block_types(branch.guard)
-                    self._validate_block_types(branch.body)
+                        self._validate_block_types(branch.guard, module_name=module_name)
+                    self._validate_block_types(branch.body, module_name=module_name)
 
-    def _validate_type_node(self, type_node: TypeNode) -> None:
+    def _validate_type_node(self, type_node: TypeNode, *, module_name: str) -> None:
         try:
             _validate_language_type_v1(
                 type_node,
                 declared_opaque_type_names=self._declared_opaque_type_names,
+                resolve_import_category=lambda type_name: self._import_type_category(module_name, type_name),
             )
             validate_type_v1(type_node, forbid_quote=False)
         except HostABIError as error:
             self._raise_error(error.message, type_node.span.line, type_node.span.column, span=type_node.span)
+
+    def _import_type_category(self, module_name: str, type_name: str) -> SymbolCategory | None:
+        metadata = self._symbols.alias_metadata(module_name, type_name)
+        if metadata is None:
+            return None
+        return metadata.category
 
     def _is_declared_opaque_type(self, type_node: TypeNode) -> bool:
         return type_node.name in self._declared_opaque_type_names and len(type_node.args) == 0
@@ -1797,6 +1810,7 @@ _CHECKER_MESSAGE_CODE_MAP = {
     "pure frame cannot call DirtyQuote": "CHECKER_PURE_FRAME_CALLS_DIRTY_QUOTE",
     "case guard cannot call dirty code": "CHECKER_CASE_GUARD_CALLS_DIRTY_CODE",
     "Map<K,V> key type must be Int, String, or Bool in v1": "CHECKER_INVALID_MAP_KEY_TYPE",
+    "host capability cannot be used as a type": "CHECKER_HOST_CAPABILITY_TYPE_USE",
 }
 
 
@@ -1868,7 +1882,16 @@ def _validate_language_type_v1(
     type_node: TypeNode,
     *,
     declared_opaque_type_names: frozenset[str] = frozenset(),
+    resolve_import_category: Callable[[str], SymbolCategory | None] | None = None,
 ) -> None:
+    imported_type_category = resolve_import_category(type_node.name) if resolve_import_category is not None else None
+    if imported_type_category is SymbolCategory.HOST_OPAQUE_TYPE:
+        if type_node.args:
+            raise HostABIError(f"type is not supported in v1: {type_node.name}")
+        return
+    if imported_type_category is SymbolCategory.HOST_CAPABILITY:
+        raise HostABIError("host capability cannot be used as a type")
+
     if type_node.name in declared_opaque_type_names:
         if type_node.args:
             raise HostABIError(f"type is not supported in v1: {type_node.name}")
@@ -1888,6 +1911,7 @@ def _validate_language_type_v1(
         _validate_language_type_v1(
             type_node.args[0],
             declared_opaque_type_names=declared_opaque_type_names,
+            resolve_import_category=resolve_import_category,
         )
         return
 
@@ -1903,10 +1927,12 @@ def _validate_language_type_v1(
         _validate_language_type_v1(
             key_type,
             declared_opaque_type_names=declared_opaque_type_names,
+            resolve_import_category=resolve_import_category,
         )
         _validate_language_type_v1(
             value_type,
             declared_opaque_type_names=declared_opaque_type_names,
+            resolve_import_category=resolve_import_category,
         )
         return
 
@@ -1920,10 +1946,12 @@ def _validate_language_type_v1(
         _validate_language_type_v1(
             value_type,
             declared_opaque_type_names=declared_opaque_type_names,
+            resolve_import_category=resolve_import_category,
         )
         _validate_language_type_v1(
             error_type,
             declared_opaque_type_names=declared_opaque_type_names,
+            resolve_import_category=resolve_import_category,
         )
         return
 
@@ -1935,16 +1963,19 @@ def _validate_language_type_v1(
             _validate_language_type_v1(
                 parameter.type_node,
                 declared_opaque_type_names=declared_opaque_type_names,
+                resolve_import_category=resolve_import_category,
             )
         for parameter in quote_signature.inputs:
             _validate_language_type_v1(
                 parameter.type_node,
                 declared_opaque_type_names=declared_opaque_type_names,
+                resolve_import_category=resolve_import_category,
             )
         for parameter in quote_signature.outputs:
             _validate_language_type_v1(
                 parameter.type_node,
                 declared_opaque_type_names=declared_opaque_type_names,
+                resolve_import_category=resolve_import_category,
             )
         return
 
