@@ -287,6 +287,7 @@ def test_pipeline_builds_legacy_opaque_bridge_from_source_host_contract() -> Non
         "end-module\n"
     )
     assert "host.io.FileHandle" in result.host_contract.opaque_types
+    assert "@host.io.FileHandle" not in result.host_contract.opaque_types
 
 
 def test_pipeline_builds_legacy_capability_bridge_from_source_host_contract() -> None:
@@ -302,6 +303,7 @@ def test_pipeline_builds_legacy_capability_bridge_from_source_host_contract() ->
         "end-module\n"
     )
     assert "host.console.log" in result.host_contract.words
+    assert "@host.console.log" not in result.host_contract.words
 
 
 def test_pipeline_accepts_grouped_import_with_prefix_alias() -> None:

@@ -188,6 +188,17 @@ def test_host_contract_still_rejects_source_canonical_host_word_name() -> None:
         host_contract_from_words([HostWord(name="@host.console.log", signature=signature, effect=HostEffect.PURE)])
 
 
+def test_host_contract_still_rejects_source_canonical_host_word_name_short_path() -> None:
+    signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n"
+    )
+    with pytest.raises(HostABIError, match="host word name must start with 'host.'"):
+        host_contract_from_words([HostWord(name="@host.foo", signature=signature, effect=HostEffect.PURE)])
+
+
 def test_host_contract_rejects_duplicate_opaque_type_declarations() -> None:
     with pytest.raises(HostABIError, match="duplicate host opaque type: host.io.FileHandle"):
         host_contract_from_words(

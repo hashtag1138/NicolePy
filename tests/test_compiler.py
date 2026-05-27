@@ -12,6 +12,7 @@ from nicole.resolver import ResolutionError
 from nicole.source import MEMORY_SOURCE_PATH
 from nicole.symbols import SymbolError
 from nicole.ast_nodes import IncludeDeclaration, ModuleDeclaration
+from nicole.host_abi import host_contract_from_words
 
 
 def test_compile_explicit_file_returns_checked_program(tmp_path: Path) -> None:
@@ -48,6 +49,38 @@ def test_compile_explicit_file_uses_physical_source_provenance(tmp_path: Path) -
     assert diagnostic.span is not None
     assert diagnostic.span.source.path == str(source_path.resolve())
     assert diagnostic.span.source.path != MEMORY_SOURCE_PATH
+
+
+def test_compile_forwards_python_host_contract_boundary_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "app.nic"
+    source_path.write_text(
+        "module @app\n"
+        "  : run { -- }\n"
+        "  ;\n"
+        "end-module\n",
+        encoding="utf-8",
+    )
+    legacy_python_host_contract = host_contract_from_words([])
+    seen_host_contracts: list[object] = []
+    from nicole import compiler as compiler_module
+
+    original_analyze_source_file = compiler_module._analyze_source_file
+
+    def _wrapped_analyze_source_file(source_file, *, host_contract=None):
+        seen_host_contracts.append(host_contract)
+        return original_analyze_source_file(source_file, host_contract=host_contract)
+
+    monkeypatch.setattr(
+        "nicole.compiler._analyze_source_file",
+        _wrapped_analyze_source_file,
+    )
+
+    NicoleCompiler(host_contract=legacy_python_host_contract).compile(source_path)
+
+    assert seen_host_contracts == [legacy_python_host_contract]
 
 
 def test_recursive_directory_discovery_is_deterministic(tmp_path: Path) -> None:

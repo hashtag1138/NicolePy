@@ -306,3 +306,25 @@ Bridge compatibility tests (runtime/ABI-facing legacy compatibility):
 - runtime fallback to `IdentifierNode.name` is restricted to legacy compatibility when `node.name` is already `host.*`
 - host runtime diagnostics/traces and host stack frame rendering remain unchanged on normal paths
 - Python ABI host naming and runtime opaque handling remain out of scope in B5C2
+
+## B5D scope (Python Host ABI Boundary Freeze)
+
+- B5 runtime identity alignment is closed through B5C2
+- Nicole source/spec host identities remain canonical `@host.*`
+- Python host ABI boundary remains legacy `host.*` in B5D:
+- `HostWord`
+- `HostOpaqueType`
+- `HostContract`
+- `RuntimeHostBindings`
+- `RuntimeOpaqueValue.type_name`
+- pipeline bridge from `SourceHostContract` canonical names to legacy `HostContract` names remains explicit and unchanged
+- B5D freezes this boundary and prevents premature cleanup/canonicalization on Python ABI/runtime surfaces
+- B5D does not migrate ABI naming, does not migrate runtime opaque identity, and does not change runtime host diagnostics/traces
+
+## B5 phase note
+
+- the B5A bridge invariants above are historical freeze context for that subphase
+- current post-B5C2 behavior for imported host calls is:
+- `ResolutionInfo.qualified_name="@host.*"`
+- `ResolutionInfo.host_binding_name="host.*"`
+- `IdentifierNode.name` preserves the source lexeme (`log`, `io.open-file`, `h.log`)

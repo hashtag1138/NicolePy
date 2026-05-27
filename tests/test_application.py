@@ -137,6 +137,14 @@ def test_mapping_host_bindings_is_accepted() -> None:
     assert "host.console.log" in app._runtime_host_bindings.words
 
 
+def test_mapping_host_bindings_rejects_canonical_host_key() -> None:
+    with pytest.raises(RuntimeError, match="runtime host binding must start with 'host.': @host.console.log"):
+        NicoleApplication(
+            "app.nic",
+            host_bindings={"@host.console.log": lambda message: message},
+        )
+
+
 def test_runtime_host_bindings_instance_is_reused() -> None:
     bindings = RuntimeHostBindings({"host.console.log": lambda message: message})
     app = NicoleApplication("app.nic", host_bindings=bindings)

@@ -133,12 +133,18 @@ Runtime value model:
 - `HostContract` and `ExportContract` remain the static host/export surfaces exposed by the Python implementation.
 - The frontend is now canonical around `@host.*`, but `runtime.py` and `host_abi.py` still use a narrow legacy bridge based on `host.*`.
 - Imported host capabilities resolve canonically, while runtime bindings are still keyed by legacy `host.*` names.
-- B5A freezes the runtime host bridge identity split for imported host calls:
+- The runtime host bridge identity split for imported host calls is:
 - `resolution.qualified_name` is canonical `@host.*`.
 - `resolution.host_binding_name` is legacy `host.*`.
-- `IdentifierNode.name` remains mutated to legacy `host.*` for runtime compatibility.
+- `IdentifierNode.name` preserves the source lexeme written in module code.
 - For non-host symbols, `resolution.host_binding_name` remains `None`.
 - This bridge metadata is internal migration state and is not a new public API contract.
+- B5D freezes the Python ABI boundary explicitly:
+- Nicole source/spec canonical host identities are `@host.*`.
+- Python host ABI identifiers remain legacy `host.*`.
+- runtime binding keys remain legacy `host.*`.
+- runtime opaque type identities remain legacy `host.*`.
+- no Python ABI migration is performed in B5D.
 - `Quote<{ ... }>` and `DirtyQuote<{ ... }>` are not ABI-compatible in v1 and must not cross the host boundary.
 
 ## Current limitations
@@ -148,8 +154,10 @@ Runtime value model:
 - Opaque values cannot be used with `=` or `!=`.
 - Runtime host opaque values must use nominal `RuntimeOpaqueValue(type_name=..., payload=...)`.
 - `Quote<{ ... }>` and `DirtyQuote<{ ... }>` remain forbidden across the ABI boundary.
-- Runtime and host ABI alignment are not fully canonical yet; B5 is the planned runtime-alignment phase.
-- B5A does not migrate runtime dispatch, does not migrate Python ABI naming, and does not remove legacy `host.*` runtime keys.
+- Runtime and host ABI alignment are intentionally split:
+- source/spec host identity is canonical `@host.*`
+- Python ABI/runtime host identity remains legacy `host.*`
+- B5D freezes this boundary; adaptation/migration is deferred to a future phase.
 
 ## Additional docs
 

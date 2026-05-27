@@ -28,30 +28,32 @@ Current implementation state against this target:
 - checker accepts canonical imported host opaque types in type position and rejects host capability-as-type
 - `ResolutionInfo.qualified_name` is canonical `@host.*`
 - `ResolutionInfo.host_binding_name` keeps the narrow legacy runtime bridge `host.*`
+- `IdentifierNode.name` preserves the source lexeme written in module code
 - canonical export publication uses `@module.word`
 - runtime export lookup uses canonical/module-qualified identities
 
-Known deferred gaps after B4:
+Known deferred gaps after B5C2/B5D freeze:
 
 - `runtime.py` remains legacy-centric and still dispatches host bindings by `host.*`
 - `host_abi.py` remains legacy-centric
 - pipeline still bridges canonical `@host.*` source identities to legacy `host.*` runtime identities
-- full runtime alignment is the planned B5 phase
+- runtime host identity migration is complete through B5C2; Python ABI migration is deferred
 
-B5A freeze scope (bridge visibility only):
+B5D freeze scope (Python host ABI boundary only):
 
 - preserve runtime behavior and preserve Python ABI behavior
-- preserve resolver bridge split for imported host calls:
+- preserve resolver/runtime split identities for imported host calls:
 - `ResolutionInfo.qualified_name == "@host.*"`
 - `ResolutionInfo.host_binding_name == "host.*"`
-- `IdentifierNode.name == "host.*"` (runtime compatibility mutation remains intentional)
+- `IdentifierNode.name` remains source lexeme (no legacy mutation in resolver)
 - preserve `ResolutionInfo.host_binding_name is None` for non-host symbols
-- preserve legacy runtime/ABI identities:
+- preserve legacy Python ABI/runtime boundary identities:
 - `RuntimeHostBindings` keys remain `host.*`
 - `HostWord` names remain `host.*`
 - `HostOpaqueType` names remain `host.*`
 - `RuntimeOpaqueValue.type_name` remains `host.*`
 - preserve canonical source export identity `@module.word`
-- B5A does not migrate runtime dispatch, does not canonicalize runtime naming, and does not remove bridge fields
+- preserve explicit source-to-legacy bridge in pipeline (`SourceHostContract` -> `HostContract`)
+- B5D does not migrate Python ABI naming, does not migrate runtime opaque identity, and does not change runtime host diagnostics/traces
 
 Nicole specification remains the only language source of truth.

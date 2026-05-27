@@ -124,8 +124,8 @@ def test_runtime_error_string_compatibility_is_preserved() -> None:
 
 
 def test_runtime_host_bindings_reject_canonical_host_key_during_bridge_freeze() -> None:
-    with pytest.raises(RuntimeError, match="runtime host binding must start with 'host.': @host.log"):
-        RuntimeHostBindings({"@host.log": lambda _msg: None})
+    with pytest.raises(RuntimeError, match="runtime host binding must start with 'host.': @host.foo"):
+        RuntimeHostBindings({"@host.foo": lambda _msg: None})
 
 
 def test_nicole_interpreter_basic_execution() -> None:
