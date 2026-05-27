@@ -1892,6 +1892,14 @@ def _validate_language_type_v1(
     if imported_type_category is SymbolCategory.HOST_CAPABILITY:
         raise HostABIError("host capability cannot be used as a type")
 
+    if type_node.name.startswith("@host."):
+        legacy_name = type_node.name[1:]
+        if legacy_name in declared_opaque_type_names:
+            if type_node.args:
+                raise HostABIError(f"type is not supported in v1: {type_node.name}")
+            return
+        raise HostABIError(f"undeclared host opaque type in checker: {type_node.name}")
+
     if type_node.name in declared_opaque_type_names:
         if type_node.args:
             raise HostABIError(f"type is not supported in v1: {type_node.name}")

@@ -257,6 +257,14 @@ def test_checker_accepts_declared_opaque_type_in_word_signature() -> None:
     )
 
 
+def test_checker_accepts_declared_canonical_opaque_type_in_word_signature() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : id { fh:@host.io.FileHandle -- out:@host.io.FileHandle }\n    fh\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
 def test_checker_accepts_declared_opaque_type_in_local_declaration() -> None:
     check_source_with_host_contract(
         'module @app\n  : local-use { fh:host.io.FileHandle -- out:host.io.FileHandle }\n    fh\n  ;\nend-module\n',
@@ -292,6 +300,14 @@ def test_checker_accepts_declared_opaque_type_in_result_value() -> None:
 def test_checker_accepts_declared_opaque_type_in_result_error() -> None:
     check_source_with_host_contract(
         'module @app\n  : keep { r:Result<String,host.io.FileHandle> -- out:Result<String,host.io.FileHandle> }\n    r\n  ;\nend-module\n',
+        [],
+        opaque_type_names=('host.io.FileHandle',),
+    )
+
+
+def test_checker_accepts_declared_canonical_opaque_type_in_result_value() -> None:
+    check_source_with_host_contract(
+        'module @app\n  : keep { r:Result<@host.io.FileHandle,String> -- out:Result<@host.io.FileHandle,String> }\n    r\n  ;\nend-module\n',
         [],
         opaque_type_names=('host.io.FileHandle',),
     )

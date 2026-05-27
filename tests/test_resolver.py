@@ -205,7 +205,9 @@ def test_resolves_grouped_as_star_member_for_host_contract() -> None:
     call = get_module_word(program, module_name="app", word_name="run").body.items[1]
     assert isinstance(call, IdentifierNode)
     assert call.resolution.owner_scope == "host"
-    assert call.resolution.qualified_name == "host.console.log"
+    assert call.resolution.qualified_name == "@host.console.log"
+    assert call.resolution.host_binding_name == "host.console.log"
+    assert call.name == "host.console.log"
 
 
 def test_resolves_grouped_prefix_alias_member_for_host_contract() -> None:
@@ -230,7 +232,9 @@ def test_resolves_grouped_prefix_alias_member_for_host_contract() -> None:
     call = get_module_word(program, module_name="app", word_name="run").body.items[0]
     assert isinstance(call, IdentifierNode)
     assert call.resolution.owner_scope == "host"
-    assert call.resolution.qualified_name == "host.io.open-file"
+    assert call.resolution.qualified_name == "@host.io.open-file"
+    assert call.resolution.host_binding_name == "host.io.open-file"
+    assert call.name == "host.io.open-file"
 
 
 def test_grouped_host_alias_does_not_override_same_module_word() -> None:
@@ -260,6 +264,7 @@ def test_grouped_host_alias_does_not_override_same_module_word() -> None:
     assert call.resolution.owner_scope == "module"
     assert call.resolution.resolved_symbol.module == "app"
     assert call.resolution.resolved_symbol.name == "log"
+    assert call.resolution.host_binding_name is None
 
 
 def test_grouped_host_alias_resolves_when_not_shadowed() -> None:
@@ -284,7 +289,9 @@ def test_grouped_host_alias_resolves_when_not_shadowed() -> None:
     call = get_module_word(program, module_name="app", word_name="run").body.items[0]
     assert isinstance(call, IdentifierNode)
     assert call.resolution.owner_scope == "host"
-    assert call.resolution.qualified_name == "host.console.log"
+    assert call.resolution.qualified_name == "@host.console.log"
+    assert call.resolution.host_binding_name == "host.console.log"
+    assert call.name == "host.console.log"
 
 
 def test_grouped_import_does_not_resolve_unlisted_member() -> None:
@@ -413,7 +420,9 @@ def test_host_resolution_remains_stable() -> None:
     host_ref = get_module_word(program, module_name="app", word_name="run").body.items[1]
     assert isinstance(host_ref, IdentifierNode)
     assert host_ref.resolution.owner_scope == "host"
-    assert host_ref.resolution.qualified_name == "host.log"
+    assert host_ref.resolution.qualified_name == "@host.log"
+    assert host_ref.resolution.host_binding_name == "host.log"
+    assert host_ref.name == "host.log"
     assert host_ref.resolution.resolved_symbol is not None
 
 
@@ -446,7 +455,9 @@ def test_required_host_resolution_remains_stable() -> None:
     host_ref = get_module_word(program, module_name="app", word_name="run").body.items[1]
     assert isinstance(host_ref, IdentifierNode)
     assert host_ref.resolution.owner_scope == "host"
-    assert host_ref.resolution.qualified_name == "host.log"
+    assert host_ref.resolution.qualified_name == "@host.log"
+    assert host_ref.resolution.host_binding_name == "host.log"
+    assert host_ref.name == "host.log"
 
 
 def test_rejects_reserved_root_import_alias() -> None:

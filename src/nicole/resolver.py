@@ -488,11 +488,13 @@ class Resolver:
                 code="RESOLVER_OPTIONAL_HOST_WORD_DIRECT_CALL",
                 span=node.span,
             )
+        canonical_name = _legacy_host_name_to_canonical(host_reference)
         node.name = host_reference
         node.resolution = ResolutionInfo(
             resolved_symbol=host_word,
             owner_scope="host",
-            qualified_name=host_reference,
+            qualified_name=canonical_name,
+            host_binding_name=host_reference,
             visibility=None,
             signature_reference=host_word.signature,
             host_effect=host_word.effect,
@@ -530,3 +532,9 @@ def _scope_chain(current_scope: str | None) -> list[str | None]:
     chain: list[str | None] = [".".join(parts[:index]) for index in range(len(parts), 0, -1)]
     chain.append(None)
     return chain
+
+
+def _legacy_host_name_to_canonical(name: str) -> str:
+    if not name.startswith("host."):
+        return name
+    return f"@host.{name[len('host.'):]}"

@@ -564,8 +564,7 @@ class Parser:
             normalized_name = name_token.lexeme
         elif token.kind is TokenKind.QUALIFIED_MODULE_NAME and token.lexeme.startswith("@host."):
             name_token = self._advance()
-            # Transitional compatibility: keep downstream host opaque handling on host.* names.
-            normalized_name = token.lexeme[1:]
+            normalized_name = token.lexeme
         else:
             self._raise_error("malformed type")
 

@@ -90,6 +90,7 @@ class ResolutionInfo:
     resolved_symbol: object | None = None
     owner_scope: str | None = None
     qualified_name: str | None = None
+    host_binding_name: str | None = None
     visibility: Visibility | None = None
     signature_reference: SignatureNode | None = None
     declared_dirty: bool | None = None

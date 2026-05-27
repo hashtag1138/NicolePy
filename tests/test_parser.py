@@ -395,8 +395,7 @@ def test_parser_parses_host_require_with_canonical_host_output_type():
     assert isinstance(require_decl, HostRequireDeclaration)
     output = require_decl.signature.outputs[0]
     assert output.name == "handle"
-    # Transitional parser compatibility: canonical @host.* type is normalized to host.*.
-    assert output.type_node.name == "host.io.FileHandle"
+    assert output.type_node.name == "@host.io.FileHandle"
 
 
 def test_parser_rejects_host_require_with_anonymous_output_signature():
@@ -613,7 +612,7 @@ def test_parser_parses_word_signature_with_canonical_host_type():
     )
     word = program.words[0]
     assert word.signature.inputs[0].name == "handle"
-    assert word.signature.inputs[0].type_node.name == "host.io.FileHandle"
+    assert word.signature.inputs[0].type_node.name == "@host.io.FileHandle"
 
 
 def test_parser_parses_generic_types_with_canonical_host_type_arguments():
@@ -630,8 +629,8 @@ def test_parser_parses_generic_types_with_canonical_host_type_arguments():
     list_arg = consume_list.signature.inputs[0].type_node.args[0]
     result_first_arg = consume_result.signature.inputs[0].type_node.args[0]
 
-    assert list_arg.name == "host.io.FileHandle"
-    assert result_first_arg.name == "host.io.FileHandle"
+    assert list_arg.name == "@host.io.FileHandle"
+    assert result_first_arg.name == "@host.io.FileHandle"
 
 
 def test_parser_keeps_legacy_host_dotted_type_name():
