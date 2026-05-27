@@ -1009,7 +1009,7 @@ def _resolve_runtime_host_binding_name(
         if host_binding_name is not None:
             return host_binding_name
 
-    if node.name:
+    if node.name and node.name.startswith("host."):
         return node.name
 
     raise _runtime_error(

@@ -1201,6 +1201,38 @@ end-module
     assert seen == ["hello"]
 
 
+def test_runtime_bridge_compat_rejects_source_lexeme_without_host_binding_name() -> None:
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)]
+    )
+    checked = analyze_program(
+        """module @app
+  import @host.log as log
+  : run { -- }
+    "hello" log
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract,
+    )
+    host_identifier = _find_first_host_identifier_in_exported_word(checked, "@app.run")
+    assert host_identifier.name == "log"
+    host_identifier.resolution.host_binding_name = None
+
+    with pytest.raises(RuntimeError, match="missing runtime host binding identity") as exc_info:
+        run_export(checked, "@app.run", RuntimeHostBindings({}))
+
+    error = exc_info.value
+    assert str(error) == "missing runtime host binding identity"
+    assert error.diagnostic.operation == "host.binding.resolve"
+    assert "missing host binding: log" not in str(error)
+
+
 def test_runtime_bridge_compat_missing_binding_uses_resolved_runtime_identity() -> None:
     host_signature = signature_from_source("""module @app
   : hostsig { msg:String -- } ;

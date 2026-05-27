@@ -299,3 +299,10 @@ Bridge compatibility tests (runtime/ABI-facing legacy compatibility):
 - runtime host lookup continues to consume bridge identity from `resolution.host_binding_name`
 - runtime fallback to `IdentifierNode.name` remains present as compatibility/internal behavior
 - runtime opaque handling and Python ABI host naming remain out of scope in B5C1
+
+## B5C2 scope (Runtime Host Fallback Reduction)
+
+- runtime host normal path now requires `resolution.host_binding_name`
+- runtime fallback to `IdentifierNode.name` is restricted to legacy compatibility when `node.name` is already `host.*`
+- host runtime diagnostics/traces and host stack frame rendering remain unchanged on normal paths
+- Python ABI host naming and runtime opaque handling remain out of scope in B5C2
