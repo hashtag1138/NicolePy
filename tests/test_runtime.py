@@ -1162,6 +1162,7 @@ end-module
     )
     host_identifier = _find_first_host_identifier_in_exported_word(checked, "@app.run")
     assert host_identifier.resolution.host_binding_name == "host.log"
+    assert host_identifier.name == "h.log"
     host_identifier.name = "host.shadow"
 
     seen: list[str] = []
@@ -1171,7 +1172,7 @@ end-module
     assert seen == ["hello"]
 
 
-def test_runtime_bridge_compat_falls_back_to_node_name_when_bridge_name_is_missing() -> None:
+def test_runtime_bridge_compat_internal_fallback_to_node_name_when_bridge_name_is_missing() -> None:
     host_signature = signature_from_source("""module @app
   : hostsig { msg:String -- } ;
 end-module
@@ -1290,6 +1291,7 @@ end-module
     )
     host_identifier = _find_first_host_identifier_in_exported_word(checked, "@app.run")
     assert host_identifier.resolution.host_binding_name == "host.log"
+    assert host_identifier.name == "h.log"
     host_identifier.name = "host.grouped-shadow"
 
     seen: list[str] = []
@@ -1332,6 +1334,76 @@ end-module
     callee_identifier.resolution.host_binding_name = "host.fake"
 
     assert run_export(checked, "@app.run", RuntimeHostBindings({})) == 7
+
+
+def test_runtime_bridge_compat_resolved_host_alias_lexeme_keeps_runtime_lookup_and_diagnostics() -> None:
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)]
+    )
+    checked = analyze_program(
+        """module @app
+  import @host.log as log
+  : run { -- }
+    "hello" log
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract,
+    )
+
+    host_identifier = _find_first_host_identifier_in_exported_word(checked, "@app.run")
+    assert host_identifier.name == "log"
+    assert host_identifier.resolution.qualified_name == "@host.log"
+    assert host_identifier.resolution.host_binding_name == "host.log"
+
+    with pytest.raises(RuntimeError, match="missing host binding: host.log") as exc_info:
+        run_export(checked, "@app.run", RuntimeHostBindings({}))
+
+    error = exc_info.value
+    assert error.diagnostic.operation == "host.log"
+    assert error.diagnostic.trace is not None
+    assert error.diagnostic.trace.frames[-1].call_kind is RuntimeFrameKind.HOST
+    assert error.diagnostic.trace.frames[-1].name == "host:log"
+
+
+def test_runtime_bridge_compat_grouped_host_alias_lexeme_keeps_runtime_lookup() -> None:
+    host_signature = signature_from_source("""module @app
+  : hostsig { msg:String -- } ;
+end-module
+""")
+    host_contract = host_contract_from_words(
+        [HostWord(name="host.log", signature=host_signature, effect=HostEffect.PURE)]
+    )
+    checked = analyze_program(
+        """module @app
+  import @host.{log} as h
+  : run { -- }
+    "hello" h.log
+  ;
+  export : run
+end-module
+""",
+        host_contract=host_contract,
+    )
+
+    host_identifier = _find_first_host_identifier_in_exported_word(checked, "@app.run")
+    assert host_identifier.name == "h.log"
+    assert host_identifier.resolution.qualified_name == "@host.log"
+    assert host_identifier.resolution.host_binding_name == "host.log"
+
+    seen: list[str] = []
+    run_export(
+        checked,
+        "@app.run",
+        RuntimeHostBindings({"host.log": lambda msg: seen.append(msg)}),
+    )
+
+    assert seen == ["hello"]
 
 
 def test_runtime_drop_underflow() -> None:

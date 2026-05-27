@@ -209,7 +209,7 @@ def test_resolves_grouped_as_star_member_for_host_contract() -> None:
     assert call.resolution.owner_scope == "host"
     assert call.resolution.qualified_name == "@host.console.log"
     assert call.resolution.host_binding_name == "host.console.log"
-    assert call.name == "host.console.log"
+    assert call.name == "log"
 
 
 def test_resolves_grouped_prefix_alias_member_for_host_contract() -> None:
@@ -236,7 +236,7 @@ def test_resolves_grouped_prefix_alias_member_for_host_contract() -> None:
     assert call.resolution.owner_scope == "host"
     assert call.resolution.qualified_name == "@host.io.open-file"
     assert call.resolution.host_binding_name == "host.io.open-file"
-    assert call.name == "host.io.open-file"
+    assert call.name == "io.open-file"
 
 
 def test_grouped_host_alias_does_not_override_same_module_word() -> None:
@@ -293,7 +293,7 @@ def test_grouped_host_alias_resolves_when_not_shadowed() -> None:
     assert call.resolution.owner_scope == "host"
     assert call.resolution.qualified_name == "@host.console.log"
     assert call.resolution.host_binding_name == "host.console.log"
-    assert call.name == "host.console.log"
+    assert call.name == "log"
 
 
 def test_grouped_import_does_not_resolve_unlisted_member() -> None:
@@ -402,7 +402,7 @@ def test_builtin_resolution_remains_stable() -> None:
     assert builtin_ref.resolution.host_binding_name is None
 
 
-def test_imported_host_call_keeps_bridge_identity_trio() -> None:
+def test_imported_host_call_keeps_split_semantic_bridge_and_source_identities() -> None:
     signature = signature_from_source(
         "module @sig\n"
         "  : hostsig { msg:String -- }\n"
@@ -426,7 +426,7 @@ def test_imported_host_call_keeps_bridge_identity_trio() -> None:
     assert host_ref.resolution.owner_scope == "host"
     assert host_ref.resolution.qualified_name == "@host.log"
     assert host_ref.resolution.host_binding_name == "host.log"
-    assert host_ref.name == "host.log"
+    assert host_ref.name == "log"
     assert host_ref.resolution.resolved_symbol is not None
 
 
@@ -461,7 +461,7 @@ def test_required_host_resolution_remains_stable() -> None:
     assert host_ref.resolution.owner_scope == "host"
     assert host_ref.resolution.qualified_name == "@host.log"
     assert host_ref.resolution.host_binding_name == "host.log"
-    assert host_ref.name == "host.log"
+    assert host_ref.name == "log"
 
 
 def test_user_defined_call_keeps_host_binding_name_none() -> None:

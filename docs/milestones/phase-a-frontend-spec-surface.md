@@ -291,3 +291,11 @@ Bridge compatibility tests (runtime/ABI-facing legacy compatibility):
 - runtime host diagnostics/traces use the same resolved runtime binding identity as host lookup
 - `IdentifierNode.name` mutation remains in place in B5B
 - runtime opaque handling and Python ABI host naming remain out of scope in B5B
+
+## B5C1 scope (Resolver Host Identity Duplication Reduction)
+
+- resolver no longer mutates `IdentifierNode.name` to legacy `host.*` for imported host references
+- `IdentifierNode.name` now preserves the source lexeme written in module code (`log`, `io.open-file`, `h.log`)
+- runtime host lookup continues to consume bridge identity from `resolution.host_binding_name`
+- runtime fallback to `IdentifierNode.name` remains present as compatibility/internal behavior
+- runtime opaque handling and Python ABI host naming remain out of scope in B5C1

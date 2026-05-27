@@ -489,7 +489,6 @@ class Resolver:
                 span=node.span,
             )
         canonical_name = _legacy_host_name_to_canonical(host_reference)
-        node.name = host_reference
         node.resolution = ResolutionInfo(
             resolved_symbol=host_word,
             owner_scope="host",
