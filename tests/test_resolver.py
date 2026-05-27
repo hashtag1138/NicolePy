@@ -64,6 +64,8 @@ def test_resolves_same_module_short_name() -> None:
     assert call.resolution.resolved_symbol is not None
     assert call.resolution.resolved_symbol.module == "app"
     assert call.resolution.resolved_symbol.name == "helper"
+    assert call.resolution.qualified_name == "helper"
+    assert call.resolution.host_binding_name is None
 
 
 def test_resolves_same_module_qualified_reference_without_import() -> None:
@@ -379,6 +381,7 @@ def test_local_lexical_names_resolve_before_imported_aliases() -> None:
     assert isinstance(call, IdentifierNode)
     assert call.resolution.qualified_name == "local:x"
     assert call.resolution.resolved_symbol is None
+    assert call.resolution.host_binding_name is None
 
 
 def test_builtin_resolution_remains_stable() -> None:
@@ -396,9 +399,10 @@ def test_builtin_resolution_remains_stable() -> None:
     assert builtin_ref.resolution.resolved_symbol is not None
     assert builtin_ref.resolution.resolved_symbol.name == "list.get"
     assert builtin_ref.resolution.resolved_symbol.source.name == "BUILTIN"
+    assert builtin_ref.resolution.host_binding_name is None
 
 
-def test_host_resolution_remains_stable() -> None:
+def test_imported_host_call_keeps_bridge_identity_trio() -> None:
     signature = signature_from_source(
         "module @sig\n"
         "  : hostsig { msg:String -- }\n"
@@ -458,6 +462,25 @@ def test_required_host_resolution_remains_stable() -> None:
     assert host_ref.resolution.qualified_name == "@host.log"
     assert host_ref.resolution.host_binding_name == "host.log"
     assert host_ref.name == "host.log"
+
+
+def test_user_defined_call_keeps_host_binding_name_none() -> None:
+    program = resolve_source(
+        "module @app\n"
+        "  : helper { -- }\n"
+        "  ;\n"
+        "  : run { -- }\n"
+        "    helper\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    call = get_module_word(program, module_name="app", word_name="run").body.items[0]
+    assert isinstance(call, IdentifierNode)
+    assert call.resolution.resolved_symbol is not None
+    assert call.resolution.resolved_symbol.module == "app"
+    assert call.resolution.qualified_name == "helper"
+    assert call.resolution.host_binding_name is None
 
 
 def test_rejects_reserved_root_import_alias() -> None:

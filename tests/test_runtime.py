@@ -48,7 +48,9 @@ def signature_from_source(source: str):
     return Parser(lex(source)).parse().words[0].signature
 
 
-def _rewrite_direct_host_calls_to_import_aliases(source: str, host_words: list[HostWord]) -> str:
+def _rewrite_legacy_host_calls_to_bridge_import_aliases(source: str, host_words: list[HostWord]) -> str:
+    # Bridge-era runtime fixtures may still contain direct host.* calls; rewrite them
+    # to import aliases so resolver invariants match canonical source rules.
     unique_host_names: list[str] = []
     seen = set()
     for host_word in host_words:
@@ -84,7 +86,7 @@ def _rewrite_direct_host_calls_to_import_aliases(source: str, host_words: list[H
 def analyze_program(source: str, *, host_contract=None):
     if host_contract is None:
         return _analyze_program(source)
-    rewritten_source = _rewrite_direct_host_calls_to_import_aliases(
+    rewritten_source = _rewrite_legacy_host_calls_to_bridge_import_aliases(
         source,
         list(host_contract.words.values()),
     )
@@ -103,6 +105,11 @@ def test_runtime_error_string_compatibility_is_preserved() -> None:
 
     assert str(error) == "x"
     assert error.message == "x"
+
+
+def test_runtime_host_bindings_reject_canonical_host_key_during_bridge_freeze() -> None:
+    with pytest.raises(RuntimeError, match="runtime host binding must start with 'host.': @host.log"):
+        RuntimeHostBindings({"@host.log": lambda _msg: None})
 
 
 def test_nicole_interpreter_basic_execution() -> None:
@@ -1092,7 +1099,7 @@ def test_runtime_unsupported_nested_list_type_error_carries_trace() -> None:
     assert error.diagnostic.trace is trace
 
 
-def test_runtime_valid_host_call() -> None:
+def test_runtime_bridge_compat_valid_host_call() -> None:
     host_signature = signature_from_source("""module @app
   : hostsig { msg:String -- } ;
 end-module
@@ -1154,7 +1161,7 @@ def test_runtime_rot_underflow() -> None:
         _execute_operator("rot", stack)
 
 
-def test_runtime_missing_host_binding() -> None:
+def test_runtime_bridge_compat_missing_host_binding() -> None:
     host_signature = signature_from_source("""module @app
   : hostsig { msg:String -- } ;
 end-module

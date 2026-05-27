@@ -255,6 +255,26 @@ def test_pipeline_accepts_host_contract_with_declared_opaque_types_in_phase1() -
     assert "host.io.FileHandle" in result.host_contract.opaque_types
 
 
+def test_pipeline_bridge_freeze_rejects_canonical_hostword_name_in_python_abi() -> None:
+    host_signature = _signature_from_source(
+        "module @sig\n"
+        "  : hostsig { msg:String -- }\n"
+        "  ;\n"
+        "end-module\n",
+        module_name="sig",
+        word_name="hostsig",
+    )
+    with pytest.raises(HostABIError, match="host word name must start with 'host.'"):
+        host_contract_from_words([
+            HostWord(name="@host.console.log", signature=host_signature, effect=HostEffect.PURE)
+        ])
+
+
+def test_pipeline_bridge_freeze_rejects_canonical_host_opaque_name_in_python_abi() -> None:
+    with pytest.raises(HostABIError, match="host opaque type name must be canonical host\\.\\*"):
+        host_contract_from_words([], opaque_types=[HostOpaqueType(name="@host.io.FileHandle")])
+
+
 def test_pipeline_builds_legacy_opaque_bridge_from_source_host_contract() -> None:
     result = analyze_program(
         "module @host\n"

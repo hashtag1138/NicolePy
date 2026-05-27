@@ -14,7 +14,9 @@ from nicole.signature_collector import collect_signatures
 from nicole.standard_symbols import with_standard_symbols
 
 
-def _rewrite_direct_host_calls_to_import_aliases(source: str, host_words: list[HostWord]) -> str:
+def _rewrite_legacy_host_calls_to_bridge_import_aliases(source: str, host_words: list[HostWord]) -> str:
+    # Bridge-era checker fixtures may still contain direct host.* calls; rewrite them
+    # to import aliases so resolver invariants match canonical source rules.
     unique_host_names = []
     seen = set()
     for host_word in host_words:
@@ -76,7 +78,7 @@ def _opaque_types(type_names):
 
 
 def check_source_with_host_contract(source: str, host_words, *, opaque_type_names=()):
-    source = _rewrite_direct_host_calls_to_import_aliases(source, host_words)
+    source = _rewrite_legacy_host_calls_to_bridge_import_aliases(source, host_words)
     program = _parse_source(source)
     symbols = collect_signatures(program)
     symbols = with_standard_symbols(symbols)
@@ -98,7 +100,7 @@ def check_source_without_builtins(source: str):
     return check_program(resolved, symbols)
 
 def check_source_with_host_contract_without_builtins(source: str, host_words, *, opaque_type_names=()):
-    source = _rewrite_direct_host_calls_to_import_aliases(source, host_words)
+    source = _rewrite_legacy_host_calls_to_bridge_import_aliases(source, host_words)
     program = _parse_source(source)
     symbols = collect_signatures(program)
     contract = host_contract_from_words(
@@ -1058,7 +1060,7 @@ def test_checker_effect_analysis_distinguishes_same_name_words_across_modules() 
     host_signature = signature_from_source('module @app\n  : hostsig { msg:String -- } ;\nend-module\n')
     source = 'module @a\n  : run { -- n:Int }\n    1\n  ;\nend-module\nmodule @b\n  dirty : run { msg:String -- }\n    msg host.log\n  ;\nend-module'
     host_words = [HostWord(name='host.log', signature=host_signature, effect=HostEffect.DIRTY)]
-    source = _rewrite_direct_host_calls_to_import_aliases(source, host_words)
+    source = _rewrite_legacy_host_calls_to_bridge_import_aliases(source, host_words)
     program = _parse_source(source)
     symbols = collect_signatures(program)
     contract = host_contract_from_words(host_words)
@@ -1286,7 +1288,7 @@ def test_checker_case_guard_dirty_call_exposes_structured_diagnostic() -> None:
             host_words,
         )
     error = exc_info.value
-    rewritten = _rewrite_direct_host_calls_to_import_aliases(source, host_words)
+    rewritten = _rewrite_legacy_host_calls_to_bridge_import_aliases(source, host_words)
     program = _parse_source(rewritten)
     word = get_module_word(program, module_name="app", word_name="use-guard")
     host_call = _find_identifier(word.body, "h.log")

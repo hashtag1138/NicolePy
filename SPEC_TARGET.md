@@ -38,4 +38,20 @@ Known deferred gaps after B4:
 - pipeline still bridges canonical `@host.*` source identities to legacy `host.*` runtime identities
 - full runtime alignment is the planned B5 phase
 
+B5A freeze scope (bridge visibility only):
+
+- preserve runtime behavior and preserve Python ABI behavior
+- preserve resolver bridge split for imported host calls:
+- `ResolutionInfo.qualified_name == "@host.*"`
+- `ResolutionInfo.host_binding_name == "host.*"`
+- `IdentifierNode.name == "host.*"` (runtime compatibility mutation remains intentional)
+- preserve `ResolutionInfo.host_binding_name is None` for non-host symbols
+- preserve legacy runtime/ABI identities:
+- `RuntimeHostBindings` keys remain `host.*`
+- `HostWord` names remain `host.*`
+- `HostOpaqueType` names remain `host.*`
+- `RuntimeOpaqueValue.type_name` remains `host.*`
+- preserve canonical source export identity `@module.word`
+- B5A does not migrate runtime dispatch, does not canonicalize runtime naming, and does not remove bridge fields
+
 Nicole specification remains the only language source of truth.

@@ -238,3 +238,48 @@ Represent correctly on the NicolePy frontend side the syntax surface required by
 - `IdentifierNode.name` mutation to `host.*`
 - runtime helper rewrite remaining in `tests/test_runtime.py`
 - B5 futur
+
+## B5A scope freeze (Bridge Freeze / Runtime Identity Invariants)
+
+B5A is documentation and test-taxonomy work only.
+
+B5A does not include:
+
+- runtime migration
+- ABI migration
+- bridge removal
+- dispatch redesign
+- canonical runtime naming rollout
+
+Bridge invariants frozen in B5A:
+
+- imported host calls keep canonical semantic identity in `ResolutionInfo.qualified_name` (`@host.*`)
+- imported host calls keep legacy runtime identity in `ResolutionInfo.host_binding_name` (`host.*`)
+- imported host calls keep `IdentifierNode.name` mutated to `host.*` for runtime compatibility
+- non-host symbols keep `ResolutionInfo.host_binding_name == None`
+- runtime bindings remain keyed by legacy `host.*`
+- Python ABI host identifiers remain legacy (`HostWord`, `HostOpaqueType`, `RuntimeOpaqueValue.type_name`)
+- canonical export names remain `@module.word`
+
+Boundary rule for B5A:
+
+- this bridge is internal migration state for runtime compatibility and auditability
+- this bridge is not promoted as a new public API surface
+
+## B5A test taxonomy
+
+Frontend canonical tests (spec-facing):
+
+- parser/symbol/resolver/checker tests that validate canonical `@host.*` source behavior
+- grouped import desugaring and category preservation
+- direct source `host.*` rejection
+
+Bridge compatibility tests (runtime/ABI-facing legacy compatibility):
+
+- resolver tests asserting the split identity trio on imported host calls:
+- `qualified_name="@host.*"`
+- `host_binding_name="host.*"`
+- `IdentifierNode.name="host.*"`
+- runtime tests asserting legacy host binding keys (`host.*`) and rejecting canonical runtime keys (`@host.*`)
+- ABI tests asserting legacy host naming in Python contracts (`HostWord`, `HostOpaqueType`)
+- compatibility helpers that rewrite legacy direct-call fixtures to import-based source for bridge-era runtime coverage
