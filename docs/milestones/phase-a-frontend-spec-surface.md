@@ -283,3 +283,11 @@ Bridge compatibility tests (runtime/ABI-facing legacy compatibility):
 - runtime tests asserting legacy host binding keys (`host.*`) and rejecting canonical runtime keys (`@host.*`)
 - ABI tests asserting legacy host naming in Python contracts (`HostWord`, `HostOpaqueType`)
 - compatibility helpers that rewrite legacy direct-call fixtures to import-based source for bridge-era runtime coverage
+
+## B5B scope (Runtime Host Binding Lookup Migration)
+
+- runtime host lookup now prefers explicit bridge identity (`resolution.host_binding_name`)
+- runtime host lookup keeps legacy fallback (`IdentifierNode.name`) for compatibility in B5B
+- runtime host diagnostics/traces use the same resolved runtime binding identity as host lookup
+- `IdentifierNode.name` mutation remains in place in B5B
+- runtime opaque handling and Python ABI host naming remain out of scope in B5B

@@ -997,6 +997,30 @@ def _runtime_symbol_name(symbol: WordSymbol) -> str:
     return f"@{symbol.module}.{symbol.qualified_name}"
 
 
+def _resolve_runtime_host_binding_name(
+    node: IdentifierNode,
+    *,
+    trace: RuntimeStackTrace | None = None,
+) -> str:
+    # Bridge migration (B5B): prefer the explicit resolver bridge identity,
+    # keep legacy node.name fallback for compatibility.
+    if node.resolution.owner_scope == "host":
+        host_binding_name = node.resolution.host_binding_name
+        if host_binding_name is not None:
+            return host_binding_name
+
+    if node.name:
+        return node.name
+
+    raise _runtime_error(
+        "missing runtime host binding identity",
+        code="RUNTIME_UNSUPPORTED_OPERATION",
+        span=node.span,
+        operation="host.binding.resolve",
+        trace=trace,
+    )
+
+
 def _execute_host_call(
     node: IdentifierNode,
     stack: RuntimeStack,
@@ -1004,7 +1028,15 @@ def _execute_host_call(
     *,
     current_trace: RuntimeStackTrace | None = None,
 ) -> None:
-    host_name = node.name[5:] if node.name.startswith("host.") else node.name
+    runtime_host_binding_name = _resolve_runtime_host_binding_name(
+        node,
+        trace=current_trace,
+    )
+    host_name = (
+        runtime_host_binding_name[5:]
+        if runtime_host_binding_name.startswith("host.")
+        else runtime_host_binding_name
+    )
     host_trace = _next_trace(
         current_trace,
         RuntimeFrame(
@@ -1015,23 +1047,23 @@ def _execute_host_call(
     )
     signature = node.resolution.signature_reference
     if signature is None:
-        message = f"missing runtime signature for host word: {node.name}"
+        message = f"missing runtime signature for host word: {runtime_host_binding_name}"
         raise _runtime_error(
             message,
             code="RUNTIME_UNSUPPORTED_OPERATION",
             span=node.span,
-            operation=node.name,
+            operation=runtime_host_binding_name,
             trace=host_trace,
         )
 
-    binding = runtime_bindings.words.get(node.name)
+    binding = runtime_bindings.words.get(runtime_host_binding_name)
     if binding is None:
-        message = f"missing host binding: {node.name}"
+        message = f"missing host binding: {runtime_host_binding_name}"
         raise _runtime_error(
             message,
             code="RUNTIME_HOST_BINDING_MISSING",
             span=node.span,
-            operation=node.name,
+            operation=runtime_host_binding_name,
             trace=host_trace,
         )
 
@@ -1050,12 +1082,12 @@ def _execute_host_call(
     try:
         result = binding(*input_values)
     except Exception as exc:  # pragma: no cover - defensive runtime boundary
-        message = f"runtime host error: {node.name}"
+        message = f"runtime host error: {runtime_host_binding_name}"
         raise _runtime_error(
             message,
             code="RUNTIME_HOST_FAILURE",
             span=node.span,
-            operation=node.name,
+            operation=runtime_host_binding_name,
             cause=exc,
             trace=host_trace,
         ) from exc
@@ -1074,24 +1106,26 @@ def _execute_host_call(
         return
 
     if not isinstance(result, tuple):
-        message = f"wrong runtime signature for host word {node.name}: expected tuple outputs"
+        message = (
+            f"wrong runtime signature for host word {runtime_host_binding_name}: expected tuple outputs"
+        )
         raise _runtime_error(
             message,
             code="RUNTIME_RUNTIME_TYPE_ERROR",
             span=node.span,
-            operation=node.name,
+            operation=runtime_host_binding_name,
             trace=host_trace,
         )
     if len(result) != output_count:
         message = (
-            f"wrong runtime signature for host word {node.name}: "
+            f"wrong runtime signature for host word {runtime_host_binding_name}: "
             f"expected {output_count} outputs, got {len(result)}"
         )
         raise _runtime_error(
             message,
             code="RUNTIME_RUNTIME_TYPE_ERROR",
             span=node.span,
-            operation=node.name,
+            operation=runtime_host_binding_name,
             trace=host_trace,
         )
     for parameter, value in zip(signature.outputs, result):
