@@ -1533,6 +1533,23 @@ end-module
         run_export(checked, "@app.missing", RuntimeHostBindings({}))
 
 
+def test_runtime_missing_export_error_can_be_rendered_for_user() -> None:
+    checked = analyze_program("""module @app
+  : run { -- n:Int }
+    1
+  ;
+  export : run
+end-module
+""")
+
+    with pytest.raises(RuntimeError, match="missing export: @app.missing") as exc_info:
+        run_export(checked, "@app.missing", RuntimeHostBindings({}))
+
+    rendered = render_runtime_error(exc_info.value)
+    assert "RuntimeError[RUNTIME_MISSING_EXPORT]" in rendered
+    assert "missing export: @app.missing" in rendered
+
+
 def test_runtime_wrong_arity() -> None:
     checked = analyze_program(
         """module @app

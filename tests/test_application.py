@@ -6,8 +6,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nicole.application import NicoleApplication
+from nicole.diagnostic_renderer import render_diagnostic_error
 from nicole.errors import DiagnosticError
-from nicole.runtime import RuntimeError, RuntimeHostBindings
+from nicole.runtime import RuntimeError, RuntimeHostBindings, render_runtime_error
 
 
 def _write_simple_export_program(path: Path) -> None:
@@ -17,6 +18,34 @@ def _write_simple_export_program(path: Path) -> None:
         "    7\n"
         "  ;\n"
         "  export : run\n"
+        "end-module\n",
+        encoding="utf-8",
+    )
+
+
+def _write_main_export_program(path: Path) -> None:
+    path.write_text(
+        "module @app\n"
+        "  : main { -- n:Int }\n"
+        "    7\n"
+        "  ;\n"
+        "  export : main\n"
+        "end-module\n",
+        encoding="utf-8",
+    )
+
+
+def _write_host_logging_main_program(path: Path) -> None:
+    path.write_text(
+        "module @host\n"
+        "  require console.log { msg:String -- } dirty\n"
+        "end-module\n"
+        "module @app\n"
+        "  import @host.console.log as log\n"
+        "  dirty : main { -- }\n"
+        "    \"hello\" log\n"
+        "  ;\n"
+        "  export : main\n"
         "end-module\n",
         encoding="utf-8",
     )
@@ -200,3 +229,53 @@ def test_runtime_error_propagates_unchanged(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="missing export: @app.missing"):
         app.run("@app.missing")
+
+
+def test_run_executes_explicit_main_export(tmp_path: Path) -> None:
+    source_path = tmp_path / "app.nic"
+    _write_main_export_program(source_path)
+
+    app = NicoleApplication(source_path)
+
+    assert app.run("@app.main") == 7
+
+
+def test_compile_error_can_be_rendered_for_user(tmp_path: Path) -> None:
+    source_path = tmp_path / "app.nic"
+    source_path.write_text(
+        "module @app\n"
+        "  : main { -- n:Int }\n"
+        "    unknown-name\n"
+        "  ;\n"
+        "  export : main\n"
+        "end-module\n",
+        encoding="utf-8",
+    )
+    app = NicoleApplication(source_path)
+
+    with pytest.raises(DiagnosticError) as exc_info:
+        app.compile()
+
+    rendered = render_diagnostic_error(exc_info.value)
+    assert "ERROR [RESOLVER/RESOLVER_UNRESOLVED_NAME] unresolved name" in rendered
+    assert "unknown-name" in rendered
+    assert f"--> {source_path.resolve()}:" in rendered
+
+
+def test_runtime_host_binding_missing_can_be_rendered_with_trace(tmp_path: Path) -> None:
+    source_path = tmp_path / "app.nic"
+    _write_host_logging_main_program(source_path)
+    app = NicoleApplication(source_path)
+
+    with pytest.raises(RuntimeError, match="missing host binding: host.console.log") as exc_info:
+        app.run("@app.main")
+
+    error = exc_info.value
+    assert error.diagnostic.trace is not None
+    assert error.diagnostic.trace.frames[-1].name == "host:console.log"
+
+    rendered = render_runtime_error(error)
+    assert "RuntimeError[RUNTIME_HOST_BINDING_MISSING]" in rendered
+    assert "missing host binding: host.console.log" in rendered
+    assert "Stack trace:" in rendered
+    assert "at host:console.log" in rendered

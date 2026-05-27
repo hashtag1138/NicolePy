@@ -8,6 +8,13 @@ Ce vertical slice montre un flux Nicole executable de bout en bout via `NicoleAp
 - calcul Nicole de l'age courant, de l'age l'annee prochaine, et de la branche anniversaire
 - emission du message final via sorties host elementaires
 
+Flow compile/run recommande:
+
+1. creer `NicoleApplication` avec `main.nic` et les bindings host Python
+2. compiler explicitement (`app.compile()`) ou laisser `app.run(...)` compiler en lazy
+3. executer l'export explicite `@app.run`
+4. recuperer les erreurs compile/runtime via les erreurs Nicole existantes
+
 Source Nicole:
 
 - `examples/birthday_cli/main.nic`
@@ -21,6 +28,10 @@ Host bindings utilises:
 - `host.now.day`
 - `host.out.text`
 - `host.out.int`
+
+Export execute:
+
+- `@app.run`
 
 Comportement I/O controle:
 

@@ -9,6 +9,7 @@ from nicole.compiler import NicoleCompiler, compile_path
 from nicole.errors import DiagnosticError, DiagnosticPhase
 from nicole.pipeline import CheckedProgram
 from nicole.resolver import ResolutionError
+from nicole.runtime import RuntimeHostBindings, run_export
 from nicole.source import MEMORY_SOURCE_PATH
 from nicole.symbols import SymbolError
 from nicole.ast_nodes import IncludeDeclaration, ModuleDeclaration
@@ -264,3 +265,48 @@ def test_compile_multifile_duplicate_visible_name_keeps_existing_diagnostic(tmp_
     diagnostic = exc_info.value.diagnostic
     assert diagnostic.phase is DiagnosticPhase.SYMBOLS
     assert diagnostic.code == "SYMBOLS_DUPLICATE_VISIBLE_NAME"
+
+
+def test_compile_directory_then_run_explicit_export_name(tmp_path: Path) -> None:
+    (tmp_path / "app.nic").write_text(
+        "module @app\n"
+        "  : main { -- out:Int }\n"
+        "    7\n"
+        "  ;\n"
+        "  export : main\n"
+        "end-module\n",
+        encoding="utf-8",
+    )
+
+    checked = NicoleCompiler().compile(tmp_path)
+
+    assert run_export(checked, "@app.main", RuntimeHostBindings({})) == 7
+
+
+def test_compile_mixed_file_and_directory_then_run_explicit_export_name(tmp_path: Path) -> None:
+    file_app = tmp_path / "app.nic"
+    dir_lib = tmp_path / "lib"
+    dir_lib.mkdir()
+    file_util = dir_lib / "util.nic"
+
+    file_app.write_text(
+        "module @app\n"
+        "  : main { -- out:Int }\n"
+        "    9\n"
+        "  ;\n"
+        "  export : main\n"
+        "end-module\n",
+        encoding="utf-8",
+    )
+    file_util.write_text(
+        "module @util\n"
+        "  : helper { -- out:Int }\n"
+        "    1\n"
+        "  ;\n"
+        "end-module\n",
+        encoding="utf-8",
+    )
+
+    checked = NicoleCompiler().compile([file_app, dir_lib])
+
+    assert run_export(checked, "@app.main", RuntimeHostBindings({})) == 9

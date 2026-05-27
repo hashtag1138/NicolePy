@@ -56,4 +56,13 @@ B5D freeze scope (Python host ABI boundary only):
 - preserve explicit source-to-legacy bridge in pipeline (`SourceHostContract` -> `HostContract`)
 - B5D does not migrate Python ABI naming, does not migrate runtime opaque identity, and does not change runtime host diagnostics/traces
 
+B6 freeze scope (user compile/run facade):
+
+- `NicoleCompiler` and `NicoleApplication` are the recommended user-facing Python workflow
+- compile inputs remain explicit (`.nic` file, directory, or mixed path list)
+- execution remains explicit by export name (for example `@app.main`)
+- no implicit entrypoint behavior is introduced
+- no VM/session/debugger API is introduced
+- B6 does not reopen B5 runtime identity or Python ABI boundary decisions
+
 Nicole specification remains the only language source of truth.

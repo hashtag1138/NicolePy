@@ -26,6 +26,49 @@ python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
+## User compile/run facade (B6 freeze)
+
+Recommended Python workflow for experimentation:
+
+```python
+from nicole.compiler import NicoleCompiler
+from nicole.application import NicoleApplication
+from nicole.diagnostic_renderer import render_diagnostic_error
+from nicole.runtime import RuntimeHostBindings, RuntimeError, render_runtime_error
+from nicole.errors import DiagnosticError
+
+paths = [
+    "examples/birthday_cli/main.nic",   # single file
+    "samples/",                         # directory of .nic files
+]
+
+compiler = NicoleCompiler()
+checked = compiler.compile(paths)       # file / directory / mixed list
+
+app = NicoleApplication(
+    paths,
+    host_bindings=RuntimeHostBindings({
+        "host.console.read": lambda: "Alice",
+        "host.out.text": lambda text: None,
+    }),
+)
+
+try:
+    result = app.run("@app.main")       # explicit export name only
+except DiagnosticError as error:
+    print(render_diagnostic_error(error))
+except RuntimeError as error:
+    print(render_runtime_error(error))
+else:
+    print(result)
+```
+
+Facade constraints (intentional):
+
+- no implicit entrypoint behavior
+- no runtime session/debugger API in this facade
+- no ABI migration in this layer (`HostContract`/`RuntimeHostBindings` stay legacy `host.*`)
+
 ## Canonical usage
 
 `from nicole.pipeline import analyze_program` is the canonical static entrypoint.

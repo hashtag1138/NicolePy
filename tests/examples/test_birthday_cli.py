@@ -76,6 +76,10 @@ def _run_birthday_cli(*, inputs: list[str], today: tuple[int, int, int]) -> tupl
             }
         ),
     )
+    assert app.checked is None
+    checked = app.compile()
+    assert app.checked is checked
+    assert "@app.run" in checked.export_contract.words
     result = app.run("@app.run")
 
     assert result is None
