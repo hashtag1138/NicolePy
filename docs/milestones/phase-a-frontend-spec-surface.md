@@ -3,9 +3,9 @@
 ## Baseline
 
 - spec target: `v0.3.1-source-visible-host-abi-freeze`
-- NicolePy HEAD: `83bf3d58ca28e0fcb04d0e8417d589e160fed9c6`
-- date: `2026-05-26`
-- status: `planned`
+- NicolePy HEAD: `835e979e9450056d7e9c6c01787b8191d1d12839`
+- date: `2026-05-27`
+- status: `Phase A complete; Phase B through B4 implemented, with B4c/B4d pending commit`
 
 ## Objectif
 
@@ -28,7 +28,66 @@ Represent correctly on the NicolePy frontend side the syntax surface required by
 - no deep ABI migration
 - no spec modification
 
-## Decoupage Patchs
+## Etat reel post-B4
+
+- Phase A is complete.
+- Phase B1/B2/B3 are complete and committed.
+- B4a and B4b1 are committed in `835e979e9450056d7e9c6c01787b8191d1d12839` (`feat: preserve canonical host identities`).
+- B4c is implemented but not committed:
+  - `birthday_cli/main.nic` now declares host ABI in `module @host`
+  - `module @app` imports host capabilities from `@host`
+  - the example no longer uses direct source `host.*`
+  - the birthday example test no longer reconstructs host ABI signatures in Python
+  - the birthday example test no longer rewrites Nicole source before execution
+- B4d is implemented but not committed:
+  - `README.md` is aligned to canonical `@host` source forms
+  - `SPEC_TARGET.md` is aligned to `v0.3.1-source-visible-host-abi-freeze`
+
+## Phase B completion summary
+
+### B1
+
+- semantic collection recognizes `module @host`, `require`, and `opaque`
+- host ABI fragments consolidate into canonical `SourceHostContract`
+
+### B2
+
+- grouped imports are desugared into explicit internal imports
+- grouped `as *` remains explicit sugar only, not wildcard semantics
+
+### B3
+
+- imported host symbols carry category metadata
+- resolver rejects direct source `host.*`
+- imported host opaque types are rejected in expression position
+- imported host capabilities remain callable
+- checker rejects host capability-as-type
+- imported host opaque types are accepted in type position
+
+### B4a
+
+- parser preserves canonical `@host.*` in `TypeNode.name`
+- checker accepts canonical host opaque types in type position
+- legacy `host.*` fallback remains temporarily accepted
+
+### B4b1
+
+- resolver publishes canonical `ResolutionInfo.qualified_name` for imported host capabilities
+- resolver keeps `ResolutionInfo.host_binding_name` as the legacy runtime bridge
+- `IdentifierNode.name` still mutates to legacy `host.*` for runtime compatibility
+
+### B4c
+
+- `birthday_cli` is now source-driven for its host ABI
+- the Nicole example file is the ABI source of truth
+- the Python test only provides runtime bindings and assertions
+
+### B4d
+
+- public docs reflect canonical `@host` source syntax
+- docs explicitly state that runtime and host ABI remain legacy-centric internally
+
+## Historical Phase A patch breakdown
 
 ### Patch A1 tokens/lexer
 
@@ -54,7 +113,7 @@ Represent correctly on the NicolePy frontend side the syntax surface required by
   - targeted `tests/test_tokens.py`
   - targeted `tests/test_lexer.py`
   - confirm no tracked diff outside this patch scope
-- status: `pending`
+- status: `completed`
 
 ### Patch A2 AST additive
 
@@ -73,7 +132,7 @@ Represent correctly on the NicolePy frontend side the syntax surface required by
 - validation:
   - targeted `tests/test_ast_nodes.py`
   - confirm existing parser-facing node assumptions still instantiate cleanly
-- status: `pending`
+- status: `completed`
 
 ### Patch A3 parser modules/import locality + `module @host` + `require`/`opaque`
 
@@ -100,7 +159,7 @@ Represent correctly on the NicolePy frontend side the syntax surface required by
   - targeted `tests/test_parser.py`
   - targeted `tests/test_diagnostics.py`
   - confirm parser spans remain deterministic
-- status: `pending`
+- status: `completed`
 
 ### Patch A4 grouped imports + `as *` + `@host.*` en type
 
@@ -127,7 +186,7 @@ Represent correctly on the NicolePy frontend side the syntax surface required by
   - targeted `tests/test_lexer.py`
   - targeted `tests/test_parser.py`
   - explicit invalid-form parser tests
-- status: `pending`
+- status: `completed`
 
 ### Patch A5 spans/diagnostics frontend
 
@@ -152,14 +211,16 @@ Represent correctly on the NicolePy frontend side the syntax surface required by
   - targeted `tests/test_parser.py`
   - targeted `tests/test_diagnostics.py`
   - confirm no unintended lexer/test/runtime file changes
-- status: `pending`
+- status: `completed`
 
 ## Compatibilite Transitoire
 
-- `host.*` remains temporarily accepted
-- `host.*` runtime remains legacy
-- `@host.*` will initially be frontend syntax only
-- semantic enforcement is deferred to later phases
+- runtime remains keyed by legacy `host.*`
+- `host_abi.py` remains legacy-centric
+- `IdentifierNode.name` still mutates to legacy `host.*` for runtime execution
+- `ResolutionInfo.host_binding_name` remains the explicit canonical-to-legacy bridge
+- `tests/test_runtime.py` still carries a rewrite helper for remaining runtime-era fixtures
+- B5 is the planned runtime/host ABI canonical alignment phase
 
 ## Regles de Validation
 
@@ -168,3 +229,12 @@ Represent correctly on the NicolePy frontend side the syntax surface required by
 - full test suite before any eventual commit
 - post-audit before commit
 - no commit without explicit validation
+
+## Remaining debt before B5
+
+- runtime legacy
+- host_abi legacy
+- runtime bindings `host.*`
+- `IdentifierNode.name` mutation to `host.*`
+- runtime helper rewrite remaining in `tests/test_runtime.py`
+- B5 futur

@@ -1,4 +1,22 @@
+module @host
+  require console.read { -- text:String } dirty
+  require parse.int { text:String -- value:Int } pure
+  require now.year { -- value:Int } pure
+  require now.month { -- value:Int } pure
+  require now.day { -- value:Int } pure
+  require out.text { text:String -- } dirty
+  require out.int { value:Int -- } dirty
+end-module
+
 module @app
+  import @host.console.read as h.console.read
+  import @host.parse.int as h.parse.int
+  import @host.now.year as h.now.year
+  import @host.now.month as h.now.month
+  import @host.now.day as h.now.day
+  import @host.out.text as h.out.text
+  import @host.out.int as h.out.int
+
   : birthday-today { birth_month:Int birth_day:Int current_month:Int current_day:Int -- is_today:Bool }
     current_month birth_month =
     current_day birth_day =
@@ -35,32 +53,32 @@ module @app
 
   dirty : emit-message { is_today:Bool age_now:Int next_age:Int name:String -- }
     is_today if
-      "Joyeux " host.out.text
-      age_now host.out.int
-      "e anniversaire " host.out.text
-      name host.out.text
-      " !" host.out.text
+      "Joyeux " h.out.text
+      age_now h.out.int
+      "e anniversaire " h.out.text
+      name h.out.text
+      " !" h.out.text
     else
-      "Bonjour " host.out.text
-      name host.out.text
-      ", l'année prochaine vous aurez " host.out.text
-      next_age host.out.int
-      " ans." host.out.text
+      "Bonjour " h.out.text
+      name h.out.text
+      ", l'année prochaine vous aurez " h.out.text
+      next_age h.out.int
+      " ans." h.out.text
     end
   ;
 
   dirty : run { -- }
-    "Quel est votre prénom ? " host.out.text
-    host.console.read
-    "Quelle est votre année de naissance ? " host.out.text
-    host.console.read host.parse.int
-    "Quel est votre mois de naissance ? " host.out.text
-    host.console.read host.parse.int
-    "Quel est votre jour de naissance ? " host.out.text
-    host.console.read host.parse.int
-    host.now.year
-    host.now.month
-    host.now.day
+    "Quel est votre prénom ? " h.out.text
+    h.console.read
+    "Quelle est votre année de naissance ? " h.out.text
+    h.console.read h.parse.int
+    "Quel est votre mois de naissance ? " h.out.text
+    h.console.read h.parse.int
+    "Quel est votre jour de naissance ? " h.out.text
+    h.console.read h.parse.int
+    h.now.year
+    h.now.month
+    h.now.day
     compute
     emit-message
   ;
