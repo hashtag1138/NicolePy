@@ -402,6 +402,25 @@ def test_builtin_resolution_remains_stable() -> None:
     assert builtin_ref.resolution.host_binding_name is None
 
 
+def test_resolves_reserved_error_variant_value_as_expression() -> None:
+    program = resolve_source(
+        "module @app\n"
+        "  : err-result { -- r:Result<Int,MapError> }\n"
+        "    MissingKey\n"
+        "    Err!\n"
+        "  ;\n"
+        "end-module\n",
+        with_builtins=True,
+    )
+
+    variant_ref = get_module_word(program, module_name="app", word_name="err-result").body.items[0]
+    assert isinstance(variant_ref, IdentifierNode)
+    assert variant_ref.resolution.owner_scope == "error-variant"
+    assert variant_ref.resolution.qualified_name == "error-variant:MapError.MissingKey"
+    assert variant_ref.resolution.resolved_symbol is None
+    assert variant_ref.resolution.host_binding_name is None
+
+
 def test_imported_host_call_keeps_split_semantic_bridge_and_source_identities() -> None:
     signature = signature_from_source(
         "module @sig\n"

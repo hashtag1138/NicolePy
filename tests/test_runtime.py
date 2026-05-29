@@ -5235,6 +5235,27 @@ end-module
     assert run_export(checked, "@app.err-map", RuntimeHostBindings({})) == Err({"k": 7})
 
 
+def test_runtime_err_constructor_accepts_standard_error_variants() -> None:
+    checked = analyze_program(
+        """module @app
+  : map-error { -- r:Result<Int,MapError> }
+    MissingKey
+    Err!
+  ;
+  : list-error { -- r:Result<Int,ListError> }
+    OutOfBounds
+    Err!
+  ;
+  export : map-error
+  export : list-error
+end-module
+"""
+    )
+
+    assert run_export(checked, "@app.map-error", RuntimeHostBindings({})) == Err("MissingKey")
+    assert run_export(checked, "@app.list-error", RuntimeHostBindings({})) == Err("OutOfBounds")
+
+
 def test_runtime_result_unwrap_or_executes() -> None:
     checked = analyze_program(
         """module @app

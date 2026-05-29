@@ -331,6 +331,13 @@ class Checker:
             self._apply_signature(node.span.line, node.span.column, stack, signature.inputs, signature.outputs, span=node.span)
             return
 
+        if node.resolution.owner_scope == "error-variant":
+            variant_type = _error_variant_expression_type(node.name, node.span)
+            if variant_type is None:
+                self._raise_error("unresolved error variant during checking", node.span.line, node.span.column, span=node.span)
+            stack.append(StackValue(variant_type))
+            return
+
         symbol = node.resolution.resolved_symbol
         if symbol is None:
             self._raise_error("unresolved identifier during checking", node.span.line, node.span.column, span=node.span)
@@ -2179,6 +2186,14 @@ def _result_error_variants(scrutinee_type: TypeNode) -> set[str] | None:
         return {"MissingKey"}
     if _is_named_type(error_type, "ListError"):
         return {"OutOfBounds"}
+    return None
+
+
+def _error_variant_expression_type(variant_name: str, span: SourceSpan) -> TypeNode | None:
+    if variant_name == "MissingKey":
+        return TypeNode(span=span, name="MapError")
+    if variant_name == "OutOfBounds":
+        return TypeNode(span=span, name="ListError")
     return None
 
 

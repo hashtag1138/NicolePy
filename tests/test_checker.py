@@ -613,6 +613,12 @@ def test_checker_accepts_ok_constructor_in_result_frame() -> None:
 def test_checker_accepts_err_constructor_in_result_frame() -> None:
     check_source('module @app\n  : err { e:MapError -- r:Result<Int,MapError> }\n    e\n    Err!\n  ;\nend-module\n')
 
+def test_checker_accepts_missing_key_err_constructor_in_result_frame() -> None:
+    check_source('module @app\n  : map-error { -- r:Result<Int,MapError> }\n    MissingKey\n    Err!\n  ;\nend-module\n')
+
+def test_checker_accepts_out_of_bounds_err_constructor_in_result_frame() -> None:
+    check_source('module @app\n  : list-error { -- r:Result<Int,ListError> }\n    OutOfBounds\n    Err!\n  ;\nend-module\n')
+
 def test_checker_accepts_err_constructor_with_non_string_error_type() -> None:
     check_source('module @app\n  : err { e:Int -- r:Result<Bool,Int> }\n    e\n    Err!\n  ;\nend-module\n')
 
@@ -632,6 +638,14 @@ def test_checker_rejects_ok_constructor_with_wrong_value_type() -> None:
 def test_checker_rejects_err_constructor_with_wrong_error_type() -> None:
     with pytest.raises(CheckerError):
         check_source('module @app\n  : bad { e:ListError -- r:Result<Int,MapError> }\n    e\n    Err!\n  ;\nend-module\n')
+
+def test_checker_rejects_missing_key_err_constructor_in_list_error_frame() -> None:
+    with pytest.raises(CheckerError, match="Err! error type does not match frame Result error type"):
+        check_source('module @app\n  : bad { -- r:Result<Int,ListError> }\n    MissingKey\n    Err!\n  ;\nend-module\n')
+
+def test_checker_rejects_out_of_bounds_err_constructor_in_map_error_frame() -> None:
+    with pytest.raises(CheckerError, match="Err! error type does not match frame Result error type"):
+        check_source('module @app\n  : bad { -- r:Result<Int,MapError> }\n    OutOfBounds\n    Err!\n  ;\nend-module\n')
 
 def test_checker_rejects_ok_constructor_in_non_result_frame() -> None:
     with pytest.raises(CheckerError):

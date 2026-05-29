@@ -639,6 +639,10 @@ def _execute_identifier(
         _execute_host_call(node, stack, runtime_bindings, current_trace=current_trace)
         return
 
+    if node.resolution.owner_scope == "error-variant":
+        stack.push(node.name)
+        return
+
     if node.name == "map.get":
         key = stack.pop()
         map_value = stack.pop()

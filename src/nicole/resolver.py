@@ -24,6 +24,11 @@ from .symbols import ImportMetadata, SymbolCategory, SymbolSource, SymbolTable, 
 
 __all__ = ["ResolutionError", "Resolver", "resolve"]
 
+_ERROR_VARIANT_VALUE_TYPES = {
+    "MissingKey": "MapError",
+    "OutOfBounds": "ListError",
+}
+
 
 class ResolutionError(DiagnosticError):
     phase = DiagnosticPhase.RESOLVER
@@ -271,6 +276,10 @@ class Resolver:
             )
             return
 
+        if node.name in _ERROR_VARIANT_VALUE_TYPES:
+            self._annotate_error_variant(node)
+            return
+
         symbol = self._lookup_symbol(
             node.name,
             current_scope=current_scope,
@@ -423,6 +432,16 @@ class Resolver:
             resolved_symbol=None,
             owner_scope=current_scope or "module",
             qualified_name=f"local:{name}",
+            visibility=None,
+            signature_reference=None,
+        )
+
+    def _annotate_error_variant(self, node: IdentifierNode) -> None:
+        type_name = _ERROR_VARIANT_VALUE_TYPES[node.name]
+        node.resolution = ResolutionInfo(
+            resolved_symbol=None,
+            owner_scope="error-variant",
+            qualified_name=f"error-variant:{type_name}.{node.name}",
             visibility=None,
             signature_reference=None,
         )

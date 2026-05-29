@@ -78,6 +78,32 @@ def test_internal_analyze_program_helper_reuses_pipeline_flow() -> None:
     assert "@app.run" not in result.export_contract.words
 
 
+def test_pipeline_accepts_missing_key_err_constructor_in_result_frame() -> None:
+    result = analyze_program(
+        "module @app\n"
+        "  : map-error { -- r:Result<Int,MapError> }\n"
+        "    MissingKey\n"
+        "    Err!\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_accepts_out_of_bounds_err_constructor_in_result_frame() -> None:
+    result = analyze_program(
+        "module @app\n"
+        "  : list-error { -- r:Result<Int,ListError> }\n"
+        "    OutOfBounds\n"
+        "    Err!\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
 def test_pipeline_resolves_same_module_short_name() -> None:
     result = analyze_program(
         "module @app\n"
