@@ -52,6 +52,70 @@ def test_pipeline_accepts_module_program_without_exports() -> None:
     assert dict(result.host_contract.opaque_types) == {}
 
 
+def test_pipeline_accepts_negative_int_literal() -> None:
+    result = analyze_program(
+        "module @app\n"
+        "  : main { -- n:Int }\n"
+        "    -5\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_accepts_negative_float_literal() -> None:
+    result = analyze_program(
+        "module @app\n"
+        "  : main { -- n:Float }\n"
+        "    -3.5\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_accepts_negative_int_list_literal() -> None:
+    result = analyze_program(
+        "module @app\n"
+        "  : main { -- xs:List<Int> }\n"
+        "    [1, -2, 3]\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
+def test_pipeline_accepts_negative_int_case_pattern() -> None:
+    result = analyze_program(
+        "module @app\n"
+        "  : main { n:Int -- text:String }\n"
+        "    n case\n"
+        "      -1 => \"minus one\"\n"
+        "      _ => \"other\"\n"
+        "    end\n"
+        "  ;\n"
+        "end-module\n"
+    )
+
+    assert isinstance(result, CheckedProgram)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "module @app\n  : bad { -- n:Int }\n    +5\n  ;\nend-module\n",
+        "module @app\n  : bad { -- n:Float }\n    -.5\n  ;\nend-module\n",
+        "module @app\n  : bad { -- n:Float }\n    5.\n  ;\nend-module\n",
+    ],
+)
+def test_pipeline_rejects_invalid_numeric_forms(source: str) -> None:
+    with pytest.raises(DiagnosticError, match="invalid numeric token"):
+        analyze_program(source)
+
+
 def test_analyze_program_keeps_source_files_empty_for_compatibility() -> None:
     result = analyze_program(
         "module @app\n"

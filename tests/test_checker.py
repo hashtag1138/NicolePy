@@ -6,7 +6,7 @@ from nicole.ast_nodes import CaseNode, IdentifierNode, IfNode, ModuleDeclaration
 from nicole.checker import Checker, CheckerError, check_program
 from nicole.errors import DiagnosticPhase
 from nicole.host_abi import HostABIError, HostEffect, HostOpaqueType, HostWord, host_contract_from_words
-from nicole.lexer import lex
+from nicole.lexer import LexError, lex
 from nicole.parser import Parser
 from nicole.resolver import resolve
 from nicole.source import MEMORY_SOURCE_PATH, SYNTHETIC_SOURCE_PATH
@@ -443,6 +443,9 @@ def test_checker_rejects_non_exhaustive_bool_case():
 def test_checker_accepts_exhaustive_bool_case():
     check_source('module @app\n  : ok { b:Bool -- n:Int }\n    b case\n      true => 1\n      false => 0\n    end\n  ;\nend-module\n')
 
+def test_checker_accepts_negative_int_case_pattern():
+    check_source('module @app\n  : sign-label { n:Int -- text:String }\n    n case\n      -1 => "minus one"\n      _ => "other"\n    end\n  ;\nend-module\n')
+
 def test_checker_accepts_bool_case_with_wildcard():
     check_source('module @app\n  : ok { b:Bool -- n:Int }\n    b case\n      true => 1\n      _ => 0\n    end\n  ;\nend-module\n')
 
@@ -874,6 +877,15 @@ def test_checker_rejects_not_with_underflow():
 def test_checker_accepts_non_empty_int_list_literal():
     check_source('module @app\n  : ints { -- xs:List<Int> }\n    [1, 2]\n  ;\nend-module\n')
 
+def test_checker_accepts_negative_int_literal():
+    check_source('module @app\n  : neg { -- n:Int }\n    -5\n  ;\nend-module\n')
+
+def test_checker_accepts_negative_float_literal():
+    check_source('module @app\n  : negf { -- n:Float }\n    -3.5\n  ;\nend-module\n')
+
+def test_checker_accepts_negative_int_list_literal():
+    check_source('module @app\n  : ints { -- xs:List<Int> }\n    [1, -2, 3]\n  ;\nend-module\n')
+
 def test_checker_accepts_non_empty_string_list_literal():
     check_source('module @app\n  : strings { -- xs:List<String> }\n    ["a", "b"]\n  ;\nend-module\n')
 
@@ -887,6 +899,11 @@ def test_checker_rejects_heterogeneous_list_literal():
 def test_checker_rejects_wrong_return_type_for_non_empty_list_literal():
     with pytest.raises(CheckerError):
         check_source('module @app\n  : bad { -- xs:List<String> }\n    [1, 2]\n  ;\nend-module\n')
+
+@pytest.mark.parametrize('source', ['module @app\n  : bad { -- n:Int }\n    +5\n  ;\nend-module\n', 'module @app\n  : bad { -- n:Float }\n    -.5\n  ;\nend-module\n', 'module @app\n  : bad { -- n:Float }\n    5.\n  ;\nend-module\n'])
+def test_checker_rejects_invalid_numeric_forms(source):
+    with pytest.raises(LexError, match='invalid numeric token'):
+        check_source(source)
 
 def test_checker_accepts_drop_after_non_empty_list_literal():
     check_source('module @app\n  : ok { -- }\n    [1, 2] drop\n  ;\nend-module\n')

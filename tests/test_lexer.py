@@ -259,6 +259,40 @@ def test_a_b_minus_remains_expression_style():
     assert [token.lexeme for token in tokens[:-1]] == ["a", "b", "-"]
 
 
+def test_negative_int_literal_is_single_token():
+    tokens = lex("-5 -42 -0")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.INT_LITERAL,
+        TokenKind.INT_LITERAL,
+        TokenKind.INT_LITERAL,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["-5", "-42", "-0"]
+
+
+def test_negative_float_literal_is_single_token():
+    tokens = lex("-3.5 -0.5")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.FLOAT_LITERAL,
+        TokenKind.FLOAT_LITERAL,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["-3.5", "-0.5"]
+
+
+def test_spaced_negative_remains_operator_then_literal():
+    tokens = lex("- 5")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.OPERATOR,
+        TokenKind.INT_LITERAL,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["-", "5"]
+
+
 def test_float_operators_are_tokenized_as_distinct_operators():
     tokens = lex("+. -. *. /.")
 
@@ -270,6 +304,25 @@ def test_float_operators_are_tokenized_as_distinct_operators():
         TokenKind.EOF,
     ]
     assert [token.lexeme for token in tokens[:-1]] == ["+.", "-.", "*.", "/."]
+
+
+def test_negative_float_operator_remains_distinct_token():
+    tokens = lex("-.")
+
+    assert [token.kind for token in tokens] == [
+        TokenKind.OPERATOR,
+        TokenKind.EOF,
+    ]
+    assert [token.lexeme for token in tokens[:-1]] == ["-."]
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["+5", "-.5", "5.", "1_000", "1e6", "-1e6", "0xFF"],
+)
+def test_invalid_numeric_forms_raise(source):
+    with pytest.raises(LexError, match="invalid numeric token"):
+        lex(source)
 
 
 def test_as_star_keeps_identifier_and_operator_tokens():

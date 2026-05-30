@@ -796,6 +796,22 @@ def test_parser_case_has_no_scrutinee_field():
     assert all(branch.guard is None for branch in case_node.branches)
 
 
+def test_parser_case_accepts_negative_int_literal_pattern():
+    program = parse_source(
+        ": sign-label { n:Int -- text:String }\n"
+        "  n case\n"
+        "    -1 => \"minus one\"\n"
+        "    _ => \"other\"\n"
+        "  end\n"
+        ";"
+    )
+    case_node = program.words[0].body.items[1]
+
+    assert isinstance(case_node, CaseNode)
+    assert case_node.branches[0].pattern.kind is PatternKind.LITERAL
+    assert case_node.branches[0].pattern.value == -1
+
+
 def test_parser_case_with_guarded_branch_parses():
     program = parse_source(
         ": classify { r:Result<Int,MapError> -- text:String }\n"
@@ -1052,6 +1068,34 @@ def test_parser_list_literal():
 
     assert isinstance(list_node, ListLiteralNode)
     assert [element.value for element in list_node.elements] == [1, 2, 3]
+
+
+def test_parser_negative_int_literal_is_single_literal_node():
+    program = parse_source(": neg { -- n:Int } -5 ;")
+    literal = program.words[0].body.items[0]
+
+    assert isinstance(literal, LiteralNode)
+    assert literal.kind is LiteralKind.INT
+    assert literal.value == -5
+    assert literal.raw == "-5"
+
+
+def test_parser_negative_float_literal_is_single_literal_node():
+    program = parse_source(": negf { -- n:Float } -3.5 ;")
+    literal = program.words[0].body.items[0]
+
+    assert isinstance(literal, LiteralNode)
+    assert literal.kind is LiteralKind.FLOAT
+    assert literal.value == -3.5
+    assert literal.raw == "-3.5"
+
+
+def test_parser_negative_list_literal():
+    program = parse_source(": listy { -- xs:List<Int> } [-1, -2, 3] ;")
+    list_node = program.words[0].body.items[0]
+
+    assert isinstance(list_node, ListLiteralNode)
+    assert [element.value for element in list_node.elements] == [-1, -2, 3]
 
 
 def test_parser_accepts_typed_empty_list():
@@ -1324,6 +1368,18 @@ def test_parser_rejects_float_literal_pattern():
             ": bad-case { n:Float -- text:String }\n"
             "  n case\n"
             "    1.5 => \"bad\"\n"
+            "    _ => \"ok\"\n"
+            "  end\n"
+            ";"
+        )
+
+
+def test_parser_rejects_negative_float_literal_pattern():
+    with pytest.raises(ParseError):
+        parse_source(
+            ": bad-case { n:Float -- text:String }\n"
+            "  n case\n"
+            "    -3.5 => \"bad\"\n"
             "    _ => \"ok\"\n"
             "  end\n"
             ";"

@@ -103,6 +103,19 @@ class Lexer:
                 self._lex_number()
                 continue
 
+            if ch == "-":
+                next_ch = self._peek_next()
+                if next_ch and next_ch.isdigit():
+                    self._lex_number(allow_leading_minus=True)
+                    continue
+                if next_ch == "." and self._peek_offset(2) and self._peek_offset(2).isdigit():
+                    self._raise_error("invalid numeric token")
+
+            if ch == "+":
+                next_ch = self._peek_next()
+                if next_ch and next_ch.isdigit():
+                    self._raise_error("invalid numeric token")
+
             if ch == "?":
                 self._emit(TokenKind.PROPAGATE, "?", 1)
                 continue
@@ -281,8 +294,12 @@ class Lexer:
                 continue
             break
 
-    def _lex_number(self) -> None:
+    def _lex_number(self, *, allow_leading_minus: bool = False) -> None:
         start = self._mark()
+        if allow_leading_minus:
+            self._advance()
+            if self._at_end() or not self._peek().isdigit():
+                self._raise_error("invalid numeric token")
         self._advance()
         while not self._at_end() and self._peek().isdigit():
             self._advance()
@@ -372,7 +389,10 @@ class Lexer:
         return self.source[self._index]
 
     def _peek_next(self) -> str | None:
-        next_index = self._index + 1
+        return self._peek_offset(1)
+
+    def _peek_offset(self, offset: int) -> str | None:
+        next_index = self._index + offset
         if next_index >= self._source_len:
             return None
         return self.source[next_index]
